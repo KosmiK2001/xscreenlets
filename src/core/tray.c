@@ -216,11 +216,19 @@ void xs_tray_rebuild(void)
         gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), launch_mi);
     }
 
-    /* --- чекбоксы инстансов --- */
-    for (gsize i = 0; i < xs_core_plugin_count(); i++) {
-        XsPlugin *p = xs_core_plugin_at(i);
-        if (p)
-            xs_tray_add_plugin(p);
+    /* --- Running Instances: подменю с чекбоксами инстансов --- */
+    {
+        GtkWidget *run_mi = gtk_menu_item_new_with_label("Running Instances");
+        GtkWidget *sub = gtk_menu_new();
+        gsize n = xs_core_plugin_count();
+
+        for (gsize i = 0; i < n; i++) {
+            XsPlugin *p = xs_core_plugin_at(i);
+            if (p)
+                xs_tray_add_plugin(p);
+        }
+        gtk_menu_item_set_submenu(GTK_MENU_ITEM(run_mi), sub);
+        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
     }
 
     GtkWidget *sep = gtk_separator_menu_item_new();
