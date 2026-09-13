@@ -111,7 +111,13 @@ void xs_tray_init(void)
         xs_log_impl("tray: failed to create GtkStatusIcon, continuing without tray");
         return;
     }
-    gtk_status_icon_set_from_icon_name(g_tray, "xscreenlets");
+    /* Иконка "xscreenlets" в теме отсутствует — берём svg оригинального
+     * screenlets (как в python2-daemon), fallback — icon-name. */
+    if (g_file_test("/usr/share/icons/screenlets.svg", G_FILE_TEST_EXISTS))
+        gtk_status_icon_set_from_file(g_tray,
+                                      "/usr/share/icons/screenlets.svg");
+    else
+        gtk_status_icon_set_from_icon_name(g_tray, "xscreenlets");
     gtk_status_icon_set_tooltip_text(g_tray, "Xscreenlets");
     g_object_ref_sink(g_tray);
     g_menu = GTK_MENU(gtk_menu_new());
