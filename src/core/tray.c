@@ -128,6 +128,8 @@ void xs_tray_init(void)
 
 void xs_tray_add_plugin(XsPlugin *p)
 {
+    GtkWidget *run_mi, *sub;
+
     if (!g_menu || !p)
         return;
     GtkCheckMenuItem *mi = GTK_CHECK_MENU_ITEM(
@@ -136,8 +138,33 @@ void xs_tray_add_plugin(XsPlugin *p)
 
     gtk_check_menu_item_set_active(mi, visible);
     g_signal_connect(mi, "toggled", G_CALLBACK(on_toggle_activate), p);
-    gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), GTK_WIDGET(mi));
-    gtk_widget_show_all(GTK_WIDGET(mi));
+    /* Чекбокс инстанса живёт в подменю "Running Instances": находим его
+     * в корневом меню (создаём при первом инстансе) и добавляем туда. */
+    run_mi = NULL;
+    {
+        GList *children = gtk_container_get_children(GTK_CONTAINER(g_menu));
+
+        for (GList *l = children; l; l = l->next) {
+            GtkMenuItem *it = l->data;
+
+            if (gtk_menu_item_get_label(it) &&
+                g_strcmp0(gtk_menu_item_get_label(it),
+                          "Running Instances") == 0) {
+                run_mi = GTK_WIDGET(it);
+                break;
+            }
+        }
+        g_list_free(children);
+    }
+    if (!run_mi) {
+        run_mi = gtk_menu_item_new_with_label("Running Instances");
+        sub = gtk_menu_new();
+        gtk_menu_item_set_submenu(GTK_MENU_ITEM(run_mi), sub);
+        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
+    }
+    sub = gtk_menu_item_get_submenu(GTK_MENU_ITEM(run_mi));
+    gtk_menu_shell_append(GTK_MENU_SHELL(sub), GTK_WIDGET(mi));
+    gtk_widget_show_all(run_mi);
 }
 
 void xs_tray_remove_plugin(XsPlugin *p)
@@ -216,19 +243,18 @@ void xs_tray_rebuild(void)
         gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), launch_mi);
     }
 
-    /* --- Running Instances: подменю с чекбоксами инстансов --- */
+    /* --- Running Instances: подменю наполнит xs_tray_add_plugin --- */
     {
         GtkWidget *run_mi = gtk_menu_item_new_with_label("Running Instances");
         GtkWidget *sub = gtk_menu_new();
-        gsize n = xs_core_plugin_count();
 
-        for (gsize i = 0; i < n; i++) {
+        gtk_menu_item_set_submenu(GTK_MENU_ITEM(run_mi), sub);
+        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
+        for (gsize i = 0; i < xs_core_plugin_count(); i++) {
             XsPlugin *p = xs_core_plugin_at(i);
             if (p)
                 xs_tray_add_plugin(p);
         }
-        gtk_menu_item_set_submenu(GTK_MENU_ITEM(run_mi), sub);
-        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
     }
 
     GtkWidget *sep = gtk_separator_menu_item_new();
