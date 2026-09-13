@@ -12,13 +12,15 @@ BUILD_DIR = build
 TARGET_DAEMON = $(BUILD_DIR)/xscreenletsd
 TARGET_PLUGIN = $(BUILD_DIR)/clock.so
 TARGET_CAL_PLUGIN = $(BUILD_DIR)/calendar.so
+TARGET_LAU_PLUGIN = $(BUILD_DIR)/launcher.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
 SRC_COMMON = src/core/common.c
 SRC_TRAY = src/core/tray.c
 SRC_MAIN = src/core/main.c
-SRC_CLOCK = src/plugins/clock.c
+SRC_CLOCK = src/widgets/clock.c
 SRC_CALENDAR = src/widgets/calendar.c
+SRC_LAUNCHER = src/widgets/launcher.c
 
 OBJS_COMMON = $(BUILD_DIR)/common.o
 OBJS_TRAY = $(BUILD_DIR)/tray.o
@@ -26,12 +28,13 @@ OBJS_MAIN = $(BUILD_DIR)/main.o
 OBJS_CLOCK = $(BUILD_DIR)/clock.o
 OBJS_STANDALONE_CLOCK = $(BUILD_DIR)/standalone_clock.o
 OBJS_CALENDAR = $(BUILD_DIR)/calendar.o
+OBJS_LAUNCHER = $(BUILD_DIR)/launcher.o
 OBJS_COMMON_DBG = $(BUILD_DIR)/common_dbg.o
 OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_STANDALONE)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -44,6 +47,9 @@ $(TARGET_PLUGIN): $(BUILD_DIR) $(OBJS_CLOCK)
 
 $(TARGET_CAL_PLUGIN): $(BUILD_DIR) $(OBJS_CALENDAR)
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_CALENDAR) $(LDFLAGS_PLUGIN)
+
+$(TARGET_LAU_PLUGIN): $(BUILD_DIR) $(OBJS_LAUNCHER)
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_LAUNCHER) $(LDFLAGS_PLUGIN) $(shell pkg-config --libs gdk-pixbuf-2.0)
 
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
@@ -64,6 +70,7 @@ install: all
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins
 	$(INSTALL) -m 0755 $(TARGET_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/clock.so
 	$(INSTALL) -m 0755 $(TARGET_CAL_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/calendar.so
+	$(INSTALL) -m 0755 $(TARGET_LAU_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/launcher.so
 
 run: all
 	@echo "To run the daemon: ./$(TARGET_DAEMON)"
