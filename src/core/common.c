@@ -433,6 +433,37 @@ static void xs_core_prop_opacity_changed(GtkRange *range, gpointer data)
     xs_core_plugin_conf_flush(p->name);
 }
 
+/* Ручное редактирование X/Y окна в Properties/Window: живьём перемещает
+ * окно (gtk_window_move) и сохраняет в конфиг плагина — как configure-event.
+ * Если позиция заблокирована (Window > Lock) — только в конфиг, без move,
+ * чтобы не спорить с WM. */
+static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *p = data;
+    XsWinState *state;
+    GKeyFile *kf;
+    const char *key = g_object_get_data(G_OBJECT(spin), "xs-pos");
+    int v;
+
+    if (!p || !p->name || !p->win || !key)
+        return;
+    state = g_object_get_data(G_OBJECT(p->win), "xs-state");
+    if (!state || state->freed)
+        return;
+    v = (int)gtk_spin_button_get_value(spin);
+    kf = xs_core_plugin_conf(p->name);
+    g_key_file_set_integer(kf, p->name, key, v);
+    xs_core_plugin_conf_flush(p->name);
+    if (strcmp(key, "x") == 0)
+        state->x = v;
+    else
+        state->y = v;
+    if (!state->locked)
+        gtk_window_move(GTK_WINDOW(p->win),
+                        strcmp(key, "x") == 0 ? v : state->x,
+                        strcmp(key, "x") == 0 ? state->y : v);
+}
+
 /* ==== Хелперы Properties-диалога (стиль get_widget_for_option) ==== */
 
 static GtkWidget *xs_prop_row(GtkBox *box, const char *label, const char *desc,
@@ -803,6 +834,32 @@ static void xs_core_show_properties(XsPlugin *p)
             gtk_grid_attach(GTK_GRID(inner_page), scale, 1, row, 1, 1);
             g_signal_connect(scale, "value-changed",
                              G_CALLBACK(xs_core_prop_opacity_changed), p);
+        }
+        row++;
+        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("X-Position"),
+                        0, row, 1, 1);
+        {
+            int cur_x = state->x;
+            GtkAdjustment *adj = gtk_adjustment_new(cur_x, 0, 10000, 1, 10, 0.0);
+            GtkWidget *spin = gtk_spin_button_new(adj, 1, 0);
+            g_object_set_data_full(G_OBJECT(spin), "xs-pos",
+                                   g_strdup("x"), g_free);
+            gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
+            g_signal_connect(spin, "value-changed",
+                             G_CALLBACK(xs_core_prop_pos_changed), p);
+        }
+        row++;
+        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Y-Position"),
+                        0, row, 1, 1);
+        {
+            int cur_y = state->y;
+            GtkAdjustment *adj = gtk_adjustment_new(cur_y, 0, 10000, 1, 10, 0.0);
+            GtkWidget *spin = gtk_spin_button_new(adj, 1, 0);
+            g_object_set_data_full(G_OBJECT(spin), "xs-pos",
+                                   g_strdup("y"), g_free);
+            gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
+            g_signal_connect(spin, "value-changed",
+                             G_CALLBACK(xs_core_prop_pos_changed), p);
         }
         row++;
         for (i = 0; i < G_N_ELEMENTS(rows); i++) {
