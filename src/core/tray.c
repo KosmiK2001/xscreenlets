@@ -13,38 +13,96 @@
 static GtkStatusIcon *g_tray = NULL;
 static GtkMenu *g_menu = NULL;
 
-static void on_reload_activate(GtkMenuItem *mi, gpointer data)
-{
-    (void)mi;
-    (void)data;
-    xs_core_reload();
-}
+/* --- callbacks --- */
 
-static void on_quit_activate(GtkMenuItem *mi, guint data)
+static void on_quit_activate(GtkMenuItem *mi, gpointer data)
 {
     (void)mi;
     (void)data;
+    xs_core_shutdown_all();
     gtk_main_quit();
 }
 
 static void on_toggle_activate(GtkMenuItem *mi, gpointer data)
 {
     XsPlugin *p = data;
-    gboolean active = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(mi));
-    xs_core_show_plugin(p, active);
+
+    xs_core_show_plugin(p,
+                        gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(mi)));
+}
+
+/* Launch <тип>: создать инстанс типа (как launch_screenlet в оригинале) */
+static void on_launch_activate(GtkMenuItem *mi, gpointer data)
+{
+    const char *type = g_object_get_data(G_OBJECT(mi), "xs-type");
+
+    (void)data;
+    if (type)
+        xs_core_add_instance(type);
+}
+
+/* Restart all: пересоздать все инстансы из [instances] (как
+ * restart_all_screenlets: всё закрыть и запустить заново) */
+static void on_restart_activate(GtkMenuItem *mi, gpointer data)
+{
+    (void)mi;
+    (void)data;
+    xs_core_save_instances();
+    xs_core_reload();
+}
+
+/* Stop all: закрыть окна всех инстансов, но НЕ удалять их из [instances] —
+ * после Restart/перезапуска демона апплеты вернутся (как quit_all_screenlets
+ * + автостарт) */
+static void on_stop_all_activate(GtkMenuItem *mi, gpointer data)
+{
+    gsize n;
+
+    (void)mi;
+    (void)data;
+    xs_core_save_instances();
+    n = xs_core_plugin_count();
+    for (gsize i = 0; i < n; i++) {
+        XsPlugin *p = xs_core_plugin_at(i);
+
+        if (p)
+            xs_core_show_plugin(p, FALSE);
+    }
+}
+
+static void on_about_activate(GtkMenuItem *mi, gpointer data)
+{
+    (void)mi;
+    (void)data;
+    {
+        GtkWidget *dlg = gtk_about_dialog_new();
+        const char *authors[] = { "kosmik2001 (Hermes agents)", NULL };
+
+        gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dlg),
+                                          "Xscreenlets");
+        gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dlg), "0.2");
+        gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dlg),
+                                      "C/GTK3 replacement for python2 "
+                                      "screenlets (daemon + gmodule plugins)");
+        gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dlg), authors);
+        gtk_window_present(GTK_WINDOW(dlg));
+        g_signal_connect(dlg, "response", G_CALLBACK(gtk_widget_destroy),
+                         NULL);
+    }
 }
 
 static void on_popup_menu(GtkStatusIcon *icon, guint button,
-                          guint32 activate_time, guint data)
+                          guint32 activate_time, gpointer data)
 {
     (void)icon;
     (void)data;
-    if (g_menu) {
+    if (g_menu)
         gtk_menu_popup(g_menu, NULL, NULL,
                        gtk_status_icon_position_menu, icon,
                        button, activate_time);
-    }
 }
+
+/* --- меню --- */
 
 void xs_tray_init(void)
 {
@@ -68,7 +126,9 @@ void xs_tray_add_plugin(XsPlugin *p)
         return;
     GtkCheckMenuItem *mi = GTK_CHECK_MENU_ITEM(
         gtk_check_menu_item_new_with_label(p->name));
-    gtk_check_menu_item_set_active(mi, TRUE);
+    gboolean visible = p->win && gtk_widget_get_visible(p->win);
+
+    gtk_check_menu_item_set_active(mi, visible);
     g_signal_connect(mi, "toggled", G_CALLBACK(on_toggle_activate), p);
     gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), GTK_WIDGET(mi));
     gtk_widget_show_all(GTK_WIDGET(mi));
@@ -113,11 +173,44 @@ void xs_tray_rebuild(void)
         return;
     GList *children = gtk_container_get_children(GTK_CONTAINER(g_menu));
     for (GList *l = children; l; l = l->next) {
-        GtkMenuItem *mi = l->data;
-        gtk_container_remove(GTK_CONTAINER(g_menu), GTK_WIDGET(mi));
+        gtk_container_remove(GTK_CONTAINER(g_menu), GTK_WIDGET(l->data));
     }
     g_list_free(children);
 
+    /* --- Launch <тип>: все загруженные типы плагинов --- */
+    {
+        GtkWidget *launch_mi = gtk_menu_item_new_with_label("Launch Applet");
+        GtkWidget *sub = gtk_menu_new();
+        GHashTable *types = g_hash_table_new(g_str_hash, g_str_equal);
+        GList *sorted = NULL;
+
+        for (gsize i = 0; i < xs_core_plugin_count(); i++) {
+            XsPlugin *p = xs_core_plugin_at(i);
+            const char *t = p ? xs_core_plugin_type(p) : NULL;
+
+            if (t && !g_hash_table_contains(types, t)) {
+                g_hash_table_add(types, (gpointer)t);
+                sorted = g_list_prepend(sorted, (gpointer)t);
+            }
+        }
+        sorted = g_list_sort(sorted, (GCompareFunc)strcmp);
+        for (GList *l = sorted; l; l = l->next) {
+            const char *t = l->data;
+            GtkWidget *it = gtk_menu_item_new_with_label(t);
+
+            g_object_set_data_full(G_OBJECT(it), "xs-type",
+                                   g_strdup(t), g_free);
+            g_signal_connect(it, "activate",
+                             G_CALLBACK(on_launch_activate), NULL);
+            gtk_menu_shell_append(GTK_MENU_SHELL(sub), it);
+        }
+        g_list_free(sorted);
+        g_hash_table_destroy(types);
+        gtk_menu_item_set_submenu(GTK_MENU_ITEM(launch_mi), sub);
+        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), launch_mi);
+    }
+
+    /* --- чекбоксы инстансов --- */
     for (gsize i = 0; i < xs_core_plugin_count(); i++) {
         XsPlugin *p = xs_core_plugin_at(i);
         if (p)
@@ -125,12 +218,23 @@ void xs_tray_rebuild(void)
     }
 
     GtkWidget *sep = gtk_separator_menu_item_new();
-    GtkWidget *reload = gtk_menu_item_new_with_label("Reload");
+    GtkWidget *restart = gtk_menu_item_new_with_label("Restart Applets");
+    GtkWidget *stopall = gtk_menu_item_new_with_label("Stop all Applets");
+    GtkWidget *sep2 = gtk_separator_menu_item_new();
+    GtkWidget *about = gtk_menu_item_new_with_label("About");
     GtkWidget *quit = gtk_menu_item_new_with_label("Quit");
-    g_signal_connect(reload, "activate", G_CALLBACK(on_reload_activate), NULL);
+
+    g_signal_connect(restart, "activate", G_CALLBACK(on_restart_activate),
+                     NULL);
+    g_signal_connect(stopall, "activate", G_CALLBACK(on_stop_all_activate),
+                     NULL);
+    g_signal_connect(about, "activate", G_CALLBACK(on_about_activate), NULL);
     g_signal_connect(quit, "activate", G_CALLBACK(on_quit_activate), NULL);
     gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), sep);
-    gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), reload);
+    gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), restart);
+    gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), stopall);
+    gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), sep2);
+    gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), about);
     gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), quit);
     gtk_widget_show_all(GTK_WIDGET(g_menu));
 }
