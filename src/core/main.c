@@ -196,6 +196,9 @@ static void create_instances(void)
         g_free(type);
     }
     g_strfreev(keys);
+    /* Собрать меню трея целиком (Launch Applet, Restart, Quit...):
+     * чекбоксы выше добавлены по одному, core-пункты добавляет rebuild. */
+    xs_tray_rebuild();
 }
 
 /* Записать текущий набор инстансов обратно в [instances] (после
