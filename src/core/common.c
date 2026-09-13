@@ -393,12 +393,23 @@ static void xs_core_prop_win_toggled(GtkToggleButton *btn, gpointer data)
 /* Текущее открытое окно Properties (для восстановления keep-above после
  * recreate). Диалог один на процесс — как в оригинале se.run(). */
 static GtkWindow *g_props_dialog = NULL;
+/* Spin-кнопки X/Y открытого Properties-диалога: обновляются при перемещении
+ * окна апплета (debounce: только когда перемещение прекратилось на 500 мс). */
+static GtkSpinButton *g_props_spin_x = NULL;
+static GtkSpinButton *g_props_spin_y = NULL;
+static guint g_props_pos_update_id = 0;
 
 static void xs_core_props_destroyed(GtkWidget *w, gpointer data)
 {
     (void)w;
     (void)data;
     g_props_dialog = NULL;
+    g_props_spin_x = NULL;
+    g_props_spin_y = NULL;
+    if (g_props_pos_update_id) {
+        g_source_remove(g_props_pos_update_id);
+        g_props_pos_update_id = 0;
+    }
 }
 
 static void xs_core_prop_scale_changed(GtkSpinButton *spin, gpointer data)
@@ -462,6 +473,42 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
         gtk_window_move(GTK_WINDOW(p->win),
                         strcmp(key, "x") == 0 ? v : state->x,
                         strcmp(key, "x") == 0 ? state->y : v);
+}
+
+/* --- синхронизация spin-кнопок X/Y Properties с окном апплета при его
+ * перемещении (Alt+drag и т.п.). Debounce: обновление только когда
+ * configure-event не приходит 500 мс (перемещение прекратилось), чтобы
+ * не мешать вводу и не дёргать окно настроек во время drag. --- */
+
+static gboolean xs_core_props_pos_update_idle(gpointer data)
+{
+    XsPlugin *p = data;
+    XsWinState *state;
+
+    g_props_pos_update_id = 0;
+    if (!p || !p->win || !g_props_dialog)
+        return G_SOURCE_REMOVE;
+    state = g_object_get_data(G_OBJECT(p->win), "xs-state");
+    if (!state || state->freed)
+        return G_SOURCE_REMOVE;
+    if (g_props_spin_x)
+        gtk_spin_button_set_value(g_props_spin_x, state->x);
+    if (g_props_spin_y)
+        gtk_spin_button_set_value(g_props_spin_y, state->y);
+    return G_SOURCE_REMOVE;
+}
+
+/* Вызывается из on_configure_event после каждого изменения позиции. */
+static void xs_core_props_pos_schedule(XsPlugin *p)
+{
+    if (!g_props_dialog || (!g_props_spin_x && !g_props_spin_y))
+        return;
+    if (g_props_pos_update_id)
+        g_source_remove(g_props_pos_update_id);
+    /* 500 мс тишины после последнего configure-event = перемещение
+     * прекратилось; тогда одним обновлением подводим координаты. */
+    g_props_pos_update_id = g_timeout_add(500, xs_core_props_pos_update_idle,
+                                          p);
 }
 
 /* ==== Хелперы Properties-диалога (стиль get_widget_for_option) ==== */
@@ -847,6 +894,8 @@ static void xs_core_show_properties(XsPlugin *p)
             gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
             g_signal_connect(spin, "value-changed",
                              G_CALLBACK(xs_core_prop_pos_changed), p);
+            g_props_spin_x = GTK_SPIN_BUTTON(spin);
+            g_object_add_weak_pointer(G_OBJECT(spin), (gpointer *)&g_props_spin_x);
         }
         row++;
         gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Y-Position"),
@@ -860,6 +909,8 @@ static void xs_core_show_properties(XsPlugin *p)
             gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
             g_signal_connect(spin, "value-changed",
                              G_CALLBACK(xs_core_prop_pos_changed), p);
+            g_props_spin_y = GTK_SPIN_BUTTON(spin);
+            g_object_add_weak_pointer(G_OBJECT(spin), (gpointer *)&g_props_spin_y);
         }
         row++;
         for (i = 0; i < G_N_ELEMENTS(rows); i++) {
@@ -1723,6 +1774,10 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
     gtk_window_get_position(GTK_WINDOW(window), &x, &y);
     state->x = x;
     state->y = y;
+
+    /* Properties открыт: обновить поля X/Y (debounce 500 мс после
+     * прекращения перемещения). */
+    xs_core_props_pos_schedule(p);
 
     /* Debounce: save config at most once every 2 seconds */
     if (g_get_monotonic_time() - state->last_conf_save_us >= 2000000) {
