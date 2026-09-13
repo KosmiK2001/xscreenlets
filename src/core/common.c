@@ -772,7 +772,9 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
     gtk_widget_set_valign(img, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(hbox), img, FALSE, TRUE, 10);
 
-    /* Метаданные для разметки: desc/author/version — из дескриптора плагина */
+    /* Метаданные для разметки: desc/author/version — из дескриптора плагина.
+     * desc/author — произвольный текст (могут содержать '&', '<' и т.п.),
+     * поэтому экранируем для Pango-разметки. */
     desc = (p && p->desc) ? p->desc : "";
     author = (p && p->author) ? p->author : "";
     ver = (p && p->version) ? p->version : "";
@@ -783,10 +785,19 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
         g_string_append_printf(mu,
                                "  <span size=\"large\"><b>v%s</b></span>",
                                ver);
-    g_string_append_printf(mu, "\n\n%s", desc);
-    if (author[0])
+    {
+        char *esc = g_markup_escape_text(desc, -1);
+
+        g_string_append_printf(mu, "\n\n%s", esc);
+        g_free(esc);
+    }
+    if (author[0]) {
+        char *esc = g_markup_escape_text(author, -1);
+
         g_string_append_printf(mu, "\n<span size=\"small\">\n(c) %s</span>",
-                               author);
+                               esc);
+        g_free(esc);
+    }
     gtk_label_set_markup(GTK_LABEL(label), mu->str);
     gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
