@@ -16,7 +16,8 @@ typedef struct _XsHostApi   XsHostApi;
 
 /* Экземпляр виджета, созданный плагином. */
 struct _XsPlugin {
-	const char *name;          /* как в desc.name */
+	const char *name;          /* имя ИНСТАНСА ("clock", "launcher-2"); = секция конфига */
+	const char *type;          /* ТИП плагина ("clock") — путь тем/иконок; NULL = name */
 	XsHostApi   *host;
 	void       *priv;          /* внутренние данные плагина */
 	GtkWidget  *win;           /* корневое окно виджета (создаёт common) */

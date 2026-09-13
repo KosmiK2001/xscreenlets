@@ -98,6 +98,20 @@ void xs_core_show_plugin(XsPlugin *p, gboolean visible);
 gsize xs_core_plugin_count(void);
 XsPlugin *xs_core_plugin_at(gsize index);
 
+/* Мультиинстанс: тип плагина инстанса ("clock" для name "clock-2") */
+const char *xs_core_plugin_type(XsPlugin *p);
+/* Найти свободное имя инстанса: "name", "name-2", "name-3", ... */
+char *xs_core_next_instance_name(const char *type);
+/* Создать новый инстанс типа type (загрузка .so не требуется — модуль уже
+ * в памяти); наследует theme/scale/opacity из секции type, если у нового
+ * инстанса ещё нет своих. Возвращает 0 при успехе. */
+int xs_core_add_instance(const char *type);
+/* Удалить инстанс: shutdown + очистка (секция конфига сохраняется как есть). */
+void xs_core_delete_instance(XsPlugin *p);
+/* Записать текущий набор инстансов в [instances] главного конфига
+ * (реализация в main.c). */
+void xs_core_save_instances(void);
+
 /* API для плагинов */
 XsHostApi *xs_host_api(void);
 

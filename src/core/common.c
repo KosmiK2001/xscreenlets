@@ -1113,6 +1113,24 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
     xs_core_menu_connect_cmd(mi, p, "about");
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
 
+    /* Add one more / Delete this — мультиинстанс (как в оригинале) */
+    {
+        const char *type = xs_core_plugin_type(p);
+        char *lbl;
+
+        xs_core_add_separator(menu);
+        lbl = g_strdup_printf("Add one more %s", type);
+        mi = gtk_menu_item_new_with_label(lbl);
+        g_free(lbl);
+        xs_core_menu_connect_cmd(mi, p, "add:");
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
+        lbl = g_strdup_printf("Delete this %s", type);
+        mi = gtk_menu_item_new_with_label(lbl);
+        g_free(lbl);
+        xs_core_menu_connect_cmd(mi, p, "delete");
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
+    }
+
     xs_core_add_separator(menu);
     mi = gtk_menu_item_new_with_label("Quit");
     xs_core_menu_connect_cmd(mi, p, "quit");
@@ -1247,6 +1265,14 @@ void xs_core_dispatch_cmd(XsPlugin *p, const char *cmd)
         xs_log_impl("Keep below applies after Reload");
     } else if (strcmp(cmd, "reload") == 0) {
         xs_core_reload();
+    } else if (g_str_has_prefix(cmd, "add:")) {
+        /* add:<type> — новый инстанс типа (как "Add one more" в оригинале) */
+        const char *type = cmd[4] ? cmd + 4 : xs_core_plugin_type(p);
+
+        xs_core_add_instance(type);
+    } else if (strcmp(cmd, "delete") == 0) {
+        /* удалить этот инстанс (окно уже уничтожится, меню закрыто через idle) */
+        xs_core_delete_instance(p);
     } else if (strcmp(cmd, "quit") == 0) {
         xs_core_shutdown_all();
         gtk_main_quit();
@@ -1400,6 +1426,127 @@ XsPlugin *xs_core_plugin_at(gsize index)
     if (!g_plugins || index >= g_plugins->len)
         return NULL;
     return g_ptr_array_index(g_plugins, index);
+}
+
+const char *xs_core_plugin_type(XsPlugin *p)
+{
+    return (p && p->type) ? p->type : (p ? p->name : NULL);
+}
+
+/* Первое свободное имя инстанса типа type: "type", "type-2", "type-3"... */
+char *xs_core_next_instance_name(const char *type)
+{
+    gsize i;
+
+    if (!type || !type[0])
+        return NULL;
+    for (i = 0; g_plugins && i < g_plugins->len; i++) {
+        XsPlugin *p = g_ptr_array_index(g_plugins, i);
+
+        if (p && p->name && strcmp(p->name, type) == 0)
+            break;
+    }
+    if (!g_plugins || i == g_plugins->len)
+        return g_strdup(type);
+    for (int n = 2; ; n++) {
+        char *cand = g_strdup_printf("%s-%d", type, n);
+        gboolean taken = FALSE;
+
+        for (i = 0; i < g_plugins->len; i++) {
+            XsPlugin *p = g_ptr_array_index(g_plugins, i);
+
+            if (p && p->name && strcmp(p->name, cand) == 0) {
+                taken = TRUE;
+                break;
+            }
+        }
+        if (!taken)
+            return cand;
+        g_free(cand);
+    }
+}
+
+/* Создать инстанс типа type. Модуль не перезагружаем: берём ops/метаданные
+ * у существующего инстанса этого типа (gmodule держит модуль живым). */
+int xs_core_add_instance(const char *type)
+{
+    XsPlugin *proto = NULL;
+    XsPlugin *p;
+    char *iname;
+    GKeyFile *kf;
+    gsize i;
+
+    if (!type || !type[0] || !g_plugins)
+        return -1;
+    for (i = 0; i < g_plugins->len; i++) {
+        XsPlugin *q = g_ptr_array_index(g_plugins, i);
+
+        if (q && xs_core_plugin_type(q) && strcmp(xs_core_plugin_type(q), type) == 0) {
+            proto = q;
+            break;
+        }
+    }
+    if (!proto || !proto->ops || !proto->ops->init) {
+        xs_log_impl("add: no loaded plugin of type '%s'", type);
+        return -1;
+    }
+    iname = xs_core_next_instance_name(type);
+    kf = xs_core_plugin_conf(iname);
+    /* Новый инстанс наследует вид от секции типа (theme/scale/opacity),
+     * если у него ещё нет своих значений. */
+    if (proto->type && strcmp(proto->type, proto->name) != 0) {
+        GKeyFile *pkf = xs_core_plugin_conf(proto->name);
+        static const char *inherit[] = { "theme", "scale", "opacity" };
+        size_t k;
+
+        for (k = 0; k < G_N_ELEMENTS(inherit); k++) {
+            char *v = conf_str(pkf, proto->name, inherit[k], NULL);
+
+            if (v) {
+                g_key_file_set_string(kf, iname, inherit[k], v);
+                g_free(v);
+            }
+        }
+    }
+    p = g_new0(XsPlugin, 1);
+    p->name = iname;
+    p->type = g_strdup(type);
+    p->host = xs_host_api();
+    p->ops = proto->ops;
+    p->desc = proto->desc;
+    p->author = proto->author;
+    p->version = proto->version;
+    p->priv = NULL;
+    if (p->ops->init(p, kf) != 0 || !p->win) {
+        xs_log_impl("add: init failed for instance '%s'", p->name);
+        xs_core_free_plugin(p);
+        return -1;
+    }
+    xs_core_register_plugin(p);
+    xs_tray_add_plugin(p);
+    xs_tray_rebuild();
+    xs_core_plugin_conf_flush(p->name);
+    xs_log_impl("added instance %s (type %s)", p->name, type);
+    xs_core_save_instances();
+    return 0;
+}
+
+void xs_core_delete_instance(XsPlugin *p)
+{
+    if (!p)
+        return;
+    xs_log_impl("deleting instance %s", p->name);
+    xs_core_shutdown_plugin(p);
+    xs_core_unregister_plugin(p);
+    xs_core_free_plugin(p);
+    xs_tray_rebuild();
+    xs_core_save_instances();
+}
+
+/* Слабая реализация: список инстансов поддерживает демон (main.c);
+ * standalone-сборки (xclock) не сохраняют список. */
+__attribute__((weak)) void xs_core_save_instances(void)
+{
 }
 
 static void
@@ -2257,6 +2404,7 @@ void xs_core_free_plugin(XsPlugin *p)
         return;
     xs_core_cleanup_plugin_window(p);
     g_free((char *)p->name);
+    g_free((char *)p->type);
     g_free(p);
 }
 
