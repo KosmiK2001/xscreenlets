@@ -46,8 +46,6 @@ typedef struct {
 	GPtrArray *events;
 } PrivData;
 
-static const char *plugin_name = "calendar";
-
 typedef struct {
 	int year, month, day;   /* month: 1..12 */
 	char *summary;
@@ -64,10 +62,10 @@ static void cal_event_free(gpointer data)
 }
 
 /* «r,g,b,a» → out[4]; нет/кривая строка → def */
-static void cal_read_color(GKeyFile *kf, const char *key,
+static void cal_read_color(GKeyFile *kf, const char *sec, const char *key,
                            const gdouble def[4], gdouble out[4])
 {
-	char *s = xs_host_api()->conf_str(kf, plugin_name, key, NULL);
+	char *s = xs_host_api()->conf_str(kf, sec, key, NULL);
 
 	out[0] = def[0]; out[1] = def[1]; out[2] = def[2]; out[3] = def[3];
 	if (s && sscanf(s, "%lf,%lf,%lf,%lf", &out[0], &out[1], &out[2],
@@ -474,7 +472,7 @@ static void cal_fit_height(XsPlugin *p, PrivData *priv)
 	/* scale — единый источник истины: конфиг (Properties/Size пишут туда
 	 * напрямую, priv->scale при этом не обновляется — иначе тик откатит
 	 * окно к старому размеру). */
-	scale = xs_host_api()->conf_dbl(priv->kf, plugin_name, "scale", 1.0);
+	scale = xs_host_api()->conf_dbl(priv->kf, p->name, "scale", 1.0);
 	if (scale < 0.2)
 		scale = 0.2;
 	else if (scale > 10.0)
@@ -551,7 +549,7 @@ static void cal_menu_cmd(XsPlugin *p, const char *cmd)
 			gtk_widget_queue_draw(p->win);
 	} else if (strcmp(cmd, "toggle_events") == 0) {
 		priv->showevents = !priv->showevents;
-		g_key_file_set_boolean(priv->kf, plugin_name, "showevents",
+		g_key_file_set_boolean(priv->kf, p->name, "showevents",
 		                       priv->showevents);
 		xs_core_plugin_conf_flush(p->name);
 		if (p->win)
@@ -579,12 +577,12 @@ static void cal_menu_cmd(XsPlugin *p, const char *cmd)
 	} else if (g_str_has_prefix(cmd, "theme:")) {
 		g_free(priv->theme);
 		priv->theme = g_strdup(cmd + 6);
-		g_key_file_set_string(priv->kf, plugin_name, "theme", priv->theme);
+		g_key_file_set_string(priv->kf, p->name, "theme", priv->theme);
 		xs_core_plugin_conf_flush(p->name);
 		{
 			char *dir = g_build_filename(
 			    g_get_user_config_dir(), "xscreenlets", "themes",
-			    plugin_name, priv->theme, NULL);
+			    p->type ? p->type : p->name, priv->theme, NULL);
 			if (!xs_host_api()->theme_load(p, dir)) {
 				g_free(dir);
 				dir = g_build_filename(
@@ -667,7 +665,7 @@ static void cal_menu(XsPlugin *p, GtkMenu *m)
 
 	/* Theme-подменю (как у clock) */
 	user_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-	                            "themes", plugin_name, NULL);
+	                            "themes", p->type ? p->type : p->name, NULL);
 	names = g_ptr_array_new_with_free_func(g_free);
 	cal_menu_add_themes(user_dir, names);
 	cal_menu_add_themes("/usr/share/screenlets/ClearCalendar/themes", names);
@@ -720,7 +718,7 @@ static void cal_bool_toggled(GtkToggleButton *btn, gpointer data)
 	if (!p || !p->priv || !key)
 		return;
 	priv = p->priv;
-	g_key_file_set_boolean(priv->kf, plugin_name, key, active);
+	g_key_file_set_boolean(priv->kf, p->name, key, active);
 	if (strcmp(key, "showevents") == 0)
 		priv->showevents = active;
 	xs_core_plugin_conf_flush(p->name);
@@ -741,7 +739,7 @@ static void cal_entry_changed(GtkEditable *e, gpointer data)
 	if (strcmp(key, "icalpath") == 0) {
 		g_free(priv->icalpath);
 		priv->icalpath = g_strdup(text);
-		g_key_file_set_string(priv->kf, plugin_name, "icalpath",
+		g_key_file_set_string(priv->kf, p->name, "icalpath",
 		                      text ? text : "");
 		xs_core_plugin_conf_flush(p->name);
 		cal_ics_load(priv);
@@ -763,7 +761,7 @@ static void cal_combo_changed(GtkComboBox *cb, gpointer data)
 	if (text) {
 		g_free(priv->first_weekday);
 		priv->first_weekday = g_strdup(text);
-		g_key_file_set_string(priv->kf, plugin_name, "first_weekday",
+		g_key_file_set_string(priv->kf, p->name, "first_weekday",
 		                      text);
 		{
 			gsize i;
@@ -815,7 +813,7 @@ static void cal_color_set(GtkColorButton *btn, gpointer data)
 	{
 		char *s = g_strdup_printf("%g,%g,%g,%g", c.red, c.green, c.blue,
 		                          c.alpha);
-		g_key_file_set_string(priv->kf, plugin_name, key, s);
+		g_key_file_set_string(priv->kf, p->name, key, s);
 		g_free(s);
 	}
 	xs_core_plugin_conf_flush(p->name);
@@ -965,7 +963,7 @@ static void cal_fill_themes(XsPlugin *p, GtkListStore *store)
 	if (!p || !p->priv || !store)
 		return;
 	search_dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-	                                  "themes", plugin_name, NULL);
+	                                  "themes", p->type ? p->type : p->name, NULL);
 	for (di = 0; di < G_N_ELEMENTS(search_dirs); di++) {
 		GDir *d = g_dir_open(search_dirs[di], 0, NULL);
 		const char *fn;
@@ -1017,30 +1015,30 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 	priv->kf = kf;
 	priv->events = g_ptr_array_new_with_free_func(cal_event_free);
 
-	priv->scale = xs_host_api()->conf_dbl(kf, plugin_name, "scale", 1.0);
+	priv->scale = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
 	if (priv->scale < 0.2)
 		priv->scale = 0.2;
 	else if (priv->scale > 10.0)
 		priv->scale = 10.0;
-	priv->theme = xs_host_api()->conf_str(kf, plugin_name, "theme", "default");
-	priv->icalpath = xs_host_api()->conf_str(kf, plugin_name, "icalpath",
+	priv->theme = xs_host_api()->conf_str(kf, p->name, "theme", "default");
+	priv->icalpath = xs_host_api()->conf_str(kf, p->name, "icalpath",
 	                                         "/usr/share/screenlets/ClearCalendar/calendar.ics");
-	priv->showevents = g_key_file_get_boolean(kf, plugin_name, "showevents",
+	priv->showevents = g_key_file_get_boolean(kf, p->name, "showevents",
 	                                          NULL);
-	cal_read_color(kf, "font_color", fc, priv->font_color);
-	cal_read_color(kf, "today_color", tc, priv->today_color);
-	cal_read_color(kf, "event_color", ec, priv->event_color);
-	cal_read_color(kf, "today_event_color", tec, priv->today_event_color);
-	cal_read_color(kf, "background_color", bc, priv->background_color);
-	priv->header_font = xs_host_api()->conf_str(kf, plugin_name,
+	cal_read_color(kf, p->name, "font_color", fc, priv->font_color);
+	cal_read_color(kf, p->name, "today_color", tc, priv->today_color);
+	cal_read_color(kf, p->name, "event_color", ec, priv->event_color);
+	cal_read_color(kf, p->name, "today_event_color", tec, priv->today_event_color);
+	cal_read_color(kf, p->name, "background_color", bc, priv->background_color);
+	priv->header_font = xs_host_api()->conf_str(kf, p->name,
 	                                            "header_font",
 	                                            "Tahoma Bold 6");
-	priv->daynames_font = xs_host_api()->conf_str(kf, plugin_name,
+	priv->daynames_font = xs_host_api()->conf_str(kf, p->name,
 	                                              "daynames_font",
 	                                              "Monospace Bold 4");
-	priv->days_font = xs_host_api()->conf_str(kf, plugin_name, "days_font",
+	priv->days_font = xs_host_api()->conf_str(kf, p->name, "days_font",
 	                                          "FreeSans 6");
-	priv->opacity = xs_host_api()->conf_dbl(kf, plugin_name, "opacity", 1.0);
+	priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
 	if (priv->opacity < 0.1)
 		priv->opacity = 0.1;
 	else if (priv->opacity > 1.0)
@@ -1048,7 +1046,7 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 
 	/* first_weekday: имя дня (ru-локаль) → индекс */
 	setlocale(LC_ALL, "");
-	priv->first_weekday = xs_host_api()->conf_str(kf, plugin_name,
+	priv->first_weekday = xs_host_api()->conf_str(kf, p->name,
 	                                              "first_weekday",
 	                                              nl_langinfo(DAY_1 + 1));
 	priv->first_day = 1; /* по умолчанию понедельник */
@@ -1057,8 +1055,8 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 			priv->first_day = (int)i;
 	}
 
-	priv->x = xs_host_api()->conf_int(kf, plugin_name, "x", 80);
-	priv->y = xs_host_api()->conf_int(kf, plugin_name, "y", 80);
+	priv->x = xs_host_api()->conf_int(kf, p->name, "x", 80);
+	priv->y = xs_host_api()->conf_int(kf, p->name, "y", 80);
 
 	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
 	                                    (int)(102 * priv->scale),
@@ -1081,7 +1079,7 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 	{
 		char *dir = g_build_filename(g_get_user_config_dir(),
 		                             "xscreenlets", "themes",
-		                             plugin_name, priv->theme, NULL);
+		                             p->type ? p->type : p->name, priv->theme, NULL);
 		if (!xs_host_api()->theme_load(p, dir)) {
 			g_free(dir);
 			dir = g_build_filename("/usr/share/screenlets",
@@ -1146,7 +1144,7 @@ static void cal_font_set(GtkFontButton *btn, gpointer data)
 		g_free(priv->days_font);
 		priv->days_font = g_strdup(fname);
 	}
-	g_key_file_set_string(priv->kf, plugin_name, key, fname);
+	g_key_file_set_string(priv->kf, p->name, key, fname);
 	xs_core_plugin_conf_flush(p->name);
 	if (p->win)
 		gtk_widget_queue_draw(p->win);

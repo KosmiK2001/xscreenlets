@@ -26,8 +26,6 @@ typedef struct {
 	int icon_w, icon_h;
 } PrivData;
 
-static const char *plugin_name = "launcher";
-
 /* ---------- иконка ---------- */
 
 static void launcher_clear_icon(PrivData *priv)
@@ -166,7 +164,7 @@ static void launcher_from_desktop_file(XsPlugin *p, const char *filename)
 	if (exec && exec[0]) {
 		g_free(priv->action);
 		priv->action = g_strdup(exec);
-		g_key_file_set_string(priv->kf, plugin_name, "action",
+		g_key_file_set_string(priv->kf, p->name, "action",
 		                      priv->action);
 		changed = TRUE;
 	}
@@ -176,7 +174,7 @@ static void launcher_from_desktop_file(XsPlugin *p, const char *filename)
 			if (launcher_load_icon(priv, fn)) {
 				g_free(priv->icon_path);
 				priv->icon_path = fn;
-				g_key_file_set_string(priv->kf, plugin_name,
+				g_key_file_set_string(priv->kf, p->name,
 				                      "icon", priv->icon_path);
 				changed = TRUE;
 			} else {
@@ -189,7 +187,7 @@ static void launcher_from_desktop_file(XsPlugin *p, const char *filename)
 	if (name && name[0]) {
 		g_free(priv->label);
 		priv->label = g_strdup(name);
-		g_key_file_set_string(priv->kf, plugin_name, "label",
+		g_key_file_set_string(priv->kf, p->name, "label",
 		                      priv->label);
 		changed = TRUE;
 	}
@@ -263,23 +261,23 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 
 	p->priv = priv;
 	priv->kf = kf;
-	priv->scale = xs_host_api()->conf_dbl(kf, plugin_name, "scale", 1.0);
+	priv->scale = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
 	if (priv->scale < 0.2)
 		priv->scale = 0.2;
 	else if (priv->scale > 10.0)
 		priv->scale = 10.0;
-	priv->opacity = xs_host_api()->conf_dbl(kf, plugin_name, "opacity", 1.0);
+	priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
 	if (priv->opacity < 0.1)
 		priv->opacity = 0.1;
 	else if (priv->opacity > 1.0)
 		priv->opacity = 1.0;
-	priv->action = xs_host_api()->conf_str(kf, plugin_name, "action", "");
-	priv->label = xs_host_api()->conf_str(kf, plugin_name, "label", "");
-	priv->icon_path = xs_host_api()->conf_str(kf, plugin_name, "icon", "");
+	priv->action = xs_host_api()->conf_str(kf, p->name, "action", "");
+	priv->label = xs_host_api()->conf_str(kf, p->name, "label", "");
+	priv->icon_path = xs_host_api()->conf_str(kf, p->name, "icon", "");
 	if (!priv->icon_path[0]) {
 		g_free(priv->icon_path);
 		priv->icon_path = launcher_default_icon();
-		g_key_file_set_string(kf, plugin_name, "icon", priv->icon_path);
+		g_key_file_set_string(kf, p->name, "icon", priv->icon_path);
 	}
 	if (!launcher_load_icon(priv, priv->icon_path)) {
 		char *di = launcher_default_icon();
@@ -287,13 +285,13 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 		    launcher_load_icon(priv, di)) {
 			g_free(priv->icon_path);
 			priv->icon_path = di;
-			g_key_file_set_string(kf, plugin_name, "icon", di);
+			g_key_file_set_string(kf, p->name, "icon", di);
 		} else {
 			g_free(di);
 		}
 	}
-	priv->x = xs_host_api()->conf_int(kf, plugin_name, "x", 80);
-	priv->y = xs_host_api()->conf_int(kf, plugin_name, "y", 80);
+	priv->x = xs_host_api()->conf_int(kf, p->name, "x", 80);
+	priv->y = xs_host_api()->conf_int(kf, p->name, "y", 80);
 
 	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
 	                                    (int)(priv->icon_w * priv->scale),
@@ -404,7 +402,7 @@ static void launcher_entry_changed(GtkEditable *e, gpointer data)
 			                            priv->label[0]
 			                            ? priv->label : NULL);
 	}
-	g_key_file_set_string(priv->kf, plugin_name, key, text ? text : "");
+	g_key_file_set_string(priv->kf, p->name, key, text ? text : "");
 	xs_core_plugin_conf_flush(p->name);
 }
 
@@ -424,7 +422,7 @@ static void launcher_icon_set(GtkFileChooserButton *btn, gpointer data)
 	}
 	g_free(priv->icon_path);
 	priv->icon_path = fn;
-	g_key_file_set_string(priv->kf, plugin_name, "icon", priv->icon_path);
+	g_key_file_set_string(priv->kf, p->name, "icon", priv->icon_path);
 	xs_core_plugin_conf_flush(p->name);
 	launcher_apply_icon(p, priv);
 	if (p->win)

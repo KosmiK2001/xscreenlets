@@ -15,8 +15,6 @@
 #include <cairo.h>
 #include <librsvg/rsvg.h>
 
-static const char *plugin_name = "clock";
-
 typedef struct {
 	gdouble scale;
 	gdouble opacity;
@@ -49,9 +47,10 @@ typedef struct {
 } PrivData;
 
 /* Читает булево значение в формате строк; "true"/"1"/"yes" = TRUE */
-static gboolean clock_conf_bool(GKeyFile *kf, const char *key, gboolean def)
+static gboolean clock_conf_bool(GKeyFile *kf, const char *sec,
+                                const char *key, gboolean def)
 {
-	char *s = xs_host_api()->conf_str(kf, plugin_name, key,
+	char *s = xs_host_api()->conf_str(kf, sec, key,
 	                                  def ? "true" : "false");
 	gboolean v = g_ascii_strcasecmp(s, "true") == 0 ||
 	             strcmp(s, "1") == 0 ||
@@ -109,62 +108,62 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 	priv->kf = kf; /* сохраняем указатель на kf (живёт весь цикл плагина) */
 
 	/* Read config */
-	priv->scale = xs_host_api()->conf_dbl(kf, plugin_name, "scale", 1.0);
+	priv->scale = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
 	if (priv->scale < 0.2)
 		priv->scale = 0.2;
 	else if (priv->scale > 10.0)
 		priv->scale = 10.0;
-	priv->opacity = xs_host_api()->conf_dbl(kf, plugin_name, "opacity", 1.0);
+	priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
 	if (priv->opacity < 0.1)
 		priv->opacity = 0.1;
 	else if (priv->opacity > 1.0)
 		priv->opacity = 1.0;
 	{
-		char *show_seconds = xs_host_api()->conf_str(kf, plugin_name, "show_seconds", "true");
+		char *show_seconds = xs_host_api()->conf_str(kf, p->name, "show_seconds", "true");
 		priv->show_seconds = g_ascii_strcasecmp(show_seconds, "false") != 0 &&
 		                     g_ascii_strcasecmp(show_seconds, "0") != 0 &&
 		                     g_ascii_strcasecmp(show_seconds, "no") != 0;
 		g_free(show_seconds);
 	}
-	priv->theme = xs_host_api()->conf_str(kf, plugin_name, "theme", "cairo-clock");
+	priv->theme = xs_host_api()->conf_str(kf, p->name, "theme", "cairo-clock");
 
 	/* Миграция старых ключей (до v3 меню-версии): h24 → hour_format,
 	 * show_seconds → show_seconds_hand */
-	if (g_key_file_has_key(kf, plugin_name, "h24", NULL) &&
-	    !g_key_file_has_key(kf, plugin_name, "hour_format", NULL)) {
-		gboolean old = clock_conf_bool(kf, "h24", FALSE);
-		g_key_file_set_string(kf, plugin_name, "hour_format", old ? "24" : "12");
-		g_key_file_remove_key(kf, plugin_name, "h24", NULL);
+	if (g_key_file_has_key(kf, p->name, "h24", NULL) &&
+	    !g_key_file_has_key(kf, p->name, "hour_format", NULL)) {
+		gboolean old = clock_conf_bool(kf, p->name, "h24", FALSE);
+		g_key_file_set_string(kf, p->name, "hour_format", old ? "24" : "12");
+		g_key_file_remove_key(kf, p->name, "h24", NULL);
 	}
-	if (g_key_file_has_key(kf, plugin_name, "show_seconds", NULL) &&
-	    !g_key_file_has_key(kf, plugin_name, "show_seconds_hand", NULL)) {
-		gboolean old = clock_conf_bool(kf, "show_seconds", TRUE);
-		g_key_file_set_boolean(kf, plugin_name, "show_seconds_hand", old);
-		g_key_file_remove_key(kf, plugin_name, "show_seconds", NULL);
+	if (g_key_file_has_key(kf, p->name, "show_seconds", NULL) &&
+	    !g_key_file_has_key(kf, p->name, "show_seconds_hand", NULL)) {
+		gboolean old = clock_conf_bool(kf, p->name, "show_seconds", TRUE);
+		g_key_file_set_boolean(kf, p->name, "show_seconds_hand", old);
+		g_key_file_remove_key(kf, p->name, "show_seconds", NULL);
 	}
 
 	{
-		char *hf = xs_host_api()->conf_str(kf, plugin_name, "hour_format", "12");
+		char *hf = xs_host_api()->conf_str(kf, p->name, "hour_format", "12");
 		priv->h24 = strcmp(hf, "24") == 0;
 		g_free(hf);
 	}
-	priv->show_seconds = clock_conf_bool(kf, "show_seconds_hand", TRUE);
+	priv->show_seconds = clock_conf_bool(kf, p->name, "show_seconds_hand", TRUE);
 
 	/* группа Clock */
-	priv->timezone = xs_host_api()->conf_str(kf, plugin_name, "timezone", "");
-	priv->time_offset = xs_host_api()->conf_dbl(kf, plugin_name, "time_offset", 0.0);
+	priv->timezone = xs_host_api()->conf_str(kf, p->name, "timezone", "");
+	priv->time_offset = xs_host_api()->conf_dbl(kf, p->name, "time_offset", 0.0);
 	if (priv->time_offset < -12.0)
 		priv->time_offset = -12.0;
 	else if (priv->time_offset > 12.0)
 		priv->time_offset = 12.0;
 
 	/* группа Face */
-	priv->face_text = xs_host_api()->conf_str(kf, plugin_name, "face_text", "");
-	priv->face_text_font = xs_host_api()->conf_str(kf, plugin_name,
+	priv->face_text = xs_host_api()->conf_str(kf, p->name, "face_text", "");
+	priv->face_text_font = xs_host_api()->conf_str(kf, p->name,
 	                                               "face_text_font",
 	                                               "Sans Medium 5");
 	{
-		char *cs = xs_host_api()->conf_str(kf, plugin_name,
+		char *cs = xs_host_api()->conf_str(kf, p->name,
 		                                   "face_text_color", NULL);
 		if (cs && sscanf(cs, "%lf,%lf,%lf,%lf", &priv->face_color[0],
 		                 &priv->face_color[1], &priv->face_color[2],
@@ -178,25 +177,25 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 		}
 		g_free(cs);
 	}
-	priv->face_text_x = xs_host_api()->conf_int(kf, plugin_name, "face_text_x", 32);
-	priv->face_text_y = xs_host_api()->conf_int(kf, plugin_name, "face_text_y", 59);
-	priv->show_date = clock_conf_bool(kf, "show_date", FALSE);
-	priv->date_format = xs_host_api()->conf_str(kf, plugin_name,
+	priv->face_text_x = xs_host_api()->conf_int(kf, p->name, "face_text_x", 32);
+	priv->face_text_y = xs_host_api()->conf_int(kf, p->name, "face_text_y", 59);
+	priv->show_date = clock_conf_bool(kf, p->name, "show_date", FALSE);
+	priv->date_format = xs_host_api()->conf_str(kf, p->name,
 	                                            "date_format", "%Y.%m.%d");
 
 	/* группа Alarm */
-	priv->alarm_activated = clock_conf_bool(kf, "alarm_activated", FALSE);
-	priv->alarm_h = xs_host_api()->conf_int(kf, plugin_name, "alarm_h", 7);
-	priv->alarm_m = xs_host_api()->conf_int(kf, plugin_name, "alarm_m", 30);
-	priv->alarm_s = xs_host_api()->conf_int(kf, plugin_name, "alarm_s", 0);
-	priv->alarm_length = xs_host_api()->conf_int(kf, plugin_name,
+	priv->alarm_activated = clock_conf_bool(kf, p->name, "alarm_activated", FALSE);
+	priv->alarm_h = xs_host_api()->conf_int(kf, p->name, "alarm_h", 7);
+	priv->alarm_m = xs_host_api()->conf_int(kf, p->name, "alarm_m", 30);
+	priv->alarm_s = xs_host_api()->conf_int(kf, p->name, "alarm_s", 0);
+	priv->alarm_length = xs_host_api()->conf_int(kf, p->name,
 	                                             "alarm_length", 500);
-	priv->run_command = clock_conf_bool(kf, "run_command", FALSE);
-	priv->alarm_command = xs_host_api()->conf_str(kf, plugin_name,
+	priv->run_command = clock_conf_bool(kf, p->name, "run_command", FALSE);
+	priv->alarm_command = xs_host_api()->conf_str(kf, p->name,
 	                                              "alarm_command", "firefox");
 
-	priv->x = xs_host_api()->conf_int(kf, plugin_name, "x", 80);
-	priv->y = xs_host_api()->conf_int(kf, plugin_name, "y", 80);
+	priv->x = xs_host_api()->conf_int(kf, p->name, "x", 80);
+	priv->y = xs_host_api()->conf_int(kf, p->name, "y", 80);
 
 	/* Create window */
 	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
@@ -214,12 +213,12 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 	xs_host_api()->set_opacity(p, priv->opacity);
 
 	/* Load theme */
-	const char *xdg_theme_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", "clock", priv->theme, NULL);
+	const char *xdg_theme_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", p->type ? p->type : p->name, priv->theme, NULL);
 	gboolean loaded = xs_host_api()->theme_load(p, xdg_theme_dir);
 	if (loaded) {
 		clock_read_theme_conf(xdg_theme_dir);
 	} else {
-		const char *home_theme_dir = g_build_filename(g_get_home_dir(), ".xscreenlets", "themes", "clock", priv->theme, NULL);
+		const char *home_theme_dir = g_build_filename(g_get_home_dir(), ".xscreenlets", "themes", p->type ? p->type : p->name, priv->theme, NULL);
 		loaded = xs_host_api()->theme_load(p, home_theme_dir);
 		if (loaded) {
 			clock_read_theme_conf(home_theme_dir);
@@ -239,7 +238,7 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 
 	if (xs_core_is_debug()) {
 		const char *search_dirs[] = {
-			g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", "clock", NULL),
+			g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", p->type ? p->type : p->name, NULL),
 			"/usr/share/screenlets/Clock/themes"
 		};
 		g_printerr("clock: available themes:\n");
@@ -579,7 +578,7 @@ static void clock_bool_toggled(GtkToggleButton *btn, gpointer data)
         return;
     priv = p->priv;
     active = gtk_toggle_button_get_active(btn);
-    g_key_file_set_boolean(priv->kf, plugin_name, key, active);
+    g_key_file_set_boolean(priv->kf, p->name, key, active);
     if (strcmp(key, "show_seconds_hand") == 0)
         priv->show_seconds = active;
     else if (strcmp(key, "show_date") == 0)
@@ -618,7 +617,7 @@ static void clock_entry_changed(GtkEditable *e, gpointer data)
         g_free(priv->alarm_command);
         priv->alarm_command = g_strdup(text);
     }
-    g_key_file_set_string(priv->kf, plugin_name, key, text ? text : "");
+    g_key_file_set_string(priv->kf, p->name, key, text ? text : "");
     xs_core_plugin_conf_flush(p->name);
     if (p->win)
         gtk_widget_queue_draw(p->win);
@@ -637,7 +636,7 @@ static void clock_combo_changed(GtkComboBox *cb, gpointer data)
     text = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(cb));
     if (strcmp(key, "hour_format") == 0) {
         priv->h24 = text && strcmp(text, "24") == 0;
-        g_key_file_set_string(priv->kf, plugin_name, "hour_format",
+        g_key_file_set_string(priv->kf, p->name, "hour_format",
                               text ? text : "12");
     }
     g_free(text);
@@ -658,26 +657,26 @@ static void clock_spin_changed(GtkSpinButton *spin, gpointer data)
     priv = p->priv;
     if (strcmp(key, "time_offset") == 0) {
         priv->time_offset = CLAMP(v, -12.0, 12.0);
-        g_key_file_set_double(priv->kf, plugin_name, "time_offset",
+        g_key_file_set_double(priv->kf, p->name, "time_offset",
                               priv->time_offset);
     } else if (strcmp(key, "face_text_x") == 0) {
         priv->face_text_x = (int)v;
-        g_key_file_set_integer(priv->kf, plugin_name, key, (int)v);
+        g_key_file_set_integer(priv->kf, p->name, key, (int)v);
     } else if (strcmp(key, "face_text_y") == 0) {
         priv->face_text_y = (int)v;
-        g_key_file_set_integer(priv->kf, plugin_name, "face_text_y", (int)v);
+        g_key_file_set_integer(priv->kf, p->name, "face_text_y", (int)v);
     } else if (strcmp(key, "alarm_length") == 0) {
         priv->alarm_length = (int)v;
-        g_key_file_set_integer(priv->kf, plugin_name, "alarm_length", (int)v);
+        g_key_file_set_integer(priv->kf, p->name, "alarm_length", (int)v);
     } else if (strcmp(key, "alarm_h") == 0) {
         priv->alarm_h = (int)v;
-        g_key_file_set_integer(priv->kf, plugin_name, "alarm_h", (int)v);
+        g_key_file_set_integer(priv->kf, p->name, "alarm_h", (int)v);
     } else if (strcmp(key, "alarm_m") == 0) {
         priv->alarm_m = (int)v;
-        g_key_file_set_integer(priv->kf, plugin_name, "alarm_m", (int)v);
+        g_key_file_set_integer(priv->kf, p->name, "alarm_m", (int)v);
     } else if (strcmp(key, "alarm_s") == 0) {
         priv->alarm_s = (int)v;
-        g_key_file_set_integer(priv->kf, plugin_name, "alarm_s", (int)v);
+        g_key_file_set_integer(priv->kf, p->name, "alarm_s", (int)v);
     }
     xs_core_plugin_conf_flush(p->name);
     if (p->win)
@@ -701,7 +700,7 @@ static void clock_color_set(GtkColorButton *btn, gpointer data)
     {
         char *s = g_strdup_printf("%g,%g,%g,%g", c.red, c.green, c.blue,
                                   c.alpha);
-        g_key_file_set_string(priv->kf, plugin_name, "face_text_color", s);
+        g_key_file_set_string(priv->kf, p->name, "face_text_color", s);
         g_free(s);
     }
     xs_core_plugin_conf_flush(p->name);
@@ -721,7 +720,7 @@ static void clock_font_set(GtkFontButton *btn, gpointer data)
     fname = gtk_font_chooser_get_font(GTK_FONT_CHOOSER(btn));
     g_free(priv->face_text_font);
     priv->face_text_font = g_strdup(fname);
-    g_key_file_set_string(priv->kf, plugin_name, "face_text_font", fname);
+    g_key_file_set_string(priv->kf, p->name, "face_text_font", fname);
     xs_core_plugin_conf_flush(p->name);
     if (p->win)
         gtk_widget_queue_draw(p->win);
@@ -758,7 +757,7 @@ static void clock_fill_themes(XsPlugin *p, GtkListStore *store)
     if (!p || !p->priv || !store)
         return;
     search_dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-                                      "themes", "clock", NULL);
+                                      "themes", p->type ? p->type : p->name, NULL);;
     for (di = 0; di < G_N_ELEMENTS(search_dirs); di++) {
         GDir *d = g_dir_open(search_dirs[di], 0, NULL);
         const char *fn;
@@ -1020,7 +1019,7 @@ static void clock_menu(XsPlugin *p, GtkMenu *m)
 
     /* Theme: пользовательские темы затеняют системные (как при загрузке) */
     user_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-                                "themes", "clock", NULL);
+                                "themes", p->type ? p->type : p->name, NULL);;
     names = g_ptr_array_new_with_free_func(g_free);
     clock_menu_add_themes(user_dir, names);
     clock_menu_add_themes("/usr/share/screenlets/Clock/themes", names);
