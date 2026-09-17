@@ -155,7 +155,19 @@ static XsPlugin *create_instance(const char *type, const char *iname)
         }
     }
     xs_core_register_plugin(p);
-    xs_tray_add_plugin(p);
+    /* гость рамки не показывается в трее (started_by=plugin):
+     * флаг ставится позже (при хостинге), поэтому проверяем конфиг */
+    {
+        GKeyFile *kf0 = xs_core_plugin_conf(p->name);
+        char *sb0 = g_key_file_get_string(kf0, p->name, "started_by",
+                                          NULL);
+
+        if (!sb0 || strcmp(sb0, "main_daemon") == 0)
+            xs_tray_add_plugin(p);
+        else
+            xs_log_impl("tray: %s скрыт (started_by=%s)", p->name, sb0);
+        g_free(sb0);
+    }
     xs_log_impl("loaded %s (api %u)", p->name, lp->desc->api_version);
     return p;
 }

@@ -2090,6 +2090,11 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
     kf = xs_core_plugin_conf(name);
     /* xs_type: тип плагина в конфиге (нужен для запуска гостей). */
     g_key_file_set_string(kf, name, "xs_type", type);
+    /* Новый инстанс через Launch Applet трея — main_daemon (гость,
+     * созданный рамкой, проходит через start_guest_new и здесь
+     * получает started_by=plugin, чтобы не попасть в трей/автостарт). */
+    g_key_file_set_string(kf, name, "started_by",
+                          iname && iname[0] ? "plugin" : "main_daemon");
     /* Новый инстанс наследует вид от секции типа (theme/scale/opacity),
      * если у него ещё нет своих значений. */
     if (proto->type && strcmp(proto->type, proto->name) != 0) {
