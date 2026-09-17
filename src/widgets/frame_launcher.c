@@ -685,9 +685,14 @@ static gboolean fl_guest_restart_clicked(GtkWidget *tree,
 	GtkTreeModel *model;
 	gchar *name = NULL;
 	gint col = -1;
+	gboolean is_on_button = FALSE;
 	FlRestart *r;
 
-	if (!p || !p->priv || ev->type != GDK_BUTTON_PRESS || ev->button != 1)
+	if (!p || !p->priv || ev->type != GDK_BUTTON_PRESS)
+		return FALSE;
+	xs_host_api()->log("fl restart-click: btn=%u at %.0f,%.0f",
+	                   ev->button, ev->x, ev->y);
+	if (ev->button != 1)
 		return FALSE;
 	priv = p->priv;
 	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(tree),
@@ -695,6 +700,30 @@ static gboolean fl_guest_restart_clicked(GtkWidget *tree,
 	                              &col, NULL);
 	if (!tp)
 		return FALSE;
+	/* Определяем КОЛОНКУ по X: col из get_path_at_pos — это offset
+	 * ВНУТРИ колонки, не её номер. Кнопка = 3-я колонка (индекс 2),
+	 * её ширина 24px прижата вправо. */
+	{
+		gint wx = (gint)ev->x;
+		GtkTreeViewColumn *c_btn = gtk_tree_view_get_column(
+		    GTK_TREE_VIEW(tree), 2);
+		gint btn_x_start = 0;
+		GList *cols, *l;
+		gint btn_width = 24;
+
+		cols = gtk_tree_view_get_columns(GTK_TREE_VIEW(tree));
+		for (l = cols; l; l = l->next) {
+			GtkTreeViewColumn *c = l->data;
+
+			if (c == c_btn)
+				break;
+			btn_x_start += gtk_tree_view_column_get_width(c);
+		}
+		g_list_free(cols);
+		if (c_btn)
+			btn_width = gtk_tree_view_column_get_width(c_btn);
+		is_on_button = (wx >= btn_x_start && wx < btn_x_start + btn_width);
+	}
 	model = gtk_tree_view_get_model(GTK_TREE_VIEW(tree));
 	if (!gtk_tree_model_get_iter(model, &it, tp)) {
 		gtk_tree_path_free(tp);
@@ -706,7 +735,9 @@ static gboolean fl_guest_restart_clicked(GtkWidget *tree,
 		g_free(name);
 		return FALSE;
 	}
-	if (col != 2) {
+	if (!is_on_button) {
+		xs_host_api()->log("fl restart-click: мимо кнопки (x-offset=%d)",
+		                   col);
 		g_free(name);
 		return FALSE;
 	}
@@ -716,7 +747,7 @@ static gboolean fl_guest_restart_clicked(GtkWidget *tree,
 	r = g_new0(FlRestart, 1);
 	r->name = g_strdup(name);
 	r->host = p;
-	g_timeout_add(350, fl_restart_start_cb, r);
+	g_timeout_add(1000, fl_restart_start_cb, r);
 	g_free(name);
 	return TRUE;
 }
@@ -818,6 +849,7 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 		txt = gtk_cell_renderer_text_new();
 		c1 = gtk_tree_view_column_new_with_attributes(
 		    NULL, txt, "text", 1, NULL);
+		gtk_tree_view_column_set_expand(c1, TRUE);
 		gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c1);
 
 		btn = gtk_cell_renderer_pixbuf_new();
