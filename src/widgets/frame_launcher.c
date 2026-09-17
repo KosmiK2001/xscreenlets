@@ -207,13 +207,11 @@ static int fl_init(XsPlugin *p, GKeyFile *kf)
 		g_free(sb);
 	}
 
-	fl_load_theme(p, priv);
-	/* ВАЖНО: theme_load вызывается ДО make_window — тема закэшируется
-	 * после создания окна в fl_load_theme_after_win (см. ниже). */
+	/* Тема загружается ПОСЛЕ make_window (theme_load требует state).
+	 * Толщины рамки читаются из theme.conf там же. */
 
 	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
 	                                    priv->width, priv->height);
-	/* перезагрузить тему теперь, когда окно/state существуют */
 	fl_load_theme(p, priv);
 	if (!p->win) {
 		xs_host_api()->log("frame_launcher: failed to create window");
@@ -249,16 +247,72 @@ static int fl_init(XsPlugin *p, GKeyFile *kf)
 	return 0;
 }
 
+/* 9-slice отрисовка рамки из темы: углы — в натуральном размере,
+ * стороны — тайлами/растяжкой между углами, центр (backdrop) —
+ * растяжкой на content-зону. Элементы темы:
+ *   frame-tl, frame-tr, frame-bl, frame-br  — углы (native size)
+ *   frame-top, frame-bottom, frame-left, frame-right — стороны
+ *   backdrop — фон content-зоны
+ * Если в теме есть единый frame.svg — растягиваем его целиком
+ * (простые темы без 9-slice). */
+static void fl_draw_frame_nine_slice(XsPlugin *p, PrivData *priv,
+                                     cairo_t *cr, int w, int h)
+{
+	int L = priv->frame_l, R = priv->frame_r;
+	int T = priv->frame_t, B = priv->frame_b;
+
+	/* backdrop: растяжкой на content-зону */
+	if (xs_core_theme_has(p, "backdrop")) {
+		int cx, cy, cw, ch;
+
+		fl_content_rect(priv, &cx, &cy, &cw, &ch);
+		xs_host_api()->theme_draw_full(p, cr, "backdrop",
+		                               cx, cy, cw, ch);
+	}
+	/* углы */
+	if (xs_core_theme_has(p, "frame-tl"))
+		xs_host_api()->theme_draw_native(p, cr, "frame-tl", 0, 0);
+	if (xs_core_theme_has(p, "frame-tr"))
+		xs_host_api()->theme_draw_native(p, cr, "frame-tr",
+		                                 w - R, 0);
+	if (xs_core_theme_has(p, "frame-bl"))
+		xs_host_api()->theme_draw_native(p, cr, "frame-bl",
+		                                 0, h - B);
+	if (xs_core_theme_has(p, "frame-br"))
+		xs_host_api()->theme_draw_native(p, cr, "frame-br",
+		                                 w - R, h - B);
+	/* стороны: растяжка между углами */
+	if (xs_core_theme_has(p, "frame-top") && w - L - R > 0)
+		xs_host_api()->theme_draw_full(p, cr, "frame-top",
+		                               L, 0, w - L - R, T);
+	if (xs_core_theme_has(p, "frame-bottom") && w - L - R > 0)
+		xs_host_api()->theme_draw_full(p, cr, "frame-bottom",
+		                               L, h - B, w - L - R, B);
+	if (xs_core_theme_has(p, "frame-left") && h - T - B > 0)
+		xs_host_api()->theme_draw_full(p, cr, "frame-left",
+		                               0, T, L, h - T - B);
+	if (xs_core_theme_has(p, "frame-right") && h - T - B > 0)
+		xs_host_api()->theme_draw_full(p, cr, "frame-right",
+		                               w - R, T, R, h - T - B);
+}
+
 static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
 	PrivData *priv = p->priv;
 	int cx, cy, cw, ch;
+	gboolean nine = xs_core_theme_has(p, "frame-tl") ||
+	                xs_core_theme_has(p, "frame-top");
 
 	if (!priv)
 		return;
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-	/* фон content-зоны (backdrop), полупрозрачный */
 	fl_content_rect(priv, &cx, &cy, &cw, &ch);
+	if (nine) {
+		/* backdrop рисуется внутри 9-slice первым слоем */
+		fl_draw_frame_nine_slice(p, priv, cr, w, h);
+		return;
+	}
+	/* фон content-зоны (backdrop), полупрозрачный */
 	if (priv->bg_opacity > 0.0) {
 		cairo_save(cr);
 		cairo_set_source_rgba(cr, 0.06, 0.06, 0.08, priv->bg_opacity);
