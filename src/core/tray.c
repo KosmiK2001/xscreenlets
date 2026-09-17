@@ -149,6 +149,7 @@ void xs_tray_add_plugin(XsPlugin *p)
     GtkCheckMenuItem *mi = GTK_CHECK_MENU_ITEM(
         gtk_check_menu_item_new_with_label(label));
     g_free(label);
+    g_object_set_data(G_OBJECT(mi), "xs-plugin", p);
     gboolean visible = p->win && gtk_widget_get_visible(p->win);
 
     gtk_check_menu_item_set_active(mi, visible);
@@ -205,10 +206,26 @@ void xs_tray_set_plugin_visibility(XsPlugin *p, gboolean visible)
     GList *children = gtk_container_get_children(GTK_CONTAINER(g_menu));
     for (GList *l = children; l; l = l->next) {
         GtkMenuItem *mi = l->data;
-        if (gtk_menu_item_get_label(mi) &&
-            g_strcmp0(gtk_menu_item_get_label(mi), p->name) == 0) {
-            GtkCheckMenuItem *mi_check = GTK_CHECK_MENU_ITEM(mi);
-            gtk_check_menu_item_set_active(mi_check, visible);
+        const char *lbl = gtk_menu_item_get_label(mi);
+
+        /* Чекбоксы живут в подменю "Running Instances" с подписью
+         * "Plugin: Label" — ищем по подменю, а не по корню. */
+        if (lbl && g_strcmp0(lbl, "Running Instances") == 0) {
+            GtkWidget *sub = gtk_menu_item_get_submenu(mi);
+            GList *schildren;
+
+            if (!sub)
+                continue;
+            schildren = gtk_container_get_children(GTK_CONTAINER(sub));
+            for (GList *sl = schildren; sl; sl = sl->next) {
+                if (g_object_get_data(G_OBJECT(sl->data),
+                                      "xs-plugin") == p) {
+                    gtk_check_menu_item_set_active(
+                        GTK_CHECK_MENU_ITEM(sl->data), visible);
+                    break;
+                }
+            }
+            g_list_free(schildren);
             break;
         }
     }
