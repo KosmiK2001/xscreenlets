@@ -14,12 +14,7 @@ static GPtrArray *g_loaded_modules = NULL;
 static guint g_sighup_source_id = 0;
 
 /* Описание загруженного типа плагина: модуль + дескриптор.
- * Инстансов может быть много на один тип. */
-typedef struct {
-    GModule *mod;
-    XsPluginDesc *desc;
-} XsLoadedPlugin;
-
+ * Инстансов может быть много на один тип. (XsLoadedPlugin в common.h) */
 static gboolean on_sighup(gpointer data)
 {
     (void)data;
@@ -357,6 +352,7 @@ int main(int argc, char **argv)
     xs_core_init(g_conf_path);
     xs_tray_init();
     load_plugin_modules();
+    xs_core_set_loaded_modules_ref(&g_loaded_modules);
     create_instances();
 
     gtk_main();

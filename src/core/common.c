@@ -1932,6 +1932,14 @@ int xs_core_add_instance(const char *type)
     return xs_core_add_instance_for_host(type, NULL) != NULL ? 0 : -1;
 }
 
+/* Слабая ссылка на загруженные модули (заполняет main.c): позволяет
+ * common.c стартовать гостя типа, среди живых инстансов которого нет. */
+static GPtrArray **g_loaded_modules_ref = NULL;
+
+void xs_core_set_loaded_modules_ref(GPtrArray **ref)
+{
+    g_loaded_modules_ref = ref;
+}
 /* Создать инстанс типа type с именем iname (iname == NULL → UUID-имя).
  * Гости: xs_type пишется в конфиг, symlink в plugins_on НЕ создаётся
  * (гость включается хозяином). */
@@ -1952,6 +1960,36 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
         if (q && xs_core_plugin_type(q) && strcmp(xs_core_plugin_type(q), type) == 0) {
             proto = q;
             break;
+        }
+    }
+    /* Живого инстанса типа нет — берём ops из загруженного модуля. */
+    if (!proto && g_loaded_modules_ref && *g_loaded_modules_ref) {
+        GPtrArray *mods = *g_loaded_modules_ref;
+
+        for (i = 0; i < mods->len; i++) {
+            XsLoadedPlugin *lp = g_ptr_array_index(mods, i);
+
+            if (lp && lp->desc && lp->desc->name &&
+                strcmp(lp->desc->name, type) == 0) {
+                static XsPluginOps ops_copy;
+                static const char *st_name, *st_desc, *st_author,
+                                  *st_version;
+
+                ops_copy = *lp->desc->ops;
+                st_name = lp->desc->name;
+                st_desc = lp->desc->desc;
+                st_author = lp->desc->author;
+                st_version = lp->desc->version;
+                proto = g_new0(XsPlugin, 1);
+                proto->type = g_strdup(type);
+                proto->name = st_name;
+                proto->ops = &ops_copy;
+                proto->desc = st_desc;
+                proto->author = st_author;
+                proto->version = st_version;
+                proto->priv = NULL;
+                break;
+            }
         }
     }
     if (!proto || !proto->ops || !proto->ops->init) {
@@ -2107,6 +2145,9 @@ xs_core_save_plugin_position(XsPlugin *p)
     XsWinState *state;
 
     if (!p || !p->win)
+        return;
+    /* Гость рамки: его «настольную» позицию не сохраняем. */
+    if (g_object_get_data(G_OBJECT(p->win), "xs-guest-host"))
         return;
     state = g_object_get_data(G_OBJECT(p->win), "xs-state");
     if (!state)
@@ -2479,6 +2520,12 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
 
     /* Если позиция заблокирована, не обновлять конфиг */
     if (state->locked)
+        return FALSE;
+
+    /* Гость внутри frame_launcher: координаты относительно рамки не
+     * пишем в конфиг (позицию гостя задаёт хозяин; иначе конфиг
+     * замусоривается «стольными» координатами и все гости съезжают). */
+    if (g_object_get_data(G_OBJECT(window), "xs-guest-host"))
         return FALSE;
 
     /* Заморозка на время правки User label: configure-event не пишет
@@ -3052,6 +3099,8 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
     g = xs_core_add_instance_for_host(type, guest_name);
     if (!g || !g->win)
         return NULL;
+    xs_log_impl("guest '%s' hosted by '%s' at %d,%d (win x/y)",
+                guest_name, host->name, gs ? gs->x : -1, gs ? gs->y : -1);
     /* репарент окна гостя в content-окно хоста: X обрежет выход за
      * границы (зона отображения = внешний размер − рамка − тень). */
     hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
@@ -3078,10 +3127,13 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                                 gtk_widget_get_display(g->win)),
                             gdk_x11_window_get_xid(gw),
                             gdk_x11_window_get_xid(cw),
-                            cx, cy);
+                            cx + gs->x, cy + gs->y);
             /* гость всегда ниже хоста (host keep_above over guests) */
             gs->keep_below = TRUE;
             xs_core_apply_window_flags(gs);
+            g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
+                              (gpointer)host->name);
+            xs_core_guest_set_started_by(g, "plugin");
         }
     }
     xs_log_impl("guest '%s' hosted by '%s'", guest_name, host->name);

@@ -13,6 +13,16 @@ typedef struct {
 	GHashTable *svgs;          /* элемент -> RsvgHandle* */
 } XsTheme;
 
+/* Загруженный модуль плагина (заполняет main.c; нужен common.c для
+ * запуска гостя типа без живых инстансов) */
+typedef struct {
+    GModule *mod;
+    XsPluginDesc *desc;
+} XsLoadedPlugin;
+
+/* main.c регистрирует массив модулей после load_plugin_modules() */
+void xs_core_set_loaded_modules_ref(GPtrArray **ref);
+
 /* Состояние окна плагина */
 typedef struct _XsWinState {
 	GtkWidget *win;            /* корневое окно */
