@@ -3099,12 +3099,13 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
     g = xs_core_add_instance_for_host(type, guest_name);
     if (!g || !g->win)
         return NULL;
+    hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
+    gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+    content = host_content_widget(host);
     xs_log_impl("guest '%s' hosted by '%s' at %d,%d (win x/y)",
                 guest_name, host->name, gs ? gs->x : -1, gs ? gs->y : -1);
     /* репарент окна гостя в content-окно хоста: X обрежет выход за
      * границы (зона отображения = внешний размер − рамка − тень). */
-    hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
-    gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
     content = host_content_widget(host);
     if (hs && gs && content) {
         GdkWindow *gw = gtk_widget_get_window(g->win);
