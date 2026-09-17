@@ -3068,7 +3068,11 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                             gdk_x11_window_get_xid(gw),
                             gdk_x11_window_get_xid(cw),
                             cx + gs->x, cy + gs->y);
-            gs->keep_below = TRUE;
+            /* Гость — child окна рамки: рисуется поверх родителя
+             * автоматически, keep_below НЕ нужен (иначе WM рвёт
+             * иерархию и появляется «прозрачный квадрат»).
+             * Сбрасываем флаг, унаследованный из конфига. */
+            gs->keep_below = FALSE;
             xs_core_apply_window_flags(gs);
             /* гость больше не main_daemon: за него отвечает frame */
             xs_core_guest_set_started_by(g, "plugin");
@@ -3135,8 +3139,9 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                             gdk_x11_window_get_xid(gw),
                             gdk_x11_window_get_xid(cw),
                             cx + gs->x, cy + gs->y);
-            /* гость всегда ниже хоста (host keep_above over guests) */
-            gs->keep_below = TRUE;
+            /* Гость — child окна рамки: рисуется поверх родителя
+             * автоматически, keep_below НЕ нужен. */
+            gs->keep_below = FALSE;
             xs_core_apply_window_flags(gs);
             xs_core_guest_set_started_by(g, "plugin");
         }
