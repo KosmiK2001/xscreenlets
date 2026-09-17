@@ -599,6 +599,7 @@ static gboolean xs_conf_name_taken(const char *name, const char *old_name)
 }
 
 static XsPlugin *find_plugin_by_name(const char *name);
+static void xs_tray_add_plugin_wrapper(XsPlugin *p);
 
 static gboolean xs_prop_label_rename_cb(gpointer data)
 {
@@ -1900,7 +1901,10 @@ gboolean xs_core_recreate_plugin(XsPlugin *p)
     if (p->ops->init(p, xs_core_plugin_conf(p->name)) != 0)
         return FALSE;
     xs_tray_remove_plugin(p);
-    xs_tray_add_plugin(p);
+    /* гость рамки в трей не попадает (started_by=plugin) */
+    if (!(p->win && g_object_get_data(G_OBJECT(p->win),
+                                      "xs-guest-host")))
+        xs_tray_add_plugin(p);
     xs_tray_rebuild();
     return FALSE;
 }
@@ -2117,7 +2121,8 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
         return NULL;
     }
     xs_core_register_plugin(p);
-    xs_tray_add_plugin(p);
+    /* гость рамки не попадает в трей: его запуск управляется хозяином */
+    xs_tray_add_plugin_wrapper(p);
     xs_tray_rebuild();
     xs_core_plugin_conf_flush(p->name);
     if (!iname || !iname[0]) {
@@ -3399,6 +3404,16 @@ char **xs_core_list_running_daemon_instances(int *count)
     if (count)
         *count = n;
     return out;
+}
+
+static void xs_tray_add_plugin_wrapper(XsPlugin *p)
+{
+    /* Гость рамки (started_by=plugin) не показывается в трей-меню:
+     * его запуском/остановкой управляет хозяин, не демон. */
+    if (p && p->win &&
+        g_object_get_data(G_OBJECT(p->win), "xs-guest-host"))
+        return;
+    xs_tray_add_plugin(p);
 }
 
 static XsHostApi host_api = {
