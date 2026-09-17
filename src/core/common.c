@@ -370,6 +370,7 @@ static void theme_draw_native(XsPlugin *p, cairo_t *cr, const char *el,
 XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                                        const char *guest_name);
 GtkWidget *host_content_widget(XsPlugin *p);
+void xs_core_guest_set_started_by(XsPlugin *g, const char *who);
 /* создать инстанс с ЗАДАННЫМ именем (не генерить UUID), для гостей */
 XsPlugin *xs_core_add_instance_for_host(const char *type,
                                         const char *iname);
@@ -3009,15 +3010,21 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                     cy = xy[1];
                 }
             }
+            /* гость позиционируется ВНУТРИ content-зоны по своим x/y
+             * (оффсеты), иначе все гости лягут в одну точку */
             XReparentWindow(gdk_x11_display_get_xdisplay(
                                 gtk_widget_get_display(g->win)),
                             gdk_x11_window_get_xid(gw),
                             gdk_x11_window_get_xid(cw),
-                            cx, cy);
+                            cx + gs->x, cy + gs->y);
             gs->keep_below = TRUE;
             xs_core_apply_window_flags(gs);
-            xs_log_impl("guest '%s' re-parented into '%s'",
-                        guest_name, host->name);
+            /* гость больше не main_daemon: за него отвечает frame */
+            g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
+                              (gpointer)host->name);
+            xs_core_guest_set_started_by(g, "plugin");
+            xs_log_impl("guest '%s' re-parented into '%s' at %d,%d",
+                        guest_name, host->name, cx + gs->x, cy + gs->y);
         }
         return g;
     }
@@ -3088,6 +3095,30 @@ GtkWidget *host_content_widget(XsPlugin *p)
     if (!p || !p->win)
         return NULL;
     return g_object_get_data(G_OBJECT(p->win), "xs-content");
+}
+
+/* Гость передан хозяину-рамке: started_by=plugin в конфиге, symlink из
+ * plugins_on удалить (демон его больше не запускает сам). */
+void xs_core_guest_set_started_by(XsPlugin *g, const char *who)
+{
+    GKeyFile *kf;
+    char *link;
+
+    if (!g || !g->name || !who)
+        return;
+    kf = xs_core_plugin_conf(g->name);
+    g_key_file_set_string(kf, g->name, "started_by", who);
+    xs_core_plugin_conf_flush(g->name);
+    if (g_plugin_onoff_dir) {
+        char *name_conf = g_strdup_printf("%s.conf", g->name);
+
+        link = g_build_filename(g_plugin_onoff_dir, name_conf, NULL);
+        unlink(link);
+        g_free(name_conf);
+        g_free(link);
+        xs_log_impl("guest '%s': started_by=%s, symlink removed",
+                    g->name, who);
+    }
 }
 
 static XsPlugin *start_guest(XsPlugin *host, const char *guest_name)
