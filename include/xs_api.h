@@ -7,6 +7,8 @@
 
 #include <gtk/gtk.h>
 #include <gmodule.h>
+#include <gdk/gdkx.h> /* XReparentWindow для хостинга гостей */
+#include <X11/Xlib.h>
 
 #define XS_API_VERSION 1
 
@@ -114,6 +116,13 @@ struct _XsHostApi {
 	 * png 1:1) — как theme.render в оригинале */
 	void (*theme_draw_native)(XsPlugin *p, cairo_t *cr, const char *el,
 	                              double x, double y);
+	/* --- frame_launcher / хостинг гостей (добавлено в конец, ABI) --- */
+	/* запустить гостя из СУЩЕСТВУЮЩЕГО конфига .plugins/<guest_name>.conf;
+	 * циклы проверяет демон; возвращает созданный XsPlugin (окно ещё
+	 * НЕ встроено: репарентит хост) или NULL */
+	XsPlugin *(*start_guest)(XsPlugin *host, const char *guest_name);
+	/* остановить гостя (полное удаление инстанса) */
+	void (*stop_guest)(XsPlugin *host, const char *guest_name);
 };
 
 #endif /* XS_API_H */

@@ -366,6 +366,17 @@ static void theme_draw_full(XsPlugin *p, cairo_t *cr, const char *el,
                             double x, double y, double width, double height);
 static void theme_draw_native(XsPlugin *p, cairo_t *cr, const char *el,
                               double x, double y);
+/* --- хостинг гостей (frame_launcher) --- */
+XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
+                                       const char *guest_name);
+GtkWidget *host_content_widget(XsPlugin *p);
+/* создать инстанс с ЗАДАННЫМ именем (не генерить UUID), для гостей */
+XsPlugin *xs_core_add_instance_for_host(const char *type,
+                                        const char *iname);
+/* --- хостинг гостей (frame_launcher): запуск/останов инстанса из
+ * конфига по запросу плагина-хоста, с защитой от циклов --- */
+static XsPlugin *start_guest(XsPlugin *host, const char *guest_name);
+static void stop_guest(XsPlugin *host, const char *guest_name);
 static void conf_set_int(GKeyFile *kf, const char *s, const char *k, int v);
 static double conf_dbl(GKeyFile *kf, const char *s, const char *k, double d);
 static char *conf_str(GKeyFile *kf, const char *s, const char *k, const char *d);
@@ -1893,9 +1904,18 @@ int xs_core_add_instance(const char *type)
     char *iname;
     GKeyFile *kf;
     gsize i;
+    gboolean is_guest = FALSE;
 
-    if (!type || !type[0] || !g_plugins)
+    /* вариант с заданным именем (гости): type == NULL разрешён */
+    if (type && !type[0])
+        type = NULL;
+
+    if (!g_plugins)
         return -1;
+    if (!type) {
+        /* guests-режим вызывается только через _for_host */
+        return -1;
+    }
     for (i = 0; i < g_plugins->len; i++) {
         XsPlugin *q = g_ptr_array_index(g_plugins, i);
 
@@ -1908,8 +1928,45 @@ int xs_core_add_instance(const char *type)
         xs_log_impl("add: no loaded plugin of type '%s'", type);
         return -1;
     }
-    iname = xs_core_next_instance_name(type);
-    kf = xs_core_plugin_conf(iname);
+    return xs_core_add_instance_for_host(type, NULL) != NULL ? 0 : -1;
+}
+
+/* Создать инстанс типа type с именем iname (iname == NULL → UUID-имя).
+ * Гости: xs_type пишется в конфиг, symlink в plugins_on НЕ создаётся
+ * (гость включается хозяином). */
+XsPlugin *xs_core_add_instance_for_host(const char *type,
+                                        const char *iname)
+{
+    XsPlugin *proto = NULL;
+    XsPlugin *p;
+    char *name;
+    GKeyFile *kf;
+    gsize i;
+
+    if (!type || !type[0] || !g_plugins)
+        return NULL;
+    for (i = 0; i < g_plugins->len; i++) {
+        XsPlugin *q = g_ptr_array_index(g_plugins, i);
+
+        if (q && xs_core_plugin_type(q) && strcmp(xs_core_plugin_type(q), type) == 0) {
+            proto = q;
+            break;
+        }
+    }
+    if (!proto || !proto->ops || !proto->ops->init) {
+        xs_log_impl("add: no loaded plugin of type '%s'", type);
+        return NULL;
+    }
+    if (iname && iname[0]) {
+        name = g_strdup(iname);
+    } else {
+        name = xs_core_next_instance_name(type);
+        if (!name)
+            return NULL;
+    }
+    kf = xs_core_plugin_conf(name);
+    /* xs_type: тип плагина в конфиге (нужен для запуска гостей). */
+    g_key_file_set_string(kf, name, "xs_type", type);
     /* Новый инстанс наследует вид от секции типа (theme/scale/opacity),
      * если у него ещё нет своих значений. */
     if (proto->type && strcmp(proto->type, proto->name) != 0) {
@@ -1921,13 +1978,13 @@ int xs_core_add_instance(const char *type)
             char *v = conf_str(pkf, proto->name, inherit[k], NULL);
 
             if (v) {
-                g_key_file_set_string(kf, iname, inherit[k], v);
+                g_key_file_set_string(kf, name, inherit[k], v);
                 g_free(v);
             }
         }
     }
     p = g_new0(XsPlugin, 1);
-    p->name = iname;
+    p->name = name;
     p->type = g_strdup(type);
     p->host = xs_host_api();
     p->ops = proto->ops;
@@ -1938,17 +1995,19 @@ int xs_core_add_instance(const char *type)
     if (p->ops->init(p, kf) != 0 || !p->win) {
         xs_log_impl("add: init failed for instance '%s'", p->name);
         xs_core_free_plugin(p);
-        return -1;
+        return NULL;
     }
     xs_core_register_plugin(p);
     xs_tray_add_plugin(p);
     xs_tray_rebuild();
     xs_core_plugin_conf_flush(p->name);
-    /* Новый инстанс включён: symlink в plugins_on. */
-    xs_onoff_relink(NULL, p->name);
+    if (!iname || !iname[0]) {
+        /* Обычный инстанс (Launch Applet): symlink в plugins_on. */
+        xs_onoff_relink(NULL, p->name);
+        xs_core_save_instances();
+    }
     xs_log_impl("added instance %s (type %s)", p->name, type);
-    xs_core_save_instances();
-    return 0;
+    return p;
 }
 
 /* Диалог «мёртвый symlink»: удалить конфиг или выбрать другой.
@@ -2839,6 +2898,212 @@ static void host_recreate(XsPlugin *p)
     xs_core_recreate_plugin(p);
 }
 
+/* === Хостинг гостей (frame_launcher) ===
+ * Гость — обычный инстанс из .plugins/<name>.conf, но:
+ *  - окно гостя репарентится в content-окно хоста (X сам обрезает
+ *    всё, что вышло за пределы хоста);
+ *  - keep_below=True у гостя, чтобы быть ниже рамки хоста;
+ *  - защита от циклов: DFS по конфигам guests_* до MAX глубины.
+ * Цикл проверяется ДО запуска, самозапуск невозможен. */
+
+#define XS_GUEST_MAX_DEPTH 8
+
+/* DFS: найдёт цикл host→...→host по конфигам (guests_1..guests_N). */
+static gboolean guest_cycle_check(const char *start_name,
+                                  const char *cur_name, int depth)
+{
+    GKeyFile *kf;
+    char *path;
+    gboolean cyc = FALSE;
+    gchar **keys = NULL;
+    gsize n = 0;
+
+    if (depth > XS_GUEST_MAX_DEPTH)
+        return TRUE; /* глубже лимита считаем циклом */
+    if (g_strcmp0(cur_name, start_name) == 0 && depth > 0)
+        return TRUE;
+    path = xs_plugin_conf_path(cur_name);
+    if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+        g_free(path);
+        return FALSE; /* конфига нет — не запустится, цикла нет */
+    }
+    kf = g_key_file_new();
+    if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+        /* секция может называться и старым именем — берём первую */
+        gchar **groups = g_key_file_get_groups(kf, NULL);
+
+        for (gsize g = 0; groups && groups[g] && !cyc; g++) {
+            int i = 1;
+
+            for (; i <= 32 && !cyc; i++) {
+                char *key = g_strdup_printf("guests_%d", i);
+                char *gn = g_key_file_get_string(kf, groups[g], key,
+                                                 NULL);
+
+                g_free(key);
+                if (!gn || !gn[0]) {
+                    g_free(gn);
+                    break;
+                }
+                cyc = guest_cycle_check(start_name, gn, depth + 1);
+                g_free(gn);
+            }
+        }
+        g_strfreev(groups);
+    }
+    g_key_file_free(kf);
+    g_free(path);
+    return cyc;
+}
+
+static XsPlugin *find_plugin_by_name(const char *name)
+{
+    for (gsize i = 0; g_plugins && i < g_plugins->len; i++) {
+        XsPlugin *q = g_ptr_array_index(g_plugins, i);
+
+        if (q && q->name && strcmp(q->name, name) == 0)
+            return q;
+    }
+    return NULL;
+}
+
+/* Внешняя точка входа для main.c: тип по имени конфига, запуск. */
+XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
+                                       const char *guest_name)
+{
+    const char *type = NULL;
+    XsPlugin *g;
+    XsWinState *hs;
+    XsWinState *gs;
+    GtkWidget *content;
+
+    if (!host || !host->win || !guest_name || !guest_name[0])
+        return NULL;
+    /* уже запущен? — это норма (гость мог стартовать раньше демона):
+     * просто репарентим его окно в хоста. */
+    if (find_plugin_by_name(guest_name)) {
+        XsPlugin *g = find_plugin_by_name(guest_name);
+        XsWinState *gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+        GtkWidget *content = host_content_widget(host);
+        GdkWindow *gw, *cw;
+
+        xs_log_impl("guest '%s': exists, win=%p content=%p",
+                    guest_name, (void *)g->win, (void *)content);
+        if (!gs || !content || !g->win)
+            return g;
+        gw = gtk_widget_get_window(g->win);
+        cw = gtk_widget_get_window(content);
+        /* GtkFixed не имеет собственного X-окна → репарентим в окно
+         * хоста с оффсетом content-зоны (данные "xs-content-xy"). */
+        if (gw && !cw)
+            cw = gtk_widget_get_window(host->win);
+        if (gw && cw) {
+            int cx = 0, cy = 0;
+
+            if (cw == gtk_widget_get_window(host->win)) {
+                gint *xy = g_object_get_data(G_OBJECT(host->win),
+                                             "xs-content-xy");
+
+                if (xy) {
+                    cx = xy[0];
+                    cy = xy[1];
+                }
+            }
+            XReparentWindow(gdk_x11_display_get_xdisplay(
+                                gtk_widget_get_display(g->win)),
+                            gdk_x11_window_get_xid(gw),
+                            gdk_x11_window_get_xid(cw),
+                            cx, cy);
+            gs->keep_below = TRUE;
+            xs_core_apply_window_flags(gs);
+            xs_log_impl("guest '%s' re-parented into '%s'",
+                        guest_name, host->name);
+        }
+        return g;
+    }
+    /* цикл/глубина: до создания чего-либо */
+    if (guest_cycle_check(guest_name, guest_name, 0)) {
+        xs_log_impl("guest '%s': ЦИКЛ или глубина > %d — запуск отменён",
+                    guest_name, XS_GUEST_MAX_DEPTH);
+        return NULL;
+    }
+    /* тип определяем по префиксу имени из загруженных модулей */
+    {
+        /* обратный вызов в main.c недоступен отсюда; тип получаем из
+         * конфига гостя: сохранённый ключ xs_type пишет демон. */
+        GKeyFile *kf = xs_core_plugin_conf(guest_name);
+        gchar **groups = g_key_file_get_groups(kf, NULL);
+
+        if (groups && groups[0])
+            type = g_key_file_get_string(kf, groups[0], "xs_type", NULL);
+        g_strfreev(groups);
+    }
+    if (!type) {
+        xs_log_impl("guest '%s': нет xs_type в конфиге", guest_name);
+        return NULL;
+    }
+    g = xs_core_add_instance_for_host(type, guest_name);
+    if (!g || !g->win)
+        return NULL;
+    /* репарент окна гостя в content-окно хоста: X обрежет выход за
+     * границы (зона отображения = внешний размер − рамка − тень). */
+    hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
+    gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+    content = host_content_widget(host);
+    if (hs && gs && content) {
+        GdkWindow *gw = gtk_widget_get_window(g->win);
+        GdkWindow *cw = gtk_widget_get_window(content);
+        int cx = 0, cy = 0;
+
+        if (gw && !cw)
+            cw = gtk_widget_get_window(host->win);
+        if (cw == gtk_widget_get_window(host->win)) {
+            gint *xy = g_object_get_data(G_OBJECT(host->win),
+                                         "xs-content-xy");
+
+            if (xy) {
+                cx = xy[0];
+                cy = xy[1];
+            }
+        }
+        if (gw && cw) {
+            XReparentWindow(gdk_x11_display_get_xdisplay(
+                                gtk_widget_get_display(g->win)),
+                            gdk_x11_window_get_xid(gw),
+                            gdk_x11_window_get_xid(cw),
+                            cx, cy);
+            /* гость всегда ниже хоста (host keep_above over guests) */
+            gs->keep_below = TRUE;
+            xs_core_apply_window_flags(gs);
+        }
+    }
+    xs_log_impl("guest '%s' hosted by '%s'", guest_name, host->name);
+    return g;
+}
+
+/* Content-виджет хоста для репарента гостей (frame_launcher). Хост-плагин
+ * помечает свой дочерний GtkWidget данными "xs-content". */
+GtkWidget *host_content_widget(XsPlugin *p)
+{
+    if (!p || !p->win)
+        return NULL;
+    return g_object_get_data(G_OBJECT(p->win), "xs-content");
+}
+
+static XsPlugin *start_guest(XsPlugin *host, const char *guest_name)
+{
+    return xs_core_start_guest_instance(host, guest_name);
+}
+
+static void stop_guest(XsPlugin *host, const char *guest_name)
+{
+    XsPlugin *g = find_plugin_by_name(guest_name);
+
+    (void)host;
+    if (g)
+        xs_core_delete_instance(g);
+}
+
 static XsHostApi host_api = {
     .make_window = host_make_window,
     .invalidate = host_invalidate,
@@ -2857,7 +3122,9 @@ static XsHostApi host_api = {
     .recreate = host_recreate,
     .resize = host_resize,
     .theme_draw_full = host_theme_draw_full,
-    .theme_draw_native = host_theme_draw_native
+    .theme_draw_native = host_theme_draw_native,
+    .start_guest = start_guest,
+    .stop_guest = stop_guest
 };
 
 void xs_core_cleanup_plugin_window(XsPlugin *p)

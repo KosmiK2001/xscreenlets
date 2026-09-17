@@ -1,8 +1,8 @@
 CC = gcc
 CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0)
-LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0)
+LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
-LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
+LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm -lX11
 
 PREFIX ?= $(HOME)
 DESTDIR ?=
@@ -13,6 +13,7 @@ TARGET_DAEMON = $(BUILD_DIR)/xscreenletsd
 TARGET_PLUGIN = $(BUILD_DIR)/clock.so
 TARGET_CAL_PLUGIN = $(BUILD_DIR)/calendar.so
 TARGET_LAU_PLUGIN = $(BUILD_DIR)/launcher.so
+TARGET_FL_PLUGIN = $(BUILD_DIR)/frame_launcher.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
 SRC_COMMON = src/core/common.c
@@ -21,6 +22,7 @@ SRC_MAIN = src/core/main.c
 SRC_CLOCK = src/widgets/clock.c
 SRC_CALENDAR = src/widgets/calendar.c
 SRC_LAUNCHER = src/widgets/launcher.c
+SRC_FL = src/widgets/frame_launcher.c
 
 OBJS_COMMON = $(BUILD_DIR)/common.o
 OBJS_TRAY = $(BUILD_DIR)/tray.o
@@ -29,12 +31,13 @@ OBJS_CLOCK = $(BUILD_DIR)/clock.o
 OBJS_STANDALONE_CLOCK = $(BUILD_DIR)/standalone_clock.o
 OBJS_CALENDAR = $(BUILD_DIR)/calendar.o
 OBJS_LAUNCHER = $(BUILD_DIR)/launcher.o
+OBJS_FL = $(BUILD_DIR)/frame_launcher.o
 OBJS_COMMON_DBG = $(BUILD_DIR)/common_dbg.o
 OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_STANDALONE)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -50,6 +53,9 @@ $(TARGET_CAL_PLUGIN): $(BUILD_DIR) $(OBJS_CALENDAR)
 
 $(TARGET_LAU_PLUGIN): $(BUILD_DIR) $(OBJS_LAUNCHER)
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_LAUNCHER) $(LDFLAGS_PLUGIN) $(shell pkg-config --libs gdk-pixbuf-2.0)
+
+$(TARGET_FL_PLUGIN): $(BUILD_DIR) $(OBJS_FL)
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_FL) $(LDFLAGS_PLUGIN)
 
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)

@@ -151,6 +151,8 @@ static XsPlugin *create_instance(const char *type, const char *iname)
     if (p->ops && p->ops->init) {
         GKeyFile *kf = xs_core_plugin_conf(p->name);
 
+        /* xs_type: тип в конфиге (нужен для запуска гостей). */
+        g_key_file_set_string(kf, p->name, "xs_type", type);
         if (p->ops->init(p, kf) != 0 || !p->win) {
             xs_log_impl("instance %s: init failed", p->name);
             xs_core_free_plugin(p);
@@ -280,6 +282,23 @@ static void create_instances(void)
         lab = kf ? g_key_file_get_string(kf, iname, "user_label", NULL)
                  : NULL;
         g_free(lab);
+        /* started_by: main_daemon | plugin. 'plugin' демон не запускает
+         * — это гость какого-то frame_launcher'а. */
+        {
+            char *sb = kf ? g_key_file_get_string(kf, iname,
+                                                  "started_by", NULL)
+                          : NULL;
+
+            if (sb && sb[0] && strcmp(sb, "main_daemon") != 0) {
+                xs_log_impl("skip %s (started_by=%s)", iname, sb);
+                g_free(sb);
+                g_free(type);
+                g_free(iname);
+                g_free(linkpath);
+                continue;
+            }
+            g_free(sb);
+        }
         create_instance(type, iname);
         g_free(type);
         g_free(iname);
