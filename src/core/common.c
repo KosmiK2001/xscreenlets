@@ -380,6 +380,8 @@ static void xs_core_save_plugin_position(XsPlugin *p);
 static gboolean xs_core_input_shape_idle(XsPlugin *p);
 
 /* Forward declarations */
+static guint g_props_label_rename_id = 0;
+static gboolean xs_prop_label_rename_cb(gpointer data);
 static gboolean xs_core_menu_dispatch_idle(gpointer data)
 {
     XsCmd *c = data;
@@ -556,9 +558,169 @@ static void xs_core_prop_win_toggled(GtkToggleButton *btn, gpointer data)
     xs_core_save_window_flags(p);
 }
 
-/* Редактирование user_label (пользовательская метка инстанса). Меняет
- * метку в конфиге; файл конфига НЕ переименовываем (имя файла =
- * тип-UUID-label фиксируется при создании; метка живёт отдельно). */
+/* Отложенное переименование конфига после правки User label (debounce:
+ * только когда ввод прекратился на 800 мс). Переименовывает файл в
+ * .plugins (тип-UUID-новая_метка), секцию, symlink в plugins_on и имя
+ * инстанса. Данные (окно) не пересоздаются — имя меняем на живом
+ * инстансе и во всех кэшах. */
+
+/* Проверить, занято ли имя конфига (кроме самого инстанса old_name). */
+static gboolean xs_conf_name_taken(const char *name, const char *old_name)
+{
+    char *path;
+    gboolean taken;
+
+    if (old_name && strcmp(name, old_name) == 0)
+        return FALSE;
+    path = xs_plugin_conf_path(name);
+    taken = g_file_test(path, G_FILE_TEST_EXISTS);
+    g_free(path);
+    return taken;
+}
+
+static gboolean xs_prop_label_rename_cb(gpointer data)
+{
+    XsPlugin *p = data;
+    XsWinState *state;
+    GKeyFile *kf;
+    char *lab;
+    char *uuid = NULL;
+    char *dash;
+    char *newname;
+    char *oldpath, *newpath;
+    char *link, *target, *oldlink;
+
+    g_props_label_rename_id = 0;
+    if (!p || !p->name || !p->win)
+        return G_SOURCE_REMOVE;
+    state = g_object_get_data(G_OBJECT(p->win), "xs-state");
+    if (!state || state->freed)
+        return G_SOURCE_REMOVE;
+    kf = xs_core_plugin_conf(p->name);
+    lab = conf_str(kf, p->name, "user_label", "blank_label");
+    if (!lab || !lab[0]) {
+        g_free(lab);
+        lab = g_strdup("blank_label");
+    }
+    /* запрет опасных символов в имени файла */
+    for (char *s = lab; *s; s++) {
+        if (*s == '/' || *s == '\\')
+            *s = '_';
+    }
+    /* новый name: текущий-тип до первого UUID → тип-UUID-метка.
+     * Имя = <тип>-<UUID8>-<label>; тип и UUID берём из текущего имени. */
+    dash = strchr(p->name, '-');
+    if (!dash) {
+        g_free(lab);
+        return G_SOURCE_REMOVE;
+    }
+    {
+        gsize tl = dash - p->name;
+        const char *rest = dash + 1; /* UUID8-label */
+
+        if (strlen(rest) < 9 || rest[8] != '-') {
+            g_free(lab);
+            return G_SOURCE_REMOVE;
+        }
+        newname = g_strdup_printf("%.*s-%.8s-%s", (int)tl, p->name,
+                                  rest, lab);
+    }
+    if (strcmp(newname, p->name) == 0) {
+        g_free(newname);
+        g_free(lab);
+        return G_SOURCE_REMOVE;
+    }
+    if (xs_conf_name_taken(newname, p->name)) {
+        xs_log_impl("rename: '%s' уже существует, метка сохранена в конфиге",
+                    newname);
+        g_free(newname);
+        g_free(lab);
+        return G_SOURCE_REMOVE;
+    }
+    /* 1) файл конфига */
+    oldpath = xs_plugin_conf_path(p->name);
+    newpath = xs_plugin_conf_path(newname);
+    if (rename(oldpath, newpath) != 0) {
+        xs_log_impl("rename %s -> %s failed", oldpath, newpath);
+        g_free(oldpath);
+        g_free(newpath);
+        g_free(newname);
+        g_free(lab);
+        return G_SOURCE_REMOVE;
+    }
+    /* 2) ключи в кэше конфигов: перенаправить запись кэша на новое имя */
+    if (g_plugin_confs) {
+        gpointer key, val;
+
+        if (g_hash_table_steal_extended(g_plugin_confs, p->name,
+                                        &key, &val)) {
+            g_hash_table_insert(g_plugin_confs, g_strdup(newname), val);
+            g_free(key);
+        }
+    }
+    /* 3) переписать секцию в конфиге */
+    kf = xs_core_plugin_conf(newname);
+    {
+        gchar **keys = NULL;
+        gsize n = 0;
+
+        if (g_key_file_has_group(kf, p->name))
+            keys = g_key_file_get_keys(kf, p->name, &n, NULL);
+        if (keys) {
+            GKeyFile *nk = g_key_file_new();
+
+            for (gsize i = 0; i < n; i++) {
+                char *v = g_key_file_get_string(kf, p->name, keys[i],
+                                                NULL);
+
+                if (v) {
+                    g_key_file_set_string(nk, newname, keys[i], v);
+                    g_free(v);
+                }
+            }
+            g_strfreev(keys);
+            {
+                char *data;
+                gsize len;
+
+                data = g_key_file_to_data(nk, &len, NULL);
+                g_file_set_contents(newpath, data, -1, NULL);
+                g_free(data);
+            }
+            g_key_file_free(nk);
+        }
+    }
+    /* 4) symlink в plugins_on */
+    if (g_plugin_onoff_dir) {
+        oldlink = g_build_filename(g_plugin_onoff_dir, p->name, NULL);
+        link = g_build_filename(g_plugin_onoff_dir, newname, NULL);
+        target = g_build_filename(
+            g_path_get_dirname(g_plugin_onoff_dir), ".plugins", newname,
+            NULL);
+        unlink(link);
+        if (symlink(target, link) != 0)
+            xs_log_impl("rename: symlink %s failed", link);
+        unlink(oldlink);
+        g_free(oldlink);
+        g_free(link);
+        g_free(target);
+    }
+    /* 5) имя инстанса на живом объекте */
+    g_free((char *)p->name);
+    p->name = newname;
+    if (p->type)
+        ; /* тип не меняется */
+    gtk_window_set_title(GTK_WINDOW(p->win), newname);
+    xs_log_impl("renamed instance -> %s (label '%s')", newname, lab);
+    g_free(lab);
+    g_free(oldpath);
+    g_free(newpath);
+    g_free(uuid);
+    /* 6) меню трея: пересобрать с новым именем */
+    xs_tray_rebuild();
+    return G_SOURCE_REMOVE;
+}
+
 static void xs_core_prop_label_changed(GtkEditable *e, gpointer data)
 {
     XsPlugin *p = data;
@@ -573,6 +735,11 @@ static void xs_core_prop_label_changed(GtkEditable *e, gpointer data)
                           (txt && txt[0]) ? txt : "blank_label");
     g_free(txt);
     xs_core_plugin_conf_flush(p->name);
+    /* debounce: переименование через 800 мс после последней правки */
+    if (g_props_label_rename_id)
+        g_source_remove(g_props_label_rename_id);
+    g_props_label_rename_id = g_timeout_add(800, xs_prop_label_rename_cb,
+                                            p);
 }
 
 /* Текущее открытое окно Properties (для восстановления keep-above после
