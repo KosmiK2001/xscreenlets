@@ -805,6 +805,8 @@ static GtkWindow *g_props_dialog = NULL;
  * окна апплета (debounce: только когда перемещение прекратилось на 500 мс). */
 static GtkSpinButton *g_props_spin_x = NULL;
 static GtkSpinButton *g_props_spin_y = NULL;
+/* Какому плагину принадлежат открытые спиннеры X/Y */
+static XsPlugin *g_props_spin_plugin = NULL;
 static guint g_props_pos_update_id = 0;
 
 static void xs_core_props_destroyed(GtkWidget *w, gpointer data)
@@ -814,6 +816,7 @@ static void xs_core_props_destroyed(GtkWidget *w, gpointer data)
     g_props_dialog = NULL;
     g_props_spin_x = NULL;
     g_props_spin_y = NULL;
+    g_props_spin_plugin = NULL;
     if (g_props_pos_update_id) {
         g_source_remove(g_props_pos_update_id);
         g_props_pos_update_id = 0;
@@ -899,10 +902,30 @@ static gboolean xs_core_props_pos_update_idle(gpointer data)
     state = g_object_get_data(G_OBJECT(p->win), "xs-state");
     if (!state || state->freed)
         return G_SOURCE_REMOVE;
-    if (g_props_spin_x)
-        gtk_spin_button_set_value(g_props_spin_x, state->x);
-    if (g_props_spin_y)
-        gtk_spin_button_set_value(g_props_spin_y, state->y);
+    /* ВАЖНО: спиннеры принадлежат диалогу КОНКРЕТНОГО плагина.
+     * Обновляем только если диалог открыт именно для p, иначе
+     * set_value чужого спиннера дёргает value-changed → pos_changed
+     * с data другого плагина → окно прыгает на чужие координаты. */
+    if (g_props_spin_plugin != p)
+        return G_SOURCE_REMOVE;
+    if (g_props_spin_x) {
+        /* блокируем сигнал: set_value эмитит value-changed →
+         * pos_changed → gtk_window_move (петля) */
+        g_signal_handlers_block_by_func(
+            g_props_spin_x, xs_core_prop_pos_changed, p);
+        if ((int)gtk_spin_button_get_value(g_props_spin_x) != state->x)
+            gtk_spin_button_set_value(g_props_spin_x, state->x);
+        g_signal_handlers_unblock_by_func(
+            g_props_spin_x, xs_core_prop_pos_changed, p);
+    }
+    if (g_props_spin_y) {
+        g_signal_handlers_block_by_func(
+            g_props_spin_y, xs_core_prop_pos_changed, p);
+        if ((int)gtk_spin_button_get_value(g_props_spin_y) != state->y)
+            gtk_spin_button_set_value(g_props_spin_y, state->y);
+        g_signal_handlers_unblock_by_func(
+            g_props_spin_y, xs_core_prop_pos_changed, p);
+    }
     return G_SOURCE_REMOVE;
 }
 
@@ -1314,6 +1337,7 @@ static void xs_core_show_properties(XsPlugin *p)
             g_signal_connect(spin, "value-changed",
                              G_CALLBACK(xs_core_prop_pos_changed), p);
             g_props_spin_x = GTK_SPIN_BUTTON(spin);
+            g_props_spin_plugin = p;
             g_object_add_weak_pointer(G_OBJECT(spin), (gpointer *)&g_props_spin_x);
         }
         row++;
