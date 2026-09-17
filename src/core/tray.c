@@ -284,8 +284,22 @@ void xs_tray_rebuild(void)
         gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
         for (gsize i = 0; i < xs_core_plugin_count(); i++) {
             XsPlugin *p = xs_core_plugin_at(i);
-            if (p)
-                xs_tray_add_plugin(p);
+            GKeyFile *kf;
+            char *sb;
+
+            if (!p || !p->name)
+                continue;
+            /* гость рамки (started_by=plugin) не показывается:
+             * его запуском управляет хозяин, не демон */
+            kf = xs_core_plugin_conf(p->name);
+            sb = kf ? g_key_file_get_string(kf, p->name,
+                                            "started_by", NULL) : NULL;
+            if (sb && strcmp(sb, "main_daemon") != 0) {
+                g_free(sb);
+                continue;
+            }
+            g_free(sb);
+            xs_tray_add_plugin(p);
         }
     }
 
