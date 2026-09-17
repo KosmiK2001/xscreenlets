@@ -381,6 +381,8 @@ static gboolean xs_core_input_shape_idle(XsPlugin *p);
 
 /* Forward declarations */
 static guint g_props_label_rename_id = 0;
+/* Заморозка x/y на время правки метки/переименования конфига */
+static gboolean g_props_label_freeze = FALSE;
 static gboolean xs_prop_label_rename_cb(gpointer data);
 static gboolean xs_core_menu_dispatch_idle(gpointer data)
 {
@@ -591,6 +593,7 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
     char *link, *target, *oldlink;
 
     g_props_label_rename_id = 0;
+    g_props_label_freeze = TRUE; /* конфиг/позиция заморожены до конца */
     if (!p || !p->name || !p->win)
         return G_SOURCE_REMOVE;
     state = g_object_get_data(G_OBJECT(p->win), "xs-state");
@@ -690,6 +693,21 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
             g_key_file_free(nk);
         }
     }
+    /* Кэш после записи файла содержит старую секцию — перезагрузить
+     * целиком из файла, иначе новые значения (x/y и пр.) уйдут в новую
+     * секцию кэша, а плагины прочитают неполную (сброс позиции). */
+    if (g_plugin_confs) {
+        gpointer key, val;
+
+        if (g_hash_table_steal_extended(g_plugin_confs, newname,
+                                        &key, &val)) {
+            xs_plugin_conf_free_value(val);
+            g_free(key);
+        }
+        kf = g_key_file_new();
+        g_key_file_load_from_file(kf, newpath, G_KEY_FILE_NONE, NULL);
+        g_hash_table_insert(g_plugin_confs, g_strdup(newname), kf);
+    }
     /* 4) symlink в plugins_on */
     if (g_plugin_onoff_dir) {
         oldlink = g_build_filename(g_plugin_onoff_dir, p->name, NULL);
@@ -718,6 +736,9 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
     g_free(uuid);
     /* 6) меню трея: пересобрать с новым именем */
     xs_tray_rebuild();
+    /* Заморозка снята: после пересборки меню и всех записей. Позицию
+     * окна обновить актуальной (state->x/y уже актуальны). */
+    g_props_label_freeze = FALSE;
     return G_SOURCE_REMOVE;
 }
 
@@ -740,6 +761,7 @@ static void xs_core_prop_label_changed(GtkEditable *e, gpointer data)
         g_source_remove(g_props_label_rename_id);
     g_props_label_rename_id = g_timeout_add(800, xs_prop_label_rename_cb,
                                             p);
+    g_props_label_freeze = TRUE;
 }
 
 /* Текущее открытое окно Properties (для восстановления keep-above после
@@ -2377,6 +2399,11 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
     if (state->locked)
         return FALSE;
 
+    /* Заморозка на время правки User label: configure-event не пишет
+     * x/y в конфиг (rename может двигать окно через WM). Снимается в
+     * xs_prop_label_rename_cb после завершения переименования. */
+    if (g_props_label_freeze)
+        return FALSE;
     gtk_window_get_position(GTK_WINDOW(window), &x, &y);
     state->x = x;
     state->y = y;
