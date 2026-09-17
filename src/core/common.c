@@ -598,6 +598,8 @@ static gboolean xs_conf_name_taken(const char *name, const char *old_name)
     return taken;
 }
 
+static XsPlugin *find_plugin_by_name(const char *name);
+
 static gboolean xs_prop_label_rename_cb(gpointer data)
 {
     XsPlugin *p = data;
@@ -605,6 +607,7 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
     GKeyFile *kf;
     char *lab;
     char *uuid = NULL;
+    char *oldname_for_guests = NULL;
     char *dash;
     char *newname;
     char *oldpath, *newpath;
@@ -764,13 +767,52 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
         strcmp(p->name, newname) != 0) {
         g_hash_table_remove(g_plugin_confs, p->name);
     }
+    oldname_for_guests = g_strdup(p->name);
     g_free((char *)p->name);
     p->name = newname;
     if (p->type)
         ; /* тип не меняется */
     gtk_window_set_title(GTK_WINDOW(p->win), newname);
+    /* 7) если гость в рамке — обновить guests_N в конфиге хозяина */
+    {
+        const char *host_name = g_object_get_data(G_OBJECT(p->win),
+                                                  "xs-guest-host");
+
+        if (host_name && host_name[0]) {
+            XsPlugin *host = find_plugin_by_name(host_name);
+
+            if (host && host->name) {
+                GKeyFile *hkf = xs_core_plugin_conf(host->name);
+                int gi;
+
+                for (gi = 1; gi <= 64; gi++) {
+                    char *gkey = g_strdup_printf("guests_%d", gi);
+                    char *gv = g_key_file_get_string(
+                        hkf, host->name, gkey, NULL);
+
+                    if (gv && strcmp(gv, oldname_for_guests) == 0) {
+                        g_key_file_set_string(hkf, host->name, gkey,
+                                              newname);
+                        g_free(gv);
+                        xs_core_plugin_conf_flush(host->name);
+                        xs_log_impl(
+                            "guest rename: %s guests_%d -> %s",
+                            host->name, gi, newname);
+                        g_free(gkey);
+                        break;
+                    }
+                    g_free(gv);
+                    g_free(gkey);
+                    if (!gv)
+                        break;
+                }
+                xs_tray_rebuild();
+            }
+        }
+    }
     xs_log_impl("renamed instance -> %s (label '%s')", newname, lab);
     g_free(lab);
+    g_free(oldname_for_guests);
     g_free(oldpath);
     g_free(newpath);
     g_free(uuid);
