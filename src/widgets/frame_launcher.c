@@ -108,8 +108,20 @@ static void fl_start_guests(XsPlugin *p, PrivData *priv)
 		return;
 	priv->started = TRUE;
 	for (int i = 0; i < priv->guest_count; i++) {
+		char *offkey, *offv;
+
 		if (!priv->guests[i] || !priv->guests[i][0])
 			continue;
+		/* гость выключен галочкой — не запускаем */
+		offkey = g_strdup_printf("guests_%d_off", i + 1);
+		offv = xs_host_api()->conf_str(priv->kf, p->name, offkey,
+		                               "");
+		g_free(offkey);
+		if (offv && offv[0]) {
+			g_free(offv);
+			continue;
+		}
+		g_free(offv);
 		xs_host_api()->log("frame_launcher %s: starting guest '%s'",
 		                   p->name, priv->guests[i]);
 		if (!xs_host_api()->start_guest(p, priv->guests[i]))
@@ -570,6 +582,112 @@ static void fl_add_running_clicked(GtkButton *btn, gpointer data)
 	                 G_CALLBACK(fl_add_running_response), p);
 }
 
+/* Галочка гостя: FALSE → остановить гостя (guests_N_off=1),
+ * TRUE → запустить заново (ключ снять). */
+static void fl_guest_toggled(GtkCellRendererToggle *cell, gchar *path,
+                             gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	GtkTreeIter it;
+	GtkTreeModel *model;
+	gboolean active;
+	gchar *name = NULL;
+	int idx;
+
+	(void)cell;
+	if (!p || !p->priv)
+		return;
+	priv = p->priv;
+	(void)it;
+	(void)model;
+	(void)active;
+	(void)name;
+	/* path = "N" (индекс строки); конфиг: guests_<N+1>, guests_<N+1>_off.
+	 * Состояние определяем по конфигу (инверсия текущего). */
+	{
+		idx = atoi(path);
+		char *offkey = g_strdup_printf("guests_%d_off", idx + 1);
+		char *cur = xs_host_api()->conf_str(priv->kf, p->name,
+		                                    offkey, "");
+		gboolean now_off = (cur && cur[0]);
+
+		g_free(cur);
+		if (now_off) {
+			/* включить: снять off, запустить гостя */
+			char *gkey = g_strdup_printf("guests_%d", idx + 1);
+			char *gname = xs_host_api()->conf_str(
+			    priv->kf, p->name, gkey, "");
+
+			xs_host_api()->conf_set_str(priv->kf, p->name,
+			                            offkey, "");
+			xs_core_plugin_conf_flush(p->name);
+			if (gname[0])
+				xs_host_api()->start_guest(p, gname);
+			g_free(gname);
+			g_free(gkey);
+		} else {
+			/* выключить: off=1, остановить гостя */
+			char *gkey = g_strdup_printf("guests_%d", idx + 1);
+			char *gname = xs_host_api()->conf_str(
+			    priv->kf, p->name, gkey, "");
+
+			xs_host_api()->conf_set_str(priv->kf, p->name,
+			                            offkey, "1");
+			xs_core_plugin_conf_flush(p->name);
+			if (gname[0])
+				xs_host_api()->stop_guest(p, gname);
+			g_free(gname);
+			g_free(gkey);
+		}
+		g_free(offkey);
+	}
+}
+
+/* Клик по кнопке рестарта (третий столбец): остановить и запустить
+ * гостя заново. */
+static gboolean fl_guest_restart_clicked(GtkWidget *tree,
+                                         GdkEventButton *ev,
+                                         gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	GtkTreePath *tp;
+	GtkTreeIter it;
+	GtkTreeModel *model;
+	gchar *name = NULL;
+	gint col = -1;
+
+	if (!p || !p->priv || ev->type != GDK_BUTTON_PRESS || ev->button != 1)
+		return FALSE;
+	priv = p->priv;
+	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(tree),
+	                              (gint)ev->x, (gint)ev->y, &tp, NULL,
+	                              &col, NULL);
+	if (!tp)
+		return FALSE;
+	model = gtk_tree_view_get_model(GTK_TREE_VIEW(tree));
+	if (!gtk_tree_model_get_iter(model, &it, tp)) {
+		gtk_tree_path_free(tp);
+		return FALSE;
+	}
+	gtk_tree_model_get(model, &it, 2, &name, -1);
+	gtk_tree_path_free(tp);
+	if (!name || !name[0]) {
+		g_free(name);
+		return FALSE;
+	}
+	/* рестарт: только если клик по колонке кнопки (иконки) */
+	if (col == 2) {
+		xs_host_api()->log("frame_launcher %s: restart guest '%s'",
+		                   p->name, name);
+		xs_host_api()->stop_guest(p, name);
+		xs_host_api()->start_guest(p, name);
+	}
+	g_free(name);
+	return (col == 2);
+}
+
 static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 {
 	PrivData *priv;
@@ -637,27 +755,88 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 		gtk_box_pack_start(GTK_BOX(page), hb, FALSE, FALSE, 4);
 	}
 
-	/* Гости: многострочное поле, имя инстанса на строку */
+	/* Гости: таблица [checkbox | имя | restart] */
 	{
-		GtkWidget *tv = gtk_text_view_new();
-		GtkTextBuffer *buf = gtk_text_view_get_buffer(
-		    GTK_TEXT_VIEW(tv));
 		GtkWidget *sw = gtk_scrolled_window_new(NULL, NULL);
-		GString *gs = g_string_new("");
+		GtkListStore *store = gtk_list_store_new(
+		    3, G_TYPE_BOOLEAN, G_TYPE_STRING, G_TYPE_STRING);
+		GtkWidget *tree;
+		GtkCellRenderer *chk, *txt, *btn;
+		GtkTreeViewColumn *c0, *c1, *c2;
+		GtkWidget *hb;
 
-		gtk_text_view_set_monospace(GTK_TEXT_VIEW(tv), TRUE);
-		gtk_widget_set_size_request(sw, -1, 90);
-		gtk_container_add(GTK_CONTAINER(sw), tv);
-		for (int i = 0; i < priv->guest_count; i++)
-			g_string_append_printf(gs, "%s\n", priv->guests[i]);
-		gtk_text_buffer_set_text(buf, gs->str, -1);
-		g_string_free(gs, TRUE);
-		g_signal_connect(buf, "changed",
-		                 G_CALLBACK(fl_guests_changed), p);
-		xs_prop_add_row(GTK_BOX(page), "Guests (по одному на строку)",
-		                "Имена инстансов из .plugins (конфигов); "
-		                "гость-рамка может хостить своих гостей",
-		                sw);
+		gtk_scrolled_window_set_policy(
+		    GTK_SCROLLED_WINDOW(sw), GTK_POLICY_NEVER,
+		    GTK_POLICY_AUTOMATIC);
+		gtk_widget_set_size_request(sw, -1, 220);
+		tree = gtk_tree_view_new_with_model(
+		    GTK_TREE_MODEL(store));
+		gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), FALSE);
+
+		chk = gtk_cell_renderer_toggle_new();
+		c0 = gtk_tree_view_column_new_with_attributes(
+		    NULL, chk, "active", 0, NULL);
+		gtk_tree_view_column_set_sizing(c0,
+		                                GTK_TREE_VIEW_COLUMN_FIXED);
+		gtk_tree_view_column_set_fixed_width(c0, 28);
+		g_object_set(chk, "activatable", TRUE, NULL);
+		gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c0);
+
+		txt = gtk_cell_renderer_text_new();
+		c1 = gtk_tree_view_column_new_with_attributes(
+		    NULL, txt, "text", 1, NULL);
+		gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c1);
+
+		btn = gtk_cell_renderer_pixbuf_new();
+		{
+			GdkPixbuf *ico = gtk_icon_theme_load_icon(
+			    gtk_icon_theme_get_default(),
+			    "view-refresh", 16,
+			    GTK_ICON_LOOKUP_USE_BUILTIN, NULL);
+
+			g_object_set(btn, "pixbuf", ico, "mode",
+			             GTK_CELL_RENDERER_MODE_ACTIVATABLE,
+			             NULL);
+			if (ico)
+				g_object_unref(ico);
+		}
+		c2 = gtk_tree_view_column_new_with_attributes(
+		    NULL, btn, NULL);
+		gtk_tree_view_column_set_sizing(c2,
+		                                GTK_TREE_VIEW_COLUMN_FIXED);
+		gtk_tree_view_column_set_fixed_width(c2, 24);
+		gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c2);
+
+		for (int i = 0; i < priv->guest_count; i++) {
+			GtkTreeIter it;
+			gboolean enabled = TRUE;
+			char *key = g_strdup_printf("guests_%d_off", i + 1);
+			char *v;
+
+			v = xs_host_api()->conf_str(priv->kf, p->name, key,
+			                            "");
+			g_free(key);
+			if (v && v[0])
+				enabled = FALSE;
+			g_free(v);
+			gtk_list_store_append(store, &it);
+			gtk_list_store_set(store, &it, 0, enabled,
+			                   1, priv->guests[i],
+			                   2, priv->guests[i], -1);
+		}
+		gtk_container_add(GTK_CONTAINER(sw), tree);
+
+		/* toggled: guests_N_off=1 → гостя остановить; =0 → запустить */
+		g_signal_connect(chk, "toggled",
+		                 G_CALLBACK(fl_guest_toggled), p);
+		g_signal_connect(tree, "button-press-event",
+		                 G_CALLBACK(fl_guest_restart_clicked), p);
+
+		hb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+		(void)hb;
+		xs_prop_add_row(GTK_BOX(page), "Guests",
+		                "Гости рамки: галочка = запущен; кнопка "
+		                "справа — рестарт гостя", sw);
 	}
 
 	gtk_widget_show_all(page);
