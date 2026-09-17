@@ -129,11 +129,26 @@ void xs_tray_init(void)
 void xs_tray_add_plugin(XsPlugin *p)
 {
     GtkWidget *run_mi, *sub;
+    char *label;
+    const char *name;
+    char *lab;
+    GKeyFile *kf;
 
     if (!g_menu || !p)
         return;
+    /* Подпись пункта: "Plugin: Label" (тип + user_label из конфига). */
+    name = xs_core_plugin_type(p) ? xs_core_plugin_type(p) : p->name;
+    lab = NULL;
+    kf = xs_core_plugin_conf(p->name);
+    if (kf)
+        lab = g_key_file_get_string(kf, p->name, "user_label", NULL);
+    if (!lab || !lab[0])
+        lab = g_strdup("blank_label");
+    label = g_strdup_printf("%s: %s", name, lab);
+    g_free(lab);
     GtkCheckMenuItem *mi = GTK_CHECK_MENU_ITEM(
-        gtk_check_menu_item_new_with_label(p->name));
+        gtk_check_menu_item_new_with_label(label));
+    g_free(label);
     gboolean visible = p->win && gtk_widget_get_visible(p->win);
 
     gtk_check_menu_item_set_active(mi, visible);
