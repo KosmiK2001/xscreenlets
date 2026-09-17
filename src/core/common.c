@@ -3031,9 +3031,16 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
      * просто репарентим его окно в хоста. */
     if (find_plugin_by_name(guest_name)) {
         XsPlugin *g = find_plugin_by_name(guest_name);
-        XsWinState *gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
-        GtkWidget *content = host_content_widget(host);
+        XsWinState *gs;
+        GtkWidget *content;
         GdkWindow *gw, *cw;
+
+        /* окно гостя может быть уже уничтожено (инстанс умирает);
+         * то же для host->win */
+        if (!g->win || !G_IS_OBJECT(g->win))
+            return g;
+        gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+        content = host_content_widget(host);
 
         xs_log_impl("guest '%s': exists, win=%p content=%p",
                     guest_name, (void *)g->win, (void *)content);
