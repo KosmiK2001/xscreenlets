@@ -378,6 +378,12 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
  * конфига по запросу плагина-хоста, с защитой от циклов --- */
 static XsPlugin *start_guest(XsPlugin *host, const char *guest_name);
 static void stop_guest(XsPlugin *host, const char *guest_name);
+/* создать новый инстанс типа и включить гостем хоста */
+static XsPlugin *start_guest_new(XsPlugin *host, const char *type);
+/* списки для диалогов frame_launcher */
+char **xs_core_list_plugin_types(void);
+int xs_core_type_count(void);
+char **xs_core_list_running_daemon_instances(int *count);
 static void conf_set_int(GKeyFile *kf, const char *s, const char *k, int v);
 static double conf_dbl(GKeyFile *kf, const char *s, const char *k, double d);
 static char *conf_str(GKeyFile *kf, const char *s, const char *k, const char *d);
@@ -3232,6 +3238,119 @@ static void stop_guest(XsPlugin *host, const char *guest_name)
         xs_core_delete_instance(g);
 }
 
+/* Создать НОВЫЙ инстанс типа type и включить его гостем хоста:
+ * генерируем UUID-конфиг (started_by=plugin, symlink не создаётся),
+ * позиция гостя — внутри видимой зоны рамки. */
+static XsPlugin *start_guest_new(XsPlugin *host, const char *type)
+{
+    XsPlugin *g;
+    XsWinState *hs, *gs;
+    GKeyFile *kf;
+
+    if (!host || !type || !type[0])
+        return NULL;
+    g = xs_core_add_instance_for_host(type, NULL);
+    if (!g || !g->win)
+        return NULL;
+    /* стартовая позиция гостя: внутри content-зоны хоста, каскадом */
+    hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
+    gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+    kf = xs_core_plugin_conf(g->name);
+    if (hs && gs && kf) {
+        gint *xy = g_object_get_data(G_OBJECT(host->win),
+                                     "xs-content-xy");
+        int cx = xy ? xy[0] : 12, cy = xy ? xy[1] : 12;
+        int avail_w = hs->w - 2 * cx - 24;
+        int avail_h = hs->h - 2 * cy - 24;
+        int n = 0, i;
+        char *key, *v;
+
+        /* каскад: сколько уже гостей у хоста — такой оффсет */
+        for (i = 1; i <= 64; i++) {
+            key = g_strdup_printf("guests_%d", i);
+            v = conf_str(kf, host->name, key, "");
+            g_free(key);
+            if (v[0]) {
+                n++;
+                g_free(v);
+            } else {
+                g_free(v);
+                break;
+            }
+        }
+        gs->x = cx + 16 * (n % 6);
+        gs->y = cy + 16 * (n % 6);
+        if (gs->x > avail_w) gs->x = cx;
+        if (gs->y > avail_h) gs->y = cy;
+        g_key_file_set_integer(kf, g->name, "x", gs->x);
+        g_key_file_set_integer(kf, g->name, "y", gs->y);
+    }
+    /* включить в рамку через общий путь (репарент, флаги, started_by) */
+    return xs_core_start_guest_instance(host, g->name);
+}
+
+/* --- списки для диалогов frame_launcher --- */
+
+char **xs_core_list_plugin_types(void)
+{
+    char **out;
+    int n = 0, i = 0;
+
+    if (!g_loaded_modules_ref || !*g_loaded_modules_ref) {
+        out = g_new0(char *, 1);
+        return out;
+    }
+    n = (*g_loaded_modules_ref)->len;
+    out = g_new0(char *, n + 1);
+    for (i = 0; i < n; i++) {
+        XsLoadedPlugin *lp = g_ptr_array_index(*g_loaded_modules_ref, i);
+
+        out[i] = (lp && lp->desc && lp->desc->name)
+                     ? g_strdup(lp->desc->name) : g_strdup("?");
+    }
+    return out;
+}
+
+int xs_core_type_count(void)
+{
+    return (g_loaded_modules_ref && *g_loaded_modules_ref)
+               ? (*g_loaded_modules_ref)->len : 0;
+}
+
+char **xs_core_list_running_daemon_instances(int *count)
+{
+    char **out;
+    int n = 0, i;
+    gsize j;
+
+    if (count)
+        *count = 0;
+    if (!g_plugins)
+        return g_new0(char *, 1);
+    out = g_new0(char *, g_plugins->len + 1);
+    for (j = 0; j < g_plugins->len; j++) {
+        XsPlugin *q = g_ptr_array_index(g_plugins, j);
+        GKeyFile *kf;
+
+        if (!q || !q->name || !q->win)
+            continue;
+        kf = xs_core_plugin_conf(q->name);
+        {
+            char *sb = kf ? g_key_file_get_string(kf, q->name,
+                                                  "started_by", NULL)
+                          : NULL;
+
+            /* в список попадают только main_daemon-инстансы */
+            if (sb && strcmp(sb, "main_daemon") == 0)
+                out[n++] = g_strdup(q->name);
+            g_free(sb);
+        }
+    }
+    if (count)
+        *count = n;
+    return out;
+}
+
 static XsHostApi host_api = {
     .make_window = host_make_window,
     .invalidate = host_invalidate,
@@ -3252,7 +3371,8 @@ static XsHostApi host_api = {
     .theme_draw_full = host_theme_draw_full,
     .theme_draw_native = host_theme_draw_native,
     .start_guest = start_guest,
-    .stop_guest = stop_guest
+    .stop_guest = stop_guest,
+    .start_guest_new = start_guest_new
 };
 
 void xs_core_cleanup_plugin_window(XsPlugin *p)

@@ -123,6 +123,9 @@ struct _XsHostApi {
 	XsPlugin *(*start_guest)(XsPlugin *host, const char *guest_name);
 	/* остановить гостя (полное удаление инстанса) */
 	void (*stop_guest)(XsPlugin *host, const char *guest_name);
+	/* создать НОВЫЙ инстанс типа type и включить его гостем хоста
+	 * (конфиг генерится с UUID; в автостарт демона не попадает) */
+	XsPlugin *(*start_guest_new)(XsPlugin *host, const char *type);
 };
 
 #endif /* XS_API_H */

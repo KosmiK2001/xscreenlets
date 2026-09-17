@@ -381,6 +381,195 @@ static void fl_guests_changed(GtkTextBuffer *buf, gpointer data)
 	xs_core_plugin_conf_flush(p->name);
 }
 
+/* ---------- меню и кнопки добавления гостей ---------- */
+
+/* Список типов доступных плагинов (из host API). Реализация через
+ * коллбек в common.c — там виден g_loaded_modules. */
+extern char **xs_core_list_plugin_types(void);
+extern int xs_core_type_count(void);
+
+/* «Add Applet»: создать НОВЫЙ инстанс выбранного типа сразу как гостя
+ * этой рамки (не через трей-автостарт). */
+static void fl_add_applet_response(GtkDialog *dlg, int res, gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	GtkComboBox *combo;
+	char *type;
+	XsPlugin *g;
+	int i;
+
+	if (res != GTK_RESPONSE_ACCEPT || !p || !p->priv) {
+		gtk_widget_destroy(GTK_WIDGET(dlg));
+		return;
+	}
+	priv = p->priv;
+	combo = g_object_get_data(G_OBJECT(dlg), "xs-combo");
+	type = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
+	gtk_widget_destroy(GTK_WIDGET(dlg));
+	if (!type || !type[0]) {
+		g_free(type);
+		return;
+	}
+	/* создать инстанс с UUID-именем и тут же включить в рамку */
+	g = xs_host_api()->start_guest_new(p, type);
+	if (g) {
+		/* дописать в guests_N */
+		i = priv->guest_count;
+		while (i < 64) {
+			char *key = g_strdup_printf("guests_%d", i + 1);
+			char *v = xs_host_api()->conf_str(priv->kf, p->name,
+			                                  key, "");
+
+			g_free(key);
+			if (v[0]) {
+				g_free(v);
+				i++;
+				continue;
+			}
+			g_free(v);
+			break;
+		}
+		if (i < 64) {
+			char *key = g_strdup_printf("guests_%d", i + 1);
+
+			xs_host_api()->conf_set_str(priv->kf, p->name, key,
+			                            g->name);
+			g_free(key);
+			priv->guests = g_realloc(priv->guests,
+			                         (i + 1) * sizeof(char *));
+			priv->guests[i] = g_strdup(g->name);
+			priv->guest_count = i + 1;
+			xs_core_plugin_conf_flush(p->name);
+		}
+	}
+	g_free(type);
+}
+
+static void fl_add_applet_clicked(GtkButton *btn, gpointer data)
+{
+	XsPlugin *p = data;
+	GtkWidget *dlg, *box, *combo;
+	char **types;
+	int n, i;
+
+	(void)btn;
+	if (!p || !p->priv)
+		return;
+	dlg = gtk_dialog_new_with_buttons("Add Applet to Frame",
+	                                  GTK_WINDOW(gtk_widget_get_toplevel(
+	                                      p->win)),
+	                                  GTK_DIALOG_MODAL, "Добавить",
+	                                  GTK_RESPONSE_ACCEPT, "Отмена",
+	                                  GTK_RESPONSE_CANCEL, NULL);
+	box = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+	gtk_box_pack_start(GTK_BOX(box),
+	                   gtk_label_new("Тип апплета для нового гостя:"),
+	                   FALSE, FALSE, 6);
+	combo = gtk_combo_box_text_new();
+	types = xs_core_list_plugin_types();
+	n = xs_core_type_count();
+	for (i = 0; i < n; i++)
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
+		                               types[i]);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+	g_object_set_data(G_OBJECT(dlg), "xs-combo", combo);
+	gtk_box_pack_start(GTK_BOX(box), combo, FALSE, FALSE, 6);
+	gtk_widget_show_all(dlg);
+	g_signal_connect(dlg, "response",
+	                 G_CALLBACK(fl_add_applet_response), p);
+}
+
+/* «Add Running»: забрать уже запущенный main_daemon-инстанс в рамку. */
+static void fl_add_running_response(GtkDialog *dlg, int res, gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	GtkComboBox *combo;
+	char *name;
+	int i;
+
+	if (res != GTK_RESPONSE_ACCEPT || !p || !p->priv) {
+		gtk_widget_destroy(GTK_WIDGET(dlg));
+		return;
+	}
+	priv = p->priv;
+	combo = g_object_get_data(G_OBJECT(dlg), "xs-combo");
+	name = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
+	gtk_widget_destroy(GTK_WIDGET(dlg));
+	if (!name || !name[0]) {
+		g_free(name);
+		return;
+	}
+	/* start_guest сам: репарентит, started_by=plugin, убирает symlink */
+	if (xs_host_api()->start_guest(p, name)) {
+		i = priv->guest_count;
+		while (i < 64) {
+			char *key = g_strdup_printf("guests_%d", i + 1);
+			char *v = xs_host_api()->conf_str(priv->kf, p->name,
+			                                  key, "");
+
+			g_free(key);
+			if (v[0]) {
+				g_free(v);
+				i++;
+				continue;
+			}
+			g_free(v);
+			break;
+		}
+		if (i < 64) {
+			char *key = g_strdup_printf("guests_%d", i + 1);
+
+			xs_host_api()->conf_set_str(priv->kf, p->name, key,
+			                            name);
+			g_free(key);
+			priv->guests = g_realloc(priv->guests,
+			                         (i + 1) * sizeof(char *));
+			priv->guests[i] = g_strdup(name);
+			priv->guest_count = i + 1;
+			xs_core_plugin_conf_flush(p->name);
+		}
+	}
+	g_free(name);
+}
+
+extern char **xs_core_list_running_daemon_instances(int *count);
+
+static void fl_add_running_clicked(GtkButton *btn, gpointer data)
+{
+	XsPlugin *p = data;
+	GtkWidget *dlg, *box, *combo;
+	char **names;
+	int n, i;
+
+	(void)btn;
+	if (!p || !p->priv)
+		return;
+	dlg = gtk_dialog_new_with_buttons("Add Running Applet to Frame",
+	                                  GTK_WINDOW(gtk_widget_get_toplevel(
+	                                      p->win)),
+	                                  GTK_DIALOG_MODAL, "Забрать в Frame",
+	                                  GTK_RESPONSE_ACCEPT, "Отмена",
+	                                  GTK_RESPONSE_CANCEL, NULL);
+	box = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+	gtk_box_pack_start(GTK_BOX(box),
+	                   gtk_label_new("Запущенный апплет (main_daemon):"),
+	                   FALSE, FALSE, 6);
+	combo = gtk_combo_box_text_new();
+	names = xs_core_list_running_daemon_instances(&n);
+	for (i = 0; i < n; i++)
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
+		                               names[i]);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
+	                         n > 0 ? 0 : -1);
+	g_object_set_data(G_OBJECT(dlg), "xs-combo", combo);
+	gtk_box_pack_start(GTK_BOX(box), combo, FALSE, FALSE, 6);
+	gtk_widget_show_all(dlg);
+	g_signal_connect(dlg, "response",
+	                 G_CALLBACK(fl_add_running_response), p);
+}
+
 static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 {
 	PrivData *priv;
@@ -425,6 +614,28 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 	                       "Имя темы (каталог в themes/frame_launcher)",
 	                       priv->theme);
 	g_signal_connect(w, "changed", G_CALLBACK(fl_entry_changed), p);
+
+	/* Кнопки добавления гостей */
+	{
+		GtkWidget *hb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+		GtkWidget *b1 = gtk_button_new_with_label("Add Applet");
+		GtkWidget *b2 = gtk_button_new_with_label("Add Running");
+
+		g_signal_connect(b1, "clicked",
+		                 G_CALLBACK(fl_add_applet_clicked), p);
+		g_signal_connect(b2, "clicked",
+		                 G_CALLBACK(fl_add_running_clicked), p);
+		gtk_widget_set_tooltip_text(
+		    b1, "Создать НОВЫЙ апплет выбранного типа сразу внутри "
+		        "рамки (в автостарт демона не попадает)");
+		gtk_widget_set_tooltip_text(
+		    b2, "Забрать уже запущенный апплет: он остановится в "
+		        "демоне, будет перенесён в рамку и убран из "
+		        "автостарта");
+		gtk_box_pack_start(GTK_BOX(hb), b1, TRUE, TRUE, 0);
+		gtk_box_pack_start(GTK_BOX(hb), b2, TRUE, TRUE, 0);
+		gtk_box_pack_start(GTK_BOX(page), hb, FALSE, FALSE, 4);
+	}
 
 	/* Гости: многострочное поле, имя инстанса на строку */
 	{
