@@ -3057,6 +3057,10 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                     cy = xy[1];
                 }
             }
+            /* флаг гостя ДО XReparentWindow: иначе configure-event от
+             * репарента успеет записать позицию в конфиг */
+            g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
+                              (gpointer)host->name);
             /* гость позиционируется ВНУТРИ content-зоны по своим x/y
              * (оффсеты), иначе все гости лягут в одну точку */
             XReparentWindow(gdk_x11_display_get_xdisplay(
@@ -3067,8 +3071,6 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             gs->keep_below = TRUE;
             xs_core_apply_window_flags(gs);
             /* гость больше не main_daemon: за него отвечает frame */
-            g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
-                              (gpointer)host->name);
             xs_core_guest_set_started_by(g, "plugin");
             xs_log_impl("guest '%s' re-parented into '%s' at %d,%d",
                         guest_name, host->name, cx + gs->x, cy + gs->y);
@@ -3124,6 +3126,10 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             }
         }
         if (gw && cw) {
+            /* флаг гостя ДО XReparentWindow: иначе configure-event от
+             * репарента успеет записать позицию в конфиг */
+            g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
+                              (gpointer)host->name);
             XReparentWindow(gdk_x11_display_get_xdisplay(
                                 gtk_widget_get_display(g->win)),
                             gdk_x11_window_get_xid(gw),
@@ -3132,8 +3138,6 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             /* гость всегда ниже хоста (host keep_above over guests) */
             gs->keep_below = TRUE;
             xs_core_apply_window_flags(gs);
-            g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
-                              (gpointer)host->name);
             xs_core_guest_set_started_by(g, "plugin");
         }
     }
