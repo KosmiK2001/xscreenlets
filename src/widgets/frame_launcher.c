@@ -196,9 +196,13 @@ static int fl_init(XsPlugin *p, GKeyFile *kf)
 	}
 
 	fl_load_theme(p, priv);
+	/* ВАЖНО: theme_load вызывается ДО make_window — тема закэшируется
+	 * после создания окна в fl_load_theme_after_win (см. ниже). */
 
 	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
 	                                    priv->width, priv->height);
+	/* перезагрузить тему теперь, когда окно/state существуют */
+	fl_load_theme(p, priv);
 	if (!p->win) {
 		xs_host_api()->log("frame_launcher: failed to create window");
 		g_free(priv->theme);

@@ -2347,6 +2347,10 @@ static gboolean theme_load(XsPlugin *p, const char *dir)
 
     if (!p || !dir)
         return FALSE;
+    /* окно может быть ещё не создано (плагин грузит тему в init до
+     * make_window) — тему кэшируем без state */
+    if (!p->win || !G_IS_OBJECT(p->win))
+        return FALSE;
     state = g_object_get_data(G_OBJECT(p->win), "xs-state");
     if (!state)
         return FALSE;
