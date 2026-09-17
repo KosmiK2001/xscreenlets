@@ -1,3 +1,6 @@
+#include <unistd.h> /* symlink, unlink, rmdir */
+#include <stdio.h>  /* remove */
+
 #include "common.h"
 #include "tray.h"
 
@@ -16,6 +19,11 @@ static gboolean g_debug = FALSE;
 /* Плагин-конфиги: name -> GKeyFile* (лениво, файл plugins/<name>.conf) */
 static GHashTable *g_plugin_confs;
 static char *g_plugin_conf_dir;
+/* Каталог symlink'ов включённых конфигов (plugins_on; только для демона) */
+static char *g_plugin_onoff_dir;
+
+static void xs_short_uuid(char buf[9]);
+static void xs_core_migrate_legacy_configs(const char *legacy_dir);
 
 static void xs_theme_free(XsTheme *theme)
 {
@@ -91,8 +99,121 @@ void xs_core_init(const char *conf_path)
         g_plugin_conf_dir = g_build_filename(g_path_get_dirname(g_conf_path),
                                              "plugins", NULL);
     }
-    g_mkdir_with_parents(g_plugin_conf_dir, 0700);
+    /* Схема мультиинстанс-конфигов:
+     *  .plugins/   — реальные конфиги всех инстансов (плагины пишут сюда)
+     *  plugins/    — совместимость: миграция старых конфигов, потом удаляется
+     *  plugins_on/ — symlink'и включённых конфигов (только для демона)
+     * Демон запускает только те конфиги, чьи symlink'и лежат в plugins_on. */
+    {
+        char *dotdir = g_build_filename(g_path_get_dirname(g_conf_path),
+                                        ".plugins", NULL);
+        char *onoffdir = g_build_filename(g_path_get_dirname(g_conf_path),
+                                          "plugins_on", NULL);
+        char *legacy = g_build_filename(g_path_get_dirname(g_conf_path),
+                                        "plugins", NULL);
+
+        g_free(g_plugin_conf_dir);
+        g_plugin_conf_dir = dotdir;   /* реальные конфиги */
+        g_plugin_onoff_dir = onoffdir;
+        g_mkdir_with_parents(dotdir, 0700);
+        g_mkdir_with_parents(onoffdir, 0700);
+        /* Миграция: если plugins/*.conf ещё есть (настоящие файлы) —
+         * переносим в .plugins, а сам plugins/ оставляем только если это
+         * НЕ каталог symlink'ов. */
+        xs_core_migrate_legacy_configs(legacy);
+        g_free(legacy);
+    }
     g_plugins = g_ptr_array_new();
+}
+
+/* Миграция старой схемы: plugins/*.conf (реальные файлы) → переименовать
+ * в тип-UUID-user_label, секцию внутри привести к имени файла, добавить
+ * user_label, перенести в .plugins, создать symlink в plugins_on.
+ * Вызывается один раз при старте демона. */
+static void xs_core_migrate_legacy_configs(const char *legacy_dir)
+{
+    GDir *d;
+    const char *fn;
+
+    if (!legacy_dir)
+        return;
+    d = g_dir_open(legacy_dir, 0, NULL);
+    if (!d)
+        return;
+    while ((fn = g_dir_read_name(d)) != NULL) {
+        char *path;
+        char *base;
+        char *newbase, *newpath;
+        GKeyFile *kf;
+        char *sec = NULL, uuid[9], *lab = NULL, *data;
+        gsize len;
+        char *dotpath, *linkpath, *target;
+        gchar **keys = NULL;
+        gsize nkeys = 0;
+        GKeyFile *nk;
+
+        if (!g_str_has_suffix(fn, ".conf"))
+            continue;
+        path = g_build_filename(legacy_dir, fn, NULL);
+        if (g_file_test(path, G_FILE_TEST_IS_SYMLINK) ||
+            !g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+            g_free(path);
+            continue; /* symlink (не наш случай) — не трогаем */
+        }
+        base = g_strndup(fn, strlen(fn) - 5); /* без .conf */
+        kf = g_key_file_new();
+        g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL);
+        lab = g_key_file_get_string(kf, base, "user_label", NULL);
+        if (!lab || !lab[0]) {
+            g_free(lab);
+            lab = g_strdup("blank_label");
+        }
+        xs_short_uuid(uuid);
+        newbase = g_strdup_printf("%s-%s-%s", base, uuid, lab);
+        nk = g_key_file_new();
+        if (g_key_file_has_group(kf, base))
+            keys = g_key_file_get_keys(kf, base, &nkeys, NULL);
+        if (keys) {
+            for (gsize i = 0; i < nkeys; i++) {
+                char *v = g_key_file_get_string(kf, base, keys[i], NULL);
+
+                if (v) {
+                    g_key_file_set_string(nk, newbase, keys[i], v);
+                    g_free(v);
+                }
+            }
+            g_strfreev(keys);
+        }
+        g_key_file_set_string(nk, newbase, "user_label", lab);
+        data = g_key_file_to_data(nk, &len, NULL);
+        g_key_file_free(nk);
+        g_key_file_free(kf);
+        newpath = g_build_filename(g_plugin_conf_dir, newbase, NULL);
+        g_file_set_contents(newpath, data, -1, NULL);
+        g_free(data);
+        remove(path);
+        /* symlink в plugins_on */
+        dotpath = g_path_get_dirname(g_plugin_conf_dir); /* .../xscreenlets */
+        linkpath = g_build_filename(dotpath, "plugins_on", newbase, NULL);
+        target = g_build_filename(dotpath, ".plugins", newbase, NULL);
+        unlink(linkpath);
+        if (symlink(target, linkpath) != 0)
+            xs_log_impl("migrate: symlink %s failed", linkpath);
+        xs_log_impl("migrated %s -> %s", fn, newbase);
+        g_free(target);
+        g_free(linkpath);
+        g_free(dotpath);
+        g_free(newpath);
+        g_free(newbase);
+        g_free(lab);
+        g_free(sec);
+        g_free(base);
+        g_free(path);
+    }
+    g_dir_close(d);
+    /* старый plugins/ больше не нужен: удаляем, если пуст */
+    if (rmdir(legacy_dir) == 0)
+        xs_log_impl("removed empty legacy dir %s", legacy_dir);
 }
 
 /* --- плагин-конфиги --- */
@@ -110,6 +231,51 @@ static char *xs_plugin_conf_path(const char *name)
                                   file, NULL);
     g_free(file);
     return path;
+}
+
+/* Каталог включённых конфигов (symlink'и; только для демона). */
+const char *xs_core_onoff_dir(void)
+{
+    return g_plugin_onoff_dir;
+}
+
+/* Короткий UUID (8 hex-символов) для имени инстанса. */
+static void xs_short_uuid(char buf[9])
+{
+    guint32 v[2];
+
+    for (int i = 0; i < 2; i++) {
+        v[i] = g_random_int();
+    }
+    g_snprintf(buf, 9, "%08x", (v[0] ^ v[1]) & 0xffffffffu);
+}
+
+/* Обновить symlink в plugins_on (после переименования конфига или
+ * включения инстанса). old_link = NULL → просто создать новый. */
+static void xs_onoff_relink(const char *old_name, const char *new_name)
+{
+    char *dir, *oldlink, *newlink;
+
+    if (!g_plugin_onoff_dir || !new_name || !new_name[0])
+        return;
+    dir = g_path_get_dirname(g_plugin_onoff_dir);
+    newlink = g_build_filename(g_plugin_onoff_dir, new_name, NULL);
+    unlink(newlink);
+    {
+        char *target = g_build_filename(dir, ".plugins",
+                                        new_name, NULL);
+
+        if (symlink(target, newlink) != 0)
+            xs_log_impl("symlink %s -> %s failed", newlink, target);
+        g_free(target);
+    }
+    if (old_name && old_name[0]) {
+        oldlink = g_build_filename(g_plugin_onoff_dir, old_name, NULL);
+        unlink(oldlink);
+        g_free(oldlink);
+    }
+    g_free(newlink);
+    g_free(dir);
 }
 
 GKeyFile *xs_core_plugin_conf(const char *name)
@@ -388,6 +554,25 @@ static void xs_core_prop_win_toggled(GtkToggleButton *btn, gpointer data)
     xs_core_set_win_flag(state, what, gtk_toggle_button_get_active(btn));
     xs_core_apply_window_flags(state);
     xs_core_save_window_flags(p);
+}
+
+/* Редактирование user_label (пользовательская метка инстанса). Меняет
+ * метку в конфиге; файл конфига НЕ переименовываем (имя файла =
+ * тип-UUID-label фиксируется при создании; метка живёт отдельно). */
+static void xs_core_prop_label_changed(GtkEditable *e, gpointer data)
+{
+    XsPlugin *p = data;
+    GKeyFile *kf;
+    char *txt;
+
+    if (!p || !p->name)
+        return;
+    kf = xs_core_plugin_conf(p->name);
+    txt = gtk_editable_get_chars(e, 0, -1);
+    g_key_file_set_string(kf, p->name, "user_label",
+                          (txt && txt[0]) ? txt : "blank_label");
+    g_free(txt);
+    xs_core_plugin_conf_flush(p->name);
 }
 
 /* Текущее открытое окно Properties (для восстановления keep-above после
@@ -924,6 +1109,20 @@ static void xs_core_show_properties(XsPlugin *p)
             g_object_add_weak_pointer(G_OBJECT(spin), (gpointer *)&g_props_spin_y);
         }
         row++;
+        /* User label: пользовательская метка инстанса (тип-UUID-label) */
+        {
+            char *lab = conf_str(kf, p->name, "user_label", "blank_label");
+            GtkWidget *entry = gtk_entry_new();
+
+            gtk_entry_set_text(GTK_ENTRY(entry), lab ? lab : "blank_label");
+            g_free(lab);
+            gtk_grid_attach(GTK_GRID(inner_page),
+                            gtk_label_new("User label"), 0, row, 1, 1);
+            gtk_grid_attach(GTK_GRID(inner_page), entry, 1, row, 1, 1);
+            g_signal_connect(entry, "changed",
+                             G_CALLBACK(xs_core_prop_label_changed), p);
+        }
+        row++;
         for (i = 0; i < G_N_ELEMENTS(rows); i++) {
             GtkWidget *cb = gtk_check_button_new_with_label(rows[i].label);
             gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cb),
@@ -1437,22 +1636,20 @@ const char *xs_core_plugin_type(XsPlugin *p)
 char *xs_core_next_instance_name(const char *type)
 {
     gsize i;
+    char uuid[9];
+    char *cand;
+    gboolean taken;
+    int guard = 0;
 
     if (!type || !type[0])
         return NULL;
-    for (i = 0; g_plugins && i < g_plugins->len; i++) {
-        XsPlugin *p = g_ptr_array_index(g_plugins, i);
-
-        if (p && p->name && strcmp(p->name, type) == 0)
-            break;
-    }
-    if (!g_plugins || i == g_plugins->len)
-        return g_strdup(type);
-    for (int n = 2; ; n++) {
-        char *cand = g_strdup_printf("%s-%d", type, n);
-        gboolean taken = FALSE;
-
-        for (i = 0; i < g_plugins->len; i++) {
+    /* Схема имён: тип-UUID8-user_label. user_label по умолчанию
+     * blank_label (переопределяется в конфиге секции). */
+    do {
+        xs_short_uuid(uuid);
+        cand = g_strdup_printf("%s-%s-blank_label", type, uuid);
+        taken = FALSE;
+        for (i = 0; g_plugins && i < g_plugins->len; i++) {
             XsPlugin *p = g_ptr_array_index(g_plugins, i);
 
             if (p && p->name && strcmp(p->name, cand) == 0) {
@@ -1460,10 +1657,20 @@ char *xs_core_next_instance_name(const char *type)
                 break;
             }
         }
-        if (!taken)
-            return cand;
+        if (!taken) {
+            char *path = xs_plugin_conf_path(cand);
+
+            taken = g_file_test(path, G_FILE_TEST_EXISTS);
+            g_free(path);
+        }
+        if (taken)
+            g_free(cand);
+    } while (taken && ++guard < 64);
+    if (taken) {
         g_free(cand);
+        return NULL;
     }
+    return cand;
 }
 
 /* Создать инстанс типа type. Модуль не перезагружаем: берём ops/метаданные
@@ -1526,20 +1733,94 @@ int xs_core_add_instance(const char *type)
     xs_tray_add_plugin(p);
     xs_tray_rebuild();
     xs_core_plugin_conf_flush(p->name);
+    /* Новый инстанс включён: symlink в plugins_on. */
+    xs_onoff_relink(NULL, p->name);
     xs_log_impl("added instance %s (type %s)", p->name, type);
     xs_core_save_instances();
     return 0;
 }
 
+/* Диалог «мёртвый symlink»: удалить конфиг или выбрать другой.
+ * Возвращает: 1 = удалить конфиг, 0 = указан новый конфиг (new_name
+ * заполнен), -1 = отменено/нет GTK. new_name: g_free() обязан вызвать
+ * вызывающий, если вернулся 0. */
+int xs_dead_link_dialog(GtkWindow *parent, const char *linkname,
+                        char **new_name)
+{
+    GtkWidget *dlg;
+    int res = -1;
+
+    if (!new_name)
+        return -1;
+    *new_name = NULL;
+    dlg = gtk_message_dialog_new(parent, GTK_DIALOG_MODAL,
+                                 GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
+                                 "Мёртвый symlink: %s\n\n"
+                                 "Конфиг не найден. Удалить symlink?",
+                                 linkname);
+    gtk_dialog_add_buttons(GTK_DIALOG(dlg),
+                           "Удалить", 1,
+                           "Указать другой конфиг", 2,
+                           "Отмена", 3,
+                           NULL);
+    res = gtk_dialog_run(GTK_DIALOG(dlg));
+    if (res == 2) {
+        GtkWidget *fc = gtk_file_chooser_dialog_new(
+            "Выберите конфиг в .plugins", parent,
+            GTK_FILE_CHOOSER_ACTION_OPEN, "Отмена", GTK_RESPONSE_CANCEL,
+            "Выбрать", GTK_RESPONSE_ACCEPT, NULL);
+        char *dotdir = g_path_get_dirname(g_plugin_conf_dir);
+        char *sub = g_build_filename(dotdir, ".plugins", NULL);
+
+        gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(fc), sub);
+        gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(fc), FALSE);
+        g_free(dotdir);
+        g_free(sub);
+        if (gtk_dialog_run(GTK_DIALOG(fc)) == GTK_RESPONSE_ACCEPT) {
+            char *picked = gtk_file_chooser_get_filename(
+                GTK_FILE_CHOOSER(fc));
+
+            if (picked) {
+                *new_name = g_path_get_basename(picked);
+                if (g_str_has_suffix(*new_name, ".conf")) {
+                    char *t = *new_name;
+
+                    *new_name = g_strndup(t, strlen(t) - 5);
+                    g_free(t);
+                }
+                g_free(picked);
+                res = 0;
+            }
+        }
+        gtk_widget_destroy(fc);
+    }
+    gtk_widget_destroy(dlg);
+    while (gtk_events_pending())
+        gtk_main_iteration_do(FALSE);
+    return res;
+}
+
 void xs_core_delete_instance(XsPlugin *p)
 {
+    char *name_copy;
+
     if (!p)
         return;
     xs_log_impl("deleting instance %s", p->name);
+    name_copy = g_strdup(p->name);
     xs_core_shutdown_plugin(p);
     xs_core_unregister_plugin(p);
     xs_core_free_plugin(p);
     xs_tray_rebuild();
+    /* Убрать symlink из plugins_on; конфиг в .plugins остаётся
+     * (инстанс можно снова включить, выбрав его при мёртвом symlink). */
+    if (g_plugin_onoff_dir) {
+        char *link = g_build_filename(g_plugin_onoff_dir, name_copy, NULL);
+
+        unlink(link);
+        g_free(link);
+    }
+    g_free(name_copy);
     xs_core_save_instances();
 }
 

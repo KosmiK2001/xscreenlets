@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -std=c11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0)
+CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0)
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0)
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
 LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm

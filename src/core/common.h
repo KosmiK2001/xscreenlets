@@ -88,6 +88,12 @@ void xs_core_conf_flush(void);
 /* Плагин-конфиги: ~/.config/xscreenlets/plugins/<name>.conf (секция = имя плагина) */
 GKeyFile *xs_core_plugin_conf(const char *name);
 void xs_core_plugin_conf_flush(const char *name);
+/* Каталог включённых конфигов (plugins_on); NULL до xs_core_init(). */
+const char *xs_core_onoff_dir(void);
+/* Диалог мёртвого symlink'а (определён в common.c): 1=удалить,
+ * 0=выбран другой конфиг (имя в *new_name), -1=отмена. */
+int xs_dead_link_dialog(GtkWindow *parent, const char *linkname,
+                        char **new_name);
 
 /* Регистрация плагинов */
 void xs_core_register_plugin(XsPlugin *p);

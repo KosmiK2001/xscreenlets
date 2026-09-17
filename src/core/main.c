@@ -107,6 +107,7 @@ static void load_plugin_modules(void)
         }
         if (!g_loaded_modules)
             g_loaded_modules = g_ptr_array_new();
+        lp->mod = mod; /* нужен для free_loaded_modules() */
         g_ptr_array_add(g_loaded_modules, lp);
         xs_log_impl("module %s: type '%s' ready", path, lp->desc->name);
         g_free(path);
@@ -162,42 +163,131 @@ static XsPlugin *create_instance(const char *type, const char *iname)
     return p;
 }
 
-/* Список инстансов: главный конфиг, секция [instances], ключи = имена,
- * значения = тип. Нет секции/ключа → дефолтный инстанс "type" = type
- * (обратная совместимость со старыми конфигами). */
+/* Запустить инстанс из имени конфига (после выбора в диалоге мёртвого
+ * symlink'а): тип определяем по загруженным модулям. */
+static void create_instance_from_conf(const char *iname)
+{
+    if (!g_loaded_modules || !iname)
+        return;
+    for (gsize i = 0; i < g_loaded_modules->len; i++) {
+        XsLoadedPlugin *lp = g_ptr_array_index(g_loaded_modules, i);
+        gsize tl;
+
+        if (!lp || !lp->desc || !lp->desc->name)
+            continue;
+        tl = strlen(lp->desc->name);
+        if (strncmp(iname, lp->desc->name, tl) == 0 && iname[tl] == '-') {
+            create_instance(lp->desc->name, iname);
+            xs_tray_rebuild();
+            return;
+        }
+    }
+    xs_log_impl("instance '%s': no plugin type matches", iname);
+}
+
+/* Список инстансов: каталог plugins_on (symlink'и на конфиги в .plugins).
+ * Имя инстанса = имя symlink'а без .conf, тип = часть до первого "-UUID".
+ * Мёртвые symlink'и: диалог (удалить / указать другой конфиг). */
 static void create_instances(void)
 {
-    GKeyFile *cf = xs_core_conf();
-    gchar **keys = NULL;
-    gsize n = 0;
+    const char *onoff = xs_core_onoff_dir();
+    GDir *d;
+    const char *fn;
 
-    if (g_key_file_has_group(cf, "instances"))
-        keys = g_key_file_get_keys(cf, "instances", &n, NULL);
-    if (!keys || n == 0) {
-        /* Дефолт: по одному инстансу на загруженный тип. */
+    if (!onoff) {
+        xs_tray_rebuild();
+        return;
+    }
+    d = g_dir_open(onoff, 0, NULL);
+    if (!d) {
+        xs_tray_rebuild();
+        return;
+    }
+    while ((fn = g_dir_read_name(d)) != NULL) {
+        char *linkpath, *target;
+        char *type, *iname;
+        GKeyFile *kf;
+        char *lab;
+
+        if (!g_str_has_suffix(fn, ".conf"))
+            continue;
+        linkpath = g_build_filename(onoff, fn, NULL);
+        target = g_file_read_link(linkpath, NULL);
+        if (target) {
+            /* Относительный symlink резолвим относительно каталога
+             * самого symlink'а (не CWD демона!). */
+            if (!g_path_is_absolute(target)) {
+                char *ldir = g_path_get_dirname(linkpath);
+                char *abs = g_build_filename(ldir, target, NULL);
+
+                g_free(target);
+                target = abs;
+                g_free(ldir);
+            }
+        }
+        if (!target || !g_file_test(target, G_FILE_TEST_EXISTS)) {
+            char *newname = NULL;
+            int res = xs_dead_link_dialog(NULL, fn, &newname);
+
+            if (res == 1) {
+                unlink(linkpath);
+                xs_log_impl("dead symlink removed: %s", fn);
+            } else if (res == 0 && newname && newname[0]) {
+                /* пересоздать symlink на выбранный конфиг и запустить */
+                char *target2 = g_build_filename(
+                    g_path_get_dirname(onoff), ".plugins", newname, NULL);
+
+                unlink(linkpath);
+                if (symlink(target2, linkpath) == 0)
+                    create_instance_from_conf(newname);
+                else
+                    xs_log_impl("relink %s failed", linkpath);
+                g_free(target2);
+            }
+            g_free(newname);
+            g_free(target);
+            g_free(linkpath);
+            continue;
+        }
+        g_free(target);
+        iname = g_strndup(fn, strlen(fn) - 5); /* без .conf */
+        /* тип = имя до "-UUID8-label": имя плагина <тип>-... —
+         * определяем по загруженным модулям. */
+        type = NULL;
         if (g_loaded_modules) {
             for (gsize i = 0; i < g_loaded_modules->len; i++) {
                 XsLoadedPlugin *lp = g_ptr_array_index(g_loaded_modules, i);
+                gsize tl;
 
-                create_instance(lp->desc->name, lp->desc->name);
+                if (!lp || !lp->desc || !lp->desc->name)
+                    continue;
+                tl = strlen(lp->desc->name);
+                if (strncmp(iname, lp->desc->name, tl) == 0 &&
+                    iname[tl] == '-') {
+                    type = g_strdup(lp->desc->name);
+                    break;
+                }
             }
         }
-        if (keys)
-            g_strfreev(keys);
-        return;
-    }
-    for (gsize i = 0; i < n; i++) {
-        char *type = g_key_file_get_string(cf, "instances", keys[i], NULL);
-
-        if (type && type[0])
-            create_instance(type, keys[i]);
-        else
-            create_instance(keys[i], keys[i]); /* значение пусто: имя = тип */
+        if (!type) {
+            xs_log_impl("instance '%s': no plugin type matches", iname);
+            g_free(iname);
+            g_free(linkpath);
+            continue;
+        }
+        /* user_label из конфига (не обязателен для запуска) */
+        kf = xs_core_plugin_conf(iname);
+        lab = kf ? g_key_file_get_string(kf, iname, "user_label", NULL)
+                 : NULL;
+        g_free(lab);
+        create_instance(type, iname);
         g_free(type);
+        g_free(iname);
+        g_free(linkpath);
     }
-    g_strfreev(keys);
-    /* Собрать меню трея целиком (Launch Applet, Restart, Quit...):
-     * чекбоксы выше добавлены по одному, core-пункты добавляет rebuild. */
+    g_dir_close(d);
+    /* Собрать меню трея целиком (Launch Applet, Running Instances,
+     * Restart, Quit...). */
     xs_tray_rebuild();
 }
 
