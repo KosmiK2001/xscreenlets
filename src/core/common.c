@@ -729,35 +729,43 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
         g_key_file_load_from_file(kf, newpath, G_KEY_FILE_NONE, NULL);
         g_hash_table_insert(g_plugin_confs, g_strdup(newname), kf);
     }
-    /* 4) symlink в plugins_on: единый формат имени (с .conf).
-     * Целевой файл = .plugins/<newname>.conf, ссылка = <newname>.conf. */
-    if (g_plugin_onoff_dir) {
-        char *newname_conf = g_strdup_printf("%s.conf", newname);
-        char *oldname_conf = g_strdup_printf("%s.conf", p->name);
+    /* 4) symlink в plugins_on: только для main_daemon-инстансов.
+     * Гость рамки (xs-guest-host) symlink не имеет/не создаёт:
+     * запускает его хозяин, а не демон. При этом мусорные ссылки
+     * (старые форматы) подчищаются в любом случае. */
+    {
+        gboolean is_guest = g_object_get_data(G_OBJECT(p->win),
+                                              "xs-guest-host") != NULL;
 
-        oldlink = g_build_filename(g_plugin_onoff_dir, oldname_conf,
-                                   NULL);
-        link = g_build_filename(g_plugin_onoff_dir, newname_conf, NULL);
-        target = g_build_filename(
-            g_path_get_dirname(g_plugin_onoff_dir), ".plugins",
-            newname_conf, NULL);
-        unlink(link);
-        if (symlink(target, link) != 0)
-            xs_log_impl("rename: symlink %s failed", link);
-        unlink(oldlink);
-        /* мусорные варианты без .conf из прошлых версий */
-        {
-            char *junk = g_build_filename(g_plugin_onoff_dir, newname,
-                                          NULL);
+        if (g_plugin_onoff_dir) {
+            char *newname_conf = g_strdup_printf("%s.conf", newname);
+            char *oldname_conf = g_strdup_printf("%s.conf", p->name);
 
-            unlink(junk);
-            g_free(junk);
+            oldlink = g_build_filename(g_plugin_onoff_dir,
+                                       oldname_conf, NULL);
+            link = g_build_filename(g_plugin_onoff_dir,
+                                    newname_conf, NULL);
+            target = g_build_filename(
+                g_path_get_dirname(g_plugin_onoff_dir), ".plugins",
+                newname_conf, NULL);
+            unlink(link);
+            if (!is_guest && symlink(target, link) != 0)
+                xs_log_impl("rename: symlink %s failed", link);
+            unlink(oldlink);
+            /* мусорные варианты без .conf из прошлых версий */
+            {
+                char *junk = g_build_filename(g_plugin_onoff_dir,
+                                              newname, NULL);
+
+                unlink(junk);
+                g_free(junk);
+            }
+            g_free(oldname_conf);
+            g_free(newname_conf);
+            g_free(oldlink);
+            g_free(link);
+            g_free(target);
         }
-        g_free(oldname_conf);
-        g_free(newname_conf);
-        g_free(oldlink);
-        g_free(link);
-        g_free(target);
     }
     /* 5) имя инстанса на живом объекте */
     /* Кэш-запись под старым именем больше не нужна (ключ уже перенаправлен
