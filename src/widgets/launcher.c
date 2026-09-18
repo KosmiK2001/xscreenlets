@@ -78,11 +78,13 @@ static void launcher_leave(XsPlugin *p)
  *  - end_size = WxH: конечный размер изображения В ПИКСЕЛЯХ,
  *    масштаб = end_size / natural. Если end_size не задан —
  *    работает scale (с сотыми долями: шаг 0.01). */
-static GdkPixbuf *launcher_render_buffer(PrivData *priv, int target_w,
-                                         int target_h)
+static cairo_surface_t *launcher_render_buffer(PrivData *priv,
+                                               int target_w,
+                                               int target_h)
 {
 	GdkPixbuf *full = NULL;
 	GdkPixbuf *scaled = NULL;
+	cairo_surface_t *surf = NULL;
 	GError *err = NULL;
 
 	if (!priv->icon_path || !priv->icon_path[0])
@@ -127,10 +129,8 @@ static GdkPixbuf *launcher_render_buffer(PrivData *priv, int target_w,
 		vp.width = target_w; vp.height = target_h;
 		rsvg_handle_render_document(svg, tcr, &vp, NULL);
 		cairo_destroy(tcr);
-		scaled = gdk_pixbuf_get_from_surface(surf, 0, 0,
-		                                     target_w, target_h);
-		cairo_surface_destroy(surf);
 		g_object_unref(svg);
+		return surf;
 	} else {
 		/* растр: загрузка full → scale */
 		full = gdk_pixbuf_new_from_file(priv->icon_path, &err);
@@ -150,11 +150,22 @@ static GdkPixbuf *launcher_render_buffer(PrivData *priv, int target_w,
 		                 priv->scale);
 		if (target_w < 1) target_w = 1;
 		if (target_h < 1) target_h = 1;
-		scaled = gdk_pixbuf_scale_simple(full, target_w, target_h,
-		                                 GDK_INTERP_BILINEAR);
+		{
+			cairo_surface_t *s = cairo_image_surface_create(
+			    CAIRO_FORMAT_ARGB32, target_w, target_h);
+			cairo_t *tcr = cairo_create(s);
+
+			gdk_cairo_set_source_pixbuf(tcr, scaled, 0, 0);
+			cairo_set_operator(tcr, CAIRO_OPERATOR_SOURCE);
+			cairo_paint(tcr);
+			cairo_destroy(tcr);
+			g_object_unref(scaled);
+			g_object_unref(full);
+			return s;
+		}
 		g_object_unref(full);
 	}
-	return scaled;
+	return NULL;
 }
 
 /* дефолт: иконка из каталога оригинального плагина */
@@ -418,15 +429,11 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 	 * рестарте окно ровно такое, каким юзер его оставил.
 	 * Файл на старте НЕ читается — картинка строится в draw. */
 	{
-		int ww = xs_host_api()->conf_int(kf, p->name, "win_w", 0);
-		int wh = xs_host_api()->conf_int(kf, p->name, "win_h", 0);
 		int w, h;
 
+		/* окно = natural×scale (или end_size): никаких legacy
+		 * win_w/h — при смене иконки/масштаба размер честный */
 		launcher_target_size(priv, &w, &h);
-		if (ww >= 8 && wh >= 8) {
-			w = ww;
-			h = wh;
-		}
 		priv->win_w = w;
 		priv->win_h = h;
 		p->win = xs_host_api()->make_window(p, priv->x, priv->y,
@@ -471,30 +478,32 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	/* Буфер строится на время отрисовки и сразу сбрасывается:
 	 * файл перечитывается на каждом draw (дёшево: раз в сек/сек10) */
 	{
-		GdkPixbuf *buf = launcher_render_buffer(priv, w, h);
+		cairo_surface_t *buf = launcher_render_buffer(priv, w, h);
 
 		if (buf) {
-			gdk_cairo_set_source_pixbuf(cr, buf, 0, 0);
+			cairo_set_source_surface(cr, buf, 0, 0);
 			cairo_paint(cr);
-			g_object_unref(buf);
+			/* hover/glow — МАСКОЙ по альфе иконки:
+			 * подсвечивается сама иконка, не квадрат окна */
+			if (priv->hovered) {
+				cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+				cairo_push_group(cr);
+				cairo_set_source_rgba(cr, 1.0, 1.0, 1.0,
+				                      0.35);
+				cairo_paint(cr);
+				cairo_pop_group_to_source(cr);
+				cairo_mask_surface(cr, buf, 0, 0);
+			}
+			if (priv->click_glow > 0.0) {
+				cairo_push_group(cr);
+				cairo_set_source_rgba(cr, 1.0, 0.85, 0.3,
+				                      0.7 * priv->click_glow);
+				cairo_paint(cr);
+				cairo_pop_group_to_source(cr);
+				cairo_mask_surface(cr, buf, 0, 0);
+			}
+			cairo_surface_destroy(buf);
 		}
-	}
-	/* hover: мягкая светлая вуаль поверх иконки */
-	if (priv->hovered) {
-		cairo_save(cr);
-		cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.18);
-		cairo_rectangle(cr, 0, 0, w, h);
-		cairo_fill(cr);
-		cairo_restore(cr);
-	}
-	/* click glow: тёплая вспышка «что-то запустилось» */
-	if (priv->click_glow > 0.0) {
-		cairo_save(cr);
-		cairo_set_source_rgba(cr, 1.0, 0.85, 0.3,
-		                      0.45 * priv->click_glow);
-		cairo_rectangle(cr, 0, 0, w, h);
-		cairo_fill(cr);
-		cairo_restore(cr);
 	}
 }
 
