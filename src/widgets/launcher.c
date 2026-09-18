@@ -97,8 +97,6 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 	    g_str_has_suffix(priv->icon_path, ".SVG")) {
 		RsvgHandle *svg = rsvg_handle_new_from_file(
 		    priv->icon_path, &err);
-		double nat_w = target_w, nat_h = target_h;
-		RsvgDimensionData dim = {0};
 		cairo_surface_t *surf;
 		cairo_t *tcr;
 		RsvgRectangle vp;
@@ -108,21 +106,8 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 				g_error_free(err);
 			return NULL;
 		}
-		/* natural для расчёта масштаба end_size/scale */
-		rsvg_handle_get_dimensions(svg, &dim);
-		if (dim.width > 0 && dim.height > 0) {
-			nat_w = dim.width;
-			nat_h = dim.height;
-		}
-		/* итог = (end_size по оси, иначе natural) × scale */
-		target_w = (int)((priv->end_size_w > 0
-		                      ? priv->end_size_w : nat_w) *
-		                 priv->scale);
-		target_h = (int)((priv->end_size_h > 0
-		                      ? priv->end_size_h : nat_h) *
-		                 priv->scale);
-		if (target_w < 1) target_w = 1;
-		if (target_h < 1) target_h = 1;
+		/* буфер = РОВНО размер окна (w×h уже рассчитан с учётом
+		 * end_size/scale в launcher_target_size) */
 		surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
 		                                  target_w, target_h);
 		tcr = cairo_create(surf);
@@ -140,37 +125,18 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 				g_error_free(err);
 			return NULL;
 		}
-		/* итог = (end_size по оси, иначе natural) × scale */
-		target_w = (int)((priv->end_size_w > 0
-		                      ? priv->end_size_w
-		                      : gdk_pixbuf_get_width(full)) *
-		                 priv->scale);
-		target_h = (int)((priv->end_size_h > 0
-		                      ? priv->end_size_h
-		                      : gdk_pixbuf_get_height(full)) *
-		                 priv->scale);
-		if (target_w < 1) target_w = 1;
-		if (target_h < 1) target_h = 1;
 		{
 			cairo_surface_t *s = cairo_image_surface_create(
 			    CAIRO_FORMAT_ARGB32, target_w, target_h);
 			cairo_t *tcr = cairo_create(s);
 
+			scaled = gdk_pixbuf_scale_simple(
+			    full, target_w, target_h, GDK_INTERP_BILINEAR);
 			if (scaled) {
 				gdk_cairo_set_source_pixbuf(tcr, scaled,
 				                            0, 0);
 				cairo_paint(tcr);
-			} else {
-				/* fallback: scale_simple NULL на мелких
-				 * размерах — растягиваем full сами */
-				gdk_cairo_set_source_pixbuf(tcr, full,
-				                            0, 0);
-				cairo_scale(tcr,
-				            (double)target_w /
-				                gdk_pixbuf_get_width(full),
-				            (double)target_h /
-				                gdk_pixbuf_get_height(full));
-				cairo_paint(tcr);
+				g_object_unref(scaled);
 			}
 			cairo_destroy(tcr);
 			g_object_unref(full);
