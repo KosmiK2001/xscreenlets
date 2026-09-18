@@ -1439,12 +1439,24 @@ static void xs_core_show_properties(XsPlugin *p)
         gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Scale"),
                         0, row, 1, 1);
         {
-            /* сотые доли масштаба: шаг 0.01, клавиши/кнопки 0.01|0.1 */
-            GtkAdjustment *adj = gtk_adjustment_new(
-                conf_dbl(kf, p->name, "scale", 1.0), 0.01, 10.0,
-                0.01, 0.1, 0.0);
-            GtkWidget *spin = gtk_spin_button_new(adj, 0.01, 2);
+            /* сотые доли масштаба: шаг 0.01, клавиши/кнопки 0.01|0.1.
+             * Для гостей frame_launcher в mode=end_size Scale спиннер
+             * глушится (он всё равно не влияет на размер). */
+            double cur_scale = conf_dbl(kf, p->name, "scale", 1.0);
+            const char *smode = conf_str(kf, p->name, "scale_mode",
+                                         NULL);
+            GtkWidget *spin;
+            GtkAdjustment *adj = gtk_adjustment_new(cur_scale, 0.01,
+                                                    10.0, 0.01, 0.1, 0.0);
+
+            spin = gtk_spin_button_new(adj, 0.01, 2);
             gtk_spin_button_set_digits(GTK_SPIN_BUTTON(spin), 2);
+            if (smode && strcmp(smode, "end_size") == 0) {
+                gtk_widget_set_sensitive(spin, FALSE);
+                gtk_widget_set_tooltip_text(
+                    spin, "Размер задаётся End width/height "
+                          "(Resize mode = end_size)");
+            }
             gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
             g_signal_connect(spin, "value-changed",
                              G_CALLBACK(xs_core_prop_scale_changed), p);
