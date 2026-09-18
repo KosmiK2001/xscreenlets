@@ -499,8 +499,20 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 		cairo_surface_t *buf = launcher_render_buffer(priv, w, h);
 
 		if (buf) {
+			int bw = cairo_image_surface_get_width(buf);
+			int bh = cairo_image_surface_get_height(buf);
+
+			/* ГАРАНТИЯ вписывания: буфер рисуется всегда
+			 * растянутым ровно в текущее окно (w×h), что бы
+			 * ни произошло с размерами — «обрез» исключён */
+			cairo_save(cr);
 			cairo_set_source_surface(cr, buf, 0, 0);
+			if (bw != w || bh != h)
+				cairo_scale(cr,
+				            (double)w / (bw > 0 ? bw : 1),
+				            (double)h / (bh > 0 ? bh : 1));
 			cairo_paint(cr);
+			cairo_restore(cr);
 			/* hover/glow — МАСКОЙ по альфе иконки:
 			 * подсвечивается сама иконка, не квадрат окна */
 			if (priv->hovered) {
@@ -510,7 +522,12 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 				                      0.35);
 				cairo_paint(cr);
 				cairo_pop_group_to_source(cr);
+				cairo_save(cr);
+				cairo_scale(cr,
+				            (double)w / (bw > 0 ? bw : 1),
+				            (double)h / (bh > 0 ? bh : 1));
 				cairo_mask_surface(cr, buf, 0, 0);
+				cairo_restore(cr);
 			}
 			if (priv->click_glow > 0.0) {
 				cairo_push_group(cr);
@@ -518,7 +535,12 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 				                      0.7 * priv->click_glow);
 				cairo_paint(cr);
 				cairo_pop_group_to_source(cr);
+				cairo_save(cr);
+				cairo_scale(cr,
+				            (double)w / (bw > 0 ? bw : 1),
+				            (double)h / (bh > 0 ? bh : 1));
 				cairo_mask_surface(cr, buf, 0, 0);
+				cairo_restore(cr);
 			}
 			cairo_surface_destroy(buf);
 		}
