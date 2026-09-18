@@ -124,6 +124,12 @@ static void launcher_apply_icon(XsPlugin *p, PrivData *priv)
 
 	if (w < 8) w = 8;
 	if (h < 8) h = 8;
+	/* запомнить ИТОГОВЫЙ размер окна: при рестарте окно должно
+	 * встать ровно таким, каким юзер его оставил (natural-размер
+	 * SVG между запусками может считаться по-разному) */
+	g_key_file_set_integer(priv->kf, p->name, "win_w", w);
+	g_key_file_set_integer(priv->kf, p->name, "win_h", h);
+	xs_core_plugin_conf_flush(p->name);
 	if (p->win)
 		xs_host_api()->resize(p, w, h);
 	if (p->win)
@@ -324,10 +330,24 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 		xs_host_api()->conf_set_int(kf, p->name, "icon_h",
 		                            priv->icon_h);
 	}
+	/* ИТОГОВЫЙ размер окна из конфига (win_w/win_h пишет
+	 * launcher_apply_icon при каждой смене scale/иконки): при
+	 * рестарте окно ровно такое, каким юзер его оставил. */
+	{
+		int ww = xs_host_api()->conf_int(kf, p->name, "win_w", 0);
+		int wh = xs_host_api()->conf_int(kf, p->name, "win_h", 0);
+		int w = (int)(priv->icon_w * priv->scale);
+		int h = (int)(priv->icon_h * priv->scale);
 
-	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
-	                                    (int)(priv->icon_w * priv->scale),
-	                                    (int)(priv->icon_h * priv->scale));
+		if (w < 8) w = 8;
+		if (h < 8) h = 8;
+		if (ww >= 8 && wh >= 8) {
+			w = ww;
+			h = wh;
+		}
+		p->win = xs_host_api()->make_window(p, priv->x, priv->y,
+		                                    w, h);
+	}
 	if (!p->win) {
 		p->host->log("launcher: failed to create window");
 		launcher_clear_icon(priv);
@@ -374,9 +394,17 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 		cairo_paint(cr);
 		cairo_restore(cr);
 	} else if (priv->svg) {
-		RsvgRectangle viewport = { 0, 0, w, h };
+		/* ВПИСЫВАТЬ весь viewBox в окно: render_document без
+		 * явного scale у SVG без width/height рисует в natural
+		 * размере (виден только уголок). Явный scale по осям. */
+		double nw = priv->icon_w > 0 ? priv->icon_w : w;
+		double nh = priv->icon_h > 0 ? priv->icon_h : h;
+		RsvgRectangle viewport = { 0, 0, nw, nh };
 
+		cairo_save(cr);
+		cairo_scale(cr, (double)w / nw, (double)h / nh);
 		rsvg_handle_render_document(priv->svg, cr, &viewport, NULL);
+		cairo_restore(cr);
 	}
 }
 
