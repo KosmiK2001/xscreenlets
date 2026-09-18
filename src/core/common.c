@@ -3539,17 +3539,41 @@ static void host_update_guest_backdrop(XsPlugin *host, XsPlugin *g)
 {
     XsWinState *gs;
     cairo_surface_t *snap;
+    gint *xy;
 
     if (!host || !host->win || !g || !g->win)
         return;
     gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
     if (!gs)
         return;
+    xy = host->win ? g_object_get_data(G_OBJECT(host->win),
+                                       "xs-content-xy") : NULL;
+    /* КЛАМП oversized гостя: окно не должно вылезать в кайму */
+    {
+        XsWinState *hs = g_object_get_data(G_OBJECT(host->win),
+                                           "xs-state");
+        int gw = 0, gh = 0, max_x, max_y;
+        gboolean clamped = FALSE;
+
+        if (hs) {
+            gtk_window_get_size(GTK_WINDOW(g->win), &gw, &gh);
+            max_x = hs->w - (xy ? 2 * xy[0] : 0) - gw;
+            max_y = hs->h - (xy ? 2 * xy[1] : 0) - gh;
+            if (max_x < 0) max_x = 0;
+            if (max_y < 0) max_y = 0;
+            if (gs->x > max_x) { gs->x = max_x; clamped = TRUE; }
+            if (gs->y > max_y) { gs->y = max_y; clamped = TRUE; }
+            if (gs->x < 0) { gs->x = 0; clamped = TRUE; }
+            if (gs->y < 0) { gs->y = 0; clamped = TRUE; }
+            if (clamped)
+                gtk_window_move(GTK_WINDOW(g->win),
+                                (xy ? xy[0] : 0) + gs->x,
+                                (xy ? xy[1] : 0) + gs->y);
+        }
+    }
     /* снимок куска кадра ХОСТА там, где физически лежит окно гостя:
      * его позиция в координатах родителя = content_xy + state->x/y */
     {
-        gint *xy = host->win ? g_object_get_data(
-            G_OBJECT(host->win), "xs-content-xy") : NULL;
         int ox = xy ? xy[0] : 0;
         int oy = xy ? xy[1] : 0;
 

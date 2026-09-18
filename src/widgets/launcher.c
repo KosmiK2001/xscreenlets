@@ -28,7 +28,7 @@ typedef struct {
 	guint glow_id;          /* таймер затухания вспышки */
 } PrivData;
 
-/* затухание вспышки клика: 40 мс шаг, ~0.4 сек */
+/* затухание вспышки клика: 50 мс шаг, ровно 1 сек */
 static gboolean launcher_glow_tick(gpointer data)
 {
 	XsPlugin *p = data;
@@ -36,7 +36,7 @@ static gboolean launcher_glow_tick(gpointer data)
 
 	if (!priv)
 		return G_SOURCE_REMOVE;
-	priv->click_glow -= 0.1;
+	priv->click_glow -= 0.05;
 	if (priv->click_glow <= 0.0) {
 		priv->click_glow = 0.0;
 		priv->glow_id = 0;
@@ -537,7 +537,7 @@ static void launcher_start_glow(XsPlugin *p)
 		return;
 	priv->click_glow = 1.0;
 	if (!priv->glow_id)
-		priv->glow_id = g_timeout_add(40, launcher_glow_tick, p);
+		priv->glow_id = g_timeout_add(50, launcher_glow_tick, p);
 	if (p->win)
 		gtk_widget_queue_draw(p->win);
 }
@@ -776,12 +776,17 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 		    ew, "Конечная ширина картинки в px (mode=end_size)");
 		gtk_widget_set_tooltip_text(
 		    eh, "Конечная высота картинки в px (mode=end_size)");
-		lbl_w = gtk_label_new("End width");
-		lbl_h = gtk_label_new("End height");
-		gtk_grid_attach(GTK_GRID(page), lbl_w, 0, 100, 1, 1);
-		gtk_grid_attach(GTK_GRID(page), ew, 1, 100, 1, 1);
-		gtk_grid_attach(GTK_GRID(page), lbl_h, 0, 101, 1, 1);
-		gtk_grid_attach(GTK_GRID(page), eh, 1, 101, 1, 1);
+		{
+			GtkWidget *hbx = gtk_box_new(
+			    GTK_ORIENTATION_HORIZONTAL, 4);
+
+			gtk_box_pack_start(GTK_BOX(hbx), ew, TRUE, TRUE, 0);
+			gtk_box_pack_start(GTK_BOX(hbx), eh, TRUE, TRUE, 0);
+			xs_prop_add_row(GTK_BOX(page), "End size (px)",
+			                "Жёсткий размер картинки "
+			                "(mode=end_size)",
+			                hbx);
+		}
 		g_object_set_data_full(G_OBJECT(ew), "xs-key",
 		                       g_strdup("end_size_w"), g_free);
 		g_object_set_data_full(G_OBJECT(eh), "xs-key",
@@ -790,7 +795,6 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 		                 G_CALLBACK(fl_end_size_changed), p);
 		g_signal_connect(eh, "value-changed",
 		                 G_CALLBACK(fl_end_size_changed), p);
-		(void)hbx;
 	}
 
 	gtk_widget_show_all(page);
