@@ -1439,9 +1439,12 @@ static void xs_core_show_properties(XsPlugin *p)
         gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Scale"),
                         0, row, 1, 1);
         {
+            /* сотые доли масштаба: шаг 0.01, клавиши/кнопки 0.01|0.1 */
             GtkAdjustment *adj = gtk_adjustment_new(
-                conf_dbl(kf, p->name, "scale", 1.0), 0.2, 10.0, 0.1, 0.5, 0.0);
-            GtkWidget *spin = gtk_spin_button_new(adj, 0.1, 2);
+                conf_dbl(kf, p->name, "scale", 1.0), 0.01, 10.0,
+                0.01, 0.1, 0.0);
+            GtkWidget *spin = gtk_spin_button_new(adj, 0.01, 2);
+            gtk_spin_button_set_digits(GTK_SPIN_BUTTON(spin), 2);
             gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
             g_signal_connect(spin, "value-changed",
                              G_CALLBACK(xs_core_prop_scale_changed), p);

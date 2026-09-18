@@ -20,67 +20,109 @@ typedef struct {
 	char *action;           /* shell-команда */
 	char *icon_path;        /* файл иконки (svg/png/...) */
 	char *label;            /* tooltip/подпись */
-	/* загруженная иконка: либо svg, либо pixbuf */
-	RsvgHandle *svg;
-	GdkPixbuf *pixbuf;
-	int icon_w, icon_h;
+	int end_size_w, end_size_h; /* end_size: конечный размер px */
+	int win_w, win_h;       /* итоговый размер окна (память) */
 } PrivData;
 
 /* ---------- иконка ---------- */
 
 static void launcher_clear_icon(PrivData *priv)
 {
-	g_clear_object(&priv->svg);
-	g_clear_object(&priv->pixbuf);
-	priv->icon_w = 32;
-	priv->icon_h = 32;
+	/* картинка больше не держится в памяти: буфер строится на
+	 * время отрисовки и сбрасывается (см. launcher_render_buffer) */
+	(void)priv;
 }
 
-static gboolean launcher_load_icon(PrivData *priv, const char *path)
+/* Новая логика картинки-отрисовка:
+ *  - при ЗАПУСКЕ изображение НЕ грузится вовсе (быстрый старт,
+ *    ноль памяти на картинки);
+ *  - буфер (pixbuf нужного размера) строится ТОЛЬКО на время
+ *    отрисовки кадра: файл читается → ресайз до целевого окна →
+ *    нарисовано → буфер сброшен (кэш на время одного draw);
+ *  - перечитывание при манипуляциях в Properties — тем же путём
+ *    (каждый draw перечитывает), плюс предпросмотр в диалоге.
+ *  - end_size = WxH: конечный размер изображения В ПИКСЕЛЯХ,
+ *    масштаб = end_size / natural. Если end_size не задан —
+ *    работает scale (с сотыми долями: шаг 0.01). */
+static GdkPixbuf *launcher_render_buffer(PrivData *priv, int target_w,
+                                         int target_h)
 {
+	GdkPixbuf *full = NULL;
+	GdkPixbuf *scaled = NULL;
 	GError *err = NULL;
 
-	launcher_clear_icon(priv);
-	if (!path || !path[0])
-		return FALSE;
+	if (!priv->icon_path || !priv->icon_path[0])
+		return NULL;
+	if (target_w < 1) target_w = 1;
+	if (target_h < 1) target_h = 1;
 
-	if (g_str_has_suffix(path, ".svg") || g_str_has_suffix(path, ".SVG")) {
-		priv->svg = rsvg_handle_new_from_file(path, &err);
-		if (priv->svg) {
-			gdouble out_w = 0, out_h = 0;
+	if (g_str_has_suffix(priv->icon_path, ".svg") ||
+	    g_str_has_suffix(priv->icon_path, ".SVG")) {
+		RsvgHandle *svg = rsvg_handle_new_from_file(
+		    priv->icon_path, &err);
+		double nat_w = target_w, nat_h = target_h;
+		RsvgDimensionData dim = {0};
+		cairo_surface_t *surf;
+		cairo_t *tcr;
+		RsvgRectangle vp;
 
-			if (rsvg_handle_get_intrinsic_size_in_pixels(priv->svg,
-			                                             &out_w, &out_h) &&
-			    out_w > 0 && out_h > 0) {
-				priv->icon_w = (int)out_w;
-				priv->icon_h = (int)out_h;
-			} else {
-				/* Нет width/height в px (только viewBox):
-				 * natural-размер = размер viewBox, иначе
-				 * между запусками icon_w «прыгает» и
-				 * масштаб слетает. */
-				RsvgDimensionData dim;
-
-				rsvg_handle_get_dimensions(priv->svg, &dim);
-				if (dim.width > 0 && dim.height > 0) {
-					priv->icon_w = dim.width;
-					priv->icon_h = dim.height;
-				}
-			}
+		if (!svg) {
+			if (err)
+				g_error_free(err);
+			return NULL;
 		}
+		/* natural для расчёта масштаба end_size/scale */
+		rsvg_handle_get_dimensions(svg, &dim);
+		if (dim.width > 0 && dim.height > 0) {
+			nat_w = dim.width;
+			nat_h = dim.height;
+		}
+		if (priv->end_size_w > 0) {
+			target_w = priv->end_size_w;
+			target_h = priv->end_size_h > 0
+			               ? priv->end_size_h : target_w;
+		} else {
+			target_w = (int)(nat_w * priv->scale);
+			target_h = (int)(nat_h * priv->scale);
+		}
+		if (target_w < 1) target_w = 1;
+		if (target_h < 1) target_h = 1;
+		surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+		                                  target_w, target_h);
+		tcr = cairo_create(surf);
+		vp.x = 0; vp.y = 0;
+		vp.width = target_w; vp.height = target_h;
+		rsvg_handle_render_document(svg, tcr, &vp, NULL);
+		cairo_destroy(tcr);
+		scaled = gdk_pixbuf_get_from_surface(surf, 0, 0,
+		                                     target_w, target_h);
+		cairo_surface_destroy(surf);
+		g_object_unref(svg);
 	} else {
-		priv->pixbuf = gdk_pixbuf_new_from_file(path, &err);
-		if (priv->pixbuf) {
-			priv->icon_w = gdk_pixbuf_get_width(priv->pixbuf);
-			priv->icon_h = gdk_pixbuf_get_height(priv->pixbuf);
+		/* растр: загрузка full → scale */
+		full = gdk_pixbuf_new_from_file(priv->icon_path, &err);
+		if (!full) {
+			if (err)
+				g_error_free(err);
+			return NULL;
 		}
+		if (priv->end_size_w > 0) {
+			target_w = priv->end_size_w;
+			target_h = priv->end_size_h > 0
+			               ? priv->end_size_h : target_w;
+		} else {
+			target_w = (int)(gdk_pixbuf_get_width(full) *
+			                 priv->scale);
+			target_h = (int)(gdk_pixbuf_get_height(full) *
+			                 priv->scale);
+		}
+		if (target_w < 1) target_w = 1;
+		if (target_h < 1) target_h = 1;
+		scaled = gdk_pixbuf_scale_simple(full, target_w, target_h,
+		                                 GDK_INTERP_BILINEAR);
+		g_object_unref(full);
 	}
-	if (!priv->svg && !priv->pixbuf) {
-		if (err)
-			g_error_free(err);
-		return FALSE;
-	}
-	return TRUE;
+	return scaled;
 }
 
 /* дефолт: иконка из каталога оригинального плагина */
@@ -117,16 +159,57 @@ static void launcher_launch(PrivData *priv)
 
 /* ---------- конфиг ---------- */
 
+/* Итоговый размер изображения (px): end_size имеет приоритет,
+ * иначе natural × scale. Natural берётся из файла (только для
+ * расчёта — файл читается в launcher_render_buffer на draw). */
+static void launcher_target_size(PrivData *priv, int *tw, int *th)
+{
+	double nw = 0, nh = 0;
+	GdkPixbuf *probe;
+	GError *err = NULL;
+
+	if (priv->end_size_w > 0) {
+		*tw = priv->end_size_w;
+		*th = priv->end_size_h > 0 ? priv->end_size_h
+		                           : priv->end_size_w;
+		return;
+	}
+	if (priv->icon_path &&
+	    (g_str_has_suffix(priv->icon_path, ".svg") ||
+	     g_str_has_suffix(priv->icon_path, ".SVG"))) {
+		RsvgHandle *svg = rsvg_handle_new_from_file(
+		    priv->icon_path, &err);
+		RsvgDimensionData dim = {0};
+
+		if (svg) {
+			rsvg_handle_get_dimensions(svg, &dim);
+			nw = dim.width;
+			nh = dim.height;
+			g_object_unref(svg);
+		}
+	} else if (priv->icon_path) {
+		probe = gdk_pixbuf_new_from_file(priv->icon_path, &err);
+		if (probe) {
+			nw = gdk_pixbuf_get_width(probe);
+			nh = gdk_pixbuf_get_height(probe);
+			g_object_unref(probe);
+		}
+	}
+	if (nw < 1) nw = 64;
+	if (nh < 1) nh = 64;
+	*tw = (int)(nw * priv->scale);
+	*th = (int)(nh * priv->scale);
+	if (*tw < 8) *tw = 8;
+	if (*th < 8) *th = 8;
+}
+
 static void launcher_apply_icon(XsPlugin *p, PrivData *priv)
 {
-	int w = (int)(priv->icon_w * priv->scale);
-	int h = (int)(priv->icon_h * priv->scale);
+	int w, h;
 
-	if (w < 8) w = 8;
-	if (h < 8) h = 8;
+	launcher_target_size(priv, &w, &h);
 	/* запомнить ИТОГОВЫЙ размер окна: при рестарте окно должно
-	 * встать ровно таким, каким юзер его оставил (natural-размер
-	 * SVG между запусками может считаться по-разному) */
+	 * встать ровно таким, каким юзер его оставил */
 	g_key_file_set_integer(priv->kf, p->name, "win_w", w);
 	g_key_file_set_integer(priv->kf, p->name, "win_h", h);
 	xs_core_plugin_conf_flush(p->name);
@@ -189,15 +272,11 @@ static void launcher_from_desktop_file(XsPlugin *p, const char *filename)
 	if (icon && icon[0]) {
 		char *fn = launcher_icon_from_gtk_theme(icon);
 		if (fn && fn[0]) {
-			if (launcher_load_icon(priv, fn)) {
-				g_free(priv->icon_path);
-				priv->icon_path = fn;
-				g_key_file_set_string(priv->kf, p->name,
-				                      "icon", priv->icon_path);
-				changed = TRUE;
-			} else {
-				g_free(fn);
-			}
+			g_free(priv->icon_path);
+			priv->icon_path = fn;
+			g_key_file_set_string(priv->kf, p->name,
+			                      "icon", priv->icon_path);
+			changed = TRUE;
 		} else {
 			g_free(fn);
 		}
@@ -280,7 +359,7 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 	p->priv = priv;
 	priv->kf = kf;
 	priv->scale = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
-	if (priv->scale < 0.2)
+	if (priv->scale < 0.01)
 		priv->scale = 0.2;
 	else if (priv->scale > 10.0)
 		priv->scale = 10.0;
@@ -297,65 +376,30 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 		priv->icon_path = launcher_default_icon();
 		g_key_file_set_string(kf, p->name, "icon", priv->icon_path);
 	}
-	if (!launcher_load_icon(priv, priv->icon_path)) {
-		char *di = launcher_default_icon();
-		if (strcmp(di, priv->icon_path) != 0 && di[0] &&
-		    launcher_load_icon(priv, di)) {
-			g_free(priv->icon_path);
-			priv->icon_path = di;
-			g_key_file_set_string(kf, p->name, "icon", di);
-		} else {
-			g_free(di);
-		}
-	}
+	/* end_size: конечный размер изображения в px (опция; "0" = выкл) */
+	priv->end_size_w = xs_host_api()->conf_int(kf, p->name,
+	                                           "end_size_w", 0);
+	priv->end_size_h = xs_host_api()->conf_int(kf, p->name,
+	                                           "end_size_h", 0);
 	priv->x = xs_host_api()->conf_int(kf, p->name, "x", 80);
 	priv->y = xs_host_api()->conf_int(kf, p->name, "y", 80);
 
-	/* NATURAL-размер иконки сохранён в конфиге (SVG без width/height
-	 * в px возвращает разный intrinsic размер между запусками —
-	 * из-за этого после рестарта лаунчер становился микроскопическим).
-	 * Конфиг главнее: 1-й запуск пишет, последующие читают. */
-	{
-		int saved_w = xs_host_api()->conf_int(kf, p->name,
-		                                      "icon_w", 0);
-		int saved_h = xs_host_api()->conf_int(kf, p->name,
-		                                      "icon_h", 0);
-
-		/* natural-размер ВСЕГДА от SVG (get_dimensions/viewBox):
-		 * сохранённые значения могли остаться от старого бага
-		 * (intrinsic 64x64), они — только fallback */
-		if (saved_w > 0 && saved_h > 0 &&
-		    (priv->icon_w <= 32 || priv->icon_h <= 32)) {
-			priv->icon_w = saved_w;
-			priv->icon_h = saved_h;
-		}
-		xs_host_api()->conf_set_int(kf, p->name, "icon_w",
-		                            priv->icon_w);
-		xs_host_api()->conf_set_int(kf, p->name, "icon_h",
-		                            priv->icon_h);
-	}
 	/* ИТОГОВЫЙ размер окна из конфига (win_w/win_h пишет
 	 * launcher_apply_icon при каждой смене scale/иконки): при
-	 * рестарте окно ровно такое, каким юзер его оставил. */
+	 * рестарте окно ровно такое, каким юзер его оставил.
+	 * Файл на старте НЕ читается — картинка строится в draw. */
 	{
 		int ww = xs_host_api()->conf_int(kf, p->name, "win_w", 0);
 		int wh = xs_host_api()->conf_int(kf, p->name, "win_h", 0);
-		int saved_w = xs_host_api()->conf_int(kf, p->name,
-		                                      "icon_w", 0);
-		int saved_h = xs_host_api()->conf_int(kf, p->name,
-		                                      "icon_h", 0);
-		int w = (int)(priv->icon_w * priv->scale);
-		int h = (int)(priv->icon_h * priv->scale);
+		int w, h;
 
-		if (w < 8) w = 8;
-		if (h < 8) h = 8;
-		/* win_w/h приоритетны ТОЛЬКО если natural-размер иконки не
-		 * менялся между запусками (иначе пересчитать от scale) */
-		if (ww >= 8 && wh >= 8 && saved_w > 0 &&
-		    saved_w == priv->icon_w && saved_h == priv->icon_h) {
+		launcher_target_size(priv, &w, &h);
+		if (ww >= 8 && wh >= 8) {
 			w = ww;
 			h = wh;
 		}
+		priv->win_w = w;
+		priv->win_h = h;
 		p->win = xs_host_api()->make_window(p, priv->x, priv->y,
 		                                    w, h);
 	}
@@ -396,26 +440,16 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 		cairo_restore(cr);
 		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	}
-	if (priv->pixbuf) {
-		gdk_cairo_set_source_pixbuf(cr, priv->pixbuf, 0, 0);
-		cairo_save(cr);
-		cairo_scale(cr,
-		            (double)w / gdk_pixbuf_get_width(priv->pixbuf),
-		            (double)h / gdk_pixbuf_get_height(priv->pixbuf));
-		cairo_paint(cr);
-		cairo_restore(cr);
-	} else if (priv->svg) {
-		/* ВПИСЫВАТЬ весь viewBox в окно: render_document без
-		 * явного scale у SVG без width/height рисует в natural
-		 * размере (виден только уголок). Явный scale по осям. */
-		double nw = priv->icon_w > 0 ? priv->icon_w : w;
-		double nh = priv->icon_h > 0 ? priv->icon_h : h;
-		RsvgRectangle viewport = { 0, 0, nw, nh };
+	/* Буфер строится на время отрисовки и сразу сбрасывается:
+	 * файл перечитывается на каждом draw (дёшево: раз в сек/сек10) */
+	{
+		GdkPixbuf *buf = launcher_render_buffer(priv, w, h);
 
-		cairo_save(cr);
-		cairo_scale(cr, (double)w / nw, (double)h / nh);
-		rsvg_handle_render_document(priv->svg, cr, &viewport, NULL);
-		cairo_restore(cr);
+		if (buf) {
+			gdk_cairo_set_source_pixbuf(cr, buf, 0, 0);
+			cairo_paint(cr);
+			g_object_unref(buf);
+		}
 	}
 }
 
@@ -456,7 +490,8 @@ static void launcher_menu_cmd(XsPlugin *p, const char *cmd)
 		GKeyFile *kf = xs_core_plugin_conf(p->name);
 		double s = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
 
-		if (s < 0.2) s = 0.2; else if (s > 10.0) s = 10.0;
+		/* сотые доли: нижний порог 0.01 */
+		if (s < 0.01) s = 0.01; else if (s > 10.0) s = 10.0;
 		priv->scale = s;
 		launcher_apply_icon(p, priv);
 	}
@@ -500,15 +535,36 @@ static void launcher_icon_set(GtkFileChooserButton *btn, gpointer data)
 		return;
 	priv = p->priv;
 	fn = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(btn));
-	if (!fn || !launcher_load_icon(priv, fn)) {
+	if (!fn || !fn[0]) {
 		g_free(fn);
 		return;
 	}
 	g_free(priv->icon_path);
 	priv->icon_path = fn;
 	g_key_file_set_string(priv->kf, p->name, "icon", priv->icon_path);
-	g_key_file_set_integer(priv->kf, p->name, "icon_w", priv->icon_w);
-	g_key_file_set_integer(priv->kf, p->name, "icon_h", priv->icon_h);
+	xs_core_plugin_conf_flush(p->name);
+	launcher_apply_icon(p, priv);
+	if (p->win)
+		gtk_widget_queue_draw(p->win);
+}
+
+/* End size: жёсткий конечный размер картинки (px). 0 = по Scale. */
+static void fl_end_size_changed(GtkSpinButton *spin, gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	const char *key = g_object_get_data(G_OBJECT(spin), "xs-key");
+	int v;
+
+	if (!p || !p->priv || !key)
+		return;
+	priv = p->priv;
+	v = gtk_spin_button_get_value_as_int(spin);
+	xs_host_api()->conf_set_int(priv->kf, p->name, key, v);
+	if (strcmp(key, "end_size_w") == 0)
+		priv->end_size_w = v;
+	else
+		priv->end_size_h = v;
 	xs_core_plugin_conf_flush(p->name);
 	launcher_apply_icon(p, priv);
 	if (p->win)
@@ -568,6 +624,42 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 	                    "The image to display on this Launcher ...", fc);
 	(void)w;
 	g_signal_connect(fc, "file-set", G_CALLBACK(launcher_icon_set), p);
+
+	/* end_size: конечный размер картинки в px (0 = выкл, масштаб
+	 * управляется Scale). Мелкий шаг 1px. */
+	{
+		GtkAdjustment *adj_w = gtk_adjustment_new(
+		    xs_host_api()->conf_int(priv->kf, p->name,
+		                            "end_size_w", 0),
+		    0, 4096, 1, 16, 0);
+		GtkAdjustment *adj_h = gtk_adjustment_new(
+		    xs_host_api()->conf_int(priv->kf, p->name,
+		                            "end_size_h", 0),
+		    0, 4096, 1, 16, 0);
+		GtkWidget *ew = gtk_spin_button_new(adj_w, 1, 0);
+		GtkWidget *eh = gtk_spin_button_new(adj_h, 1, 0);
+		GtkWidget *hbx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
+		gtk_widget_set_tooltip_text(
+		    ew, "Конечная ширина картинки в px (0 = по Scale)");
+		gtk_widget_set_tooltip_text(
+		    eh, "Конечная высота картинки в px (0 = по ширине)");
+		gtk_box_pack_start(GTK_BOX(hbx), ew, TRUE, TRUE, 0);
+		gtk_box_pack_start(GTK_BOX(hbx),
+		                   gtk_label_new("×"), FALSE, FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(hbx), eh, TRUE, TRUE, 0);
+		g_object_set_data_full(G_OBJECT(ew), "xs-key",
+		                       g_strdup("end_size_w"), g_free);
+		g_object_set_data_full(G_OBJECT(eh), "xs-key",
+		                       g_strdup("end_size_h"), g_free);
+		g_signal_connect(ew, "value-changed",
+		                 G_CALLBACK(fl_end_size_changed), p);
+		g_signal_connect(eh, "value-changed",
+		                 G_CALLBACK(fl_end_size_changed), p);
+		xs_prop_add_row(GTK_BOX(page), "End size (px, 0=off)",
+		                "Жёсткий конечный размер картинки; "
+		                "перекрывает Scale", hbx);
+	}
 
 	gtk_widget_show_all(page);
 }
