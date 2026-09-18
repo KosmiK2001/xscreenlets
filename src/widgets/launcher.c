@@ -156,6 +156,15 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 			    CAIRO_FORMAT_ARGB32, target_w, target_h);
 			cairo_t *tcr = cairo_create(s);
 
+			if (!scaled) {
+				xs_host_api()->log(
+				    "launcher: scale_simple NULL for %s (%dx%d)",
+				    priv->icon_path, target_w, target_h);
+				cairo_destroy(tcr);
+				cairo_surface_destroy(s);
+				g_object_unref(full);
+				return NULL;
+			}
 			gdk_cairo_set_source_pixbuf(tcr, scaled, 0, 0);
 			cairo_set_operator(tcr, CAIRO_OPERATOR_SOURCE);
 			cairo_paint(tcr);

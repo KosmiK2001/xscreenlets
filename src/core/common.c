@@ -2657,11 +2657,14 @@ static void theme_draw_full(XsPlugin *p, cairo_t *cr, const char *element,
         viewport.height = nh;
         rsvg_handle_render_document(it->u.svg, cr, &viewport, NULL);
     } else {
+        if (!it->u.png)
+            return;
         png_rect.x = (int)x;
         png_rect.y = (int)y;
         png_rect.width = (int)width;
         png_rect.height = (int)height;
-        gdk_cairo_set_source_pixbuf(cr, it->u.png, png_rect.x, png_rect.y);
+        gdk_cairo_set_source_pixbuf(cr, it->u.png, png_rect.x,
+                                    png_rect.y);
         cairo_rectangle(cr, png_rect.x, png_rect.y, png_rect.width,
                         png_rect.height);
         cairo_fill(cr);
@@ -2691,6 +2694,8 @@ static void theme_draw_native(XsPlugin *p, cairo_t *cr, const char *element,
         if (has_h && h.unit == RSVG_UNIT_PX)
             nh = h.length;
     } else {
+        if (!it->u.png)
+            return;
         nw = gdk_pixbuf_get_width(it->u.png);
         nh = gdk_pixbuf_get_height(it->u.png);
     }
