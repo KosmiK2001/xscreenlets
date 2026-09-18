@@ -342,6 +342,8 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 		int wh = xs_host_api()->conf_int(kf, p->name, "win_h", 0);
 		int saved_w = xs_host_api()->conf_int(kf, p->name,
 		                                      "icon_w", 0);
+		int saved_h = xs_host_api()->conf_int(kf, p->name,
+		                                      "icon_h", 0);
 		int w = (int)(priv->icon_w * priv->scale);
 		int h = (int)(priv->icon_h * priv->scale);
 
