@@ -695,8 +695,10 @@ static void launcher_update_mode_widgets(PrivData *priv,
 	gboolean end = priv->scale_mode &&
 	               strcmp(priv->scale_mode, "end_size") == 0;
 
-	gtk_widget_set_visible(scale_row, !end);
-	gtk_widget_set_visible(end_row, end);
+	/* оба поля видны всегда; неактивный — серым, чтобы было видно
+	 * значение, но понятно, что сейчас он не работает */
+	gtk_widget_set_sensitive(scale_row, !end);
+	gtk_widget_set_sensitive(end_row, end);
 }
 
 /* Смена метода в combo: сохранить, обновить поля, размер окна */
