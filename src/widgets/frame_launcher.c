@@ -330,8 +330,12 @@ static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	 * inside_transparent (nobg: внутри полностью прозрачно).
 	 * Темы с backdrop.svg добавляют свой слой поверх в 9-slice. */
 	if (priv->bg_opacity > 0.0 && !priv->inside_transparent) {
+		double a = priv->bg_opacity * 1.8; /* заметное затемнение */
+
+		if (a > 1.0)
+			a = 1.0;
 		cairo_save(cr);
-		cairo_set_source_rgba(cr, 0.06, 0.06, 0.08, priv->bg_opacity);
+		cairo_set_source_rgba(cr, 0.02, 0.02, 0.03, a);
 		cairo_rectangle(cr, cx, cy, cw, ch);
 		cairo_fill(cr);
 		cairo_restore(cr);
