@@ -160,13 +160,11 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 				gdk_cairo_set_source_pixbuf(tcr, scaled,
 				                            0, 0);
 				cairo_paint(tcr);
-				g_object_unref(scaled);
 			} else {
-				/* fallback: растянуть full без scale_simple
-				 * (NULL от него — известная странность на
-				 * мелких размерах) */
-				gdk_cairo_set_source_pixbuf(tcr, full, 0,
-				                            0);
+				/* fallback: scale_simple NULL на мелких
+				 * размерах — растягиваем full сами */
+				gdk_cairo_set_source_pixbuf(tcr, full,
+				                            0, 0);
 				cairo_scale(tcr,
 				            (double)target_w /
 				                gdk_pixbuf_get_width(full),
@@ -175,11 +173,9 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 				cairo_paint(tcr);
 			}
 			cairo_destroy(tcr);
-			g_object_unref(scaled);
 			g_object_unref(full);
 			return s;
 		}
-		g_object_unref(full);
 	}
 	return NULL;
 }
