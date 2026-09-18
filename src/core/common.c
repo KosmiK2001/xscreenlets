@@ -2222,9 +2222,13 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
                           iname && iname[0] ? "plugin" : "main_daemon");
     /* Новый инстанс наследует вид от секции типа (theme/scale/opacity),
      * если у него ещё нет своих значений. */
+    /* наследование вида от прототипа УБРАНО для scale: у каждого
+     * лаунчера свой масштаб, перетирать конфиг гостя значением
+     * прототипа нельзя (гость создан со своим scale). Наследуем
+     * только theme и opacity. */
     if (proto->type && strcmp(proto->type, proto->name) != 0) {
         GKeyFile *pkf = xs_core_plugin_conf(proto->name);
-        static const char *inherit[] = { "theme", "scale", "opacity" };
+        static const char *inherit[] = { "theme", "opacity" };
         size_t k;
 
         for (k = 0; k < G_N_ELEMENTS(inherit); k++) {
