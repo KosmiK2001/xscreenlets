@@ -428,6 +428,32 @@ static void fl_entry_changed(GtkEditable *e, gpointer data)
 	xs_core_plugin_conf_flush(p->name);
 }
 
+/* Выбор темы в ComboBox: применить на живой рамке (перечитать тему
+ * и толщины, перерисовать). */
+static void fl_theme_combo_changed(GtkComboBox *combo, gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	char *sel;
+
+	if (!p || !p->priv)
+		return;
+	priv = p->priv;
+	sel = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
+	if (!sel || !sel[0]) {
+		g_free(sel);
+		return;
+	}
+	g_free(priv->theme);
+	priv->theme = sel;
+	xs_host_api()->conf_set_str(priv->kf, p->name, "theme",
+	                            priv->theme);
+	xs_core_plugin_conf_flush(p->name);
+	/* живое применение темы: перезагрузить и перерисовать */
+	fl_load_theme(p, priv);
+	gtk_widget_queue_draw(p->win);
+}
+
 static void fl_guests_changed(GtkTextBuffer *buf, gpointer data)
 {
 	XsPlugin *p = data;
@@ -820,6 +846,64 @@ static gboolean fl_guest_restart_clicked(GtkWidget *tree,
 	return TRUE;
 }
 
+/* Список доступных тем (каталоги) для ComboBox: сканирует
+ * ~/.config/xscreenlets/themes/frame_launcher и
+ * /usr/share/screenlets/FrameLauncher/themes. Возвращает NULL-терминированный
+ * массив строк (g_free каждому + массиву). */
+static char **fl_list_themes(void)
+{
+	const char *dirs[2];
+	char **out;
+	int n = 0, d;
+
+	dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
+	                           "themes", "frame_launcher", NULL);
+	dirs[1] = "/usr/share/screenlets/FrameLauncher/themes";
+	out = g_new0(char *, 1);
+	for (d = 0; d < 2; d++) {
+		GDir *dir = g_dir_open(dirs[d], 0, NULL);
+		const char *fn;
+
+		if (!dir)
+			continue;
+		while ((fn = g_dir_read_name(dir)) != NULL) {
+			char *full = g_build_filename(dirs[d], fn, NULL);
+			gboolean dup = FALSE;
+			int i;
+
+			if (!g_file_test(full, G_FILE_TEST_IS_DIR)) {
+				g_free(full);
+				continue;
+			}
+			g_free(full);
+			for (i = 0; out[i]; i++) {
+				if (strcmp(out[i], fn) == 0) {
+					dup = TRUE;
+					break;
+				}
+			}
+			if (!dup) {
+				out = g_realloc(out,
+				                (n + 2) * sizeof(char *));
+				out[n++] = g_strdup(fn);
+				out[n] = NULL;
+			}
+		}
+		g_dir_close(dir);
+	}
+	g_free((char *)dirs[0]);
+	return out;
+}
+
+static void fl_free_themes(char **themes)
+{
+	int i;
+
+	for (i = 0; themes && themes[i]; i++)
+		g_free(themes[i]);
+	g_free(themes);
+}
+
 static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 {
 	PrivData *priv;
@@ -860,10 +944,27 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 
 #undef FL_SPIN
 
-	w = xs_prop_add_string(GTK_BOX(page), "Theme",
-	                       "Имя темы (каталог в themes/frame_launcher)",
-	                       priv->theme);
-	g_signal_connect(w, "changed", G_CALLBACK(fl_entry_changed), p);
+	/* Theme: выпадающий список каталогов тем */
+	{
+		GtkWidget *combo = gtk_combo_box_text_new();
+		char **themes = fl_list_themes();
+		int i, active = -1;
+
+		for (i = 0; themes[i]; i++) {
+			gtk_combo_box_text_append_text(
+			    GTK_COMBO_BOX_TEXT(combo), themes[i]);
+			if (priv->theme && strcmp(themes[i], priv->theme) == 0)
+				active = i;
+		}
+		fl_free_themes(themes);
+		gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
+		                         active >= 0 ? active : 0);
+		xs_prop_add_row(GTK_BOX(page), "Theme",
+		                "Тема рамки (каталог themes/frame_launcher)",
+		                combo);
+		g_signal_connect(combo, "changed",
+		                 G_CALLBACK(fl_theme_combo_changed), p);
+	}
 
 	/* Кнопки добавления гостей */
 	{
