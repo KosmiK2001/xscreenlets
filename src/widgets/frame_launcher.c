@@ -261,13 +261,27 @@ static void fl_draw_frame_nine_slice(XsPlugin *p, PrivData *priv,
 	int L = priv->frame_l, R = priv->frame_r;
 	int T = priv->frame_t, B = priv->frame_b;
 
-	/* backdrop: растяжкой на content-зону */
-	if (xs_core_theme_has(p, "backdrop")) {
+	/* backdrop: растяжкой на content-зону; прозрачность — bg_opacity
+	 * юзера (через временную группу, т.к. theme_draw_full рисует
+	 * напрямую) */
+	if (xs_core_theme_has(p, "backdrop") && priv->bg_opacity > 0.0) {
 		int cx, cy, cw, ch;
+		cairo_surface_t *tmp;
+		cairo_t *tcr;
 
 		fl_content_rect(priv, &cx, &cy, &cw, &ch);
-		xs_host_api()->theme_draw_full(p, cr, "backdrop",
-		                               cx, cy, cw, ch);
+		tmp = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+		                                 cw > 0 ? cw : 1,
+		                                 ch > 0 ? ch : 1);
+		tcr = cairo_create(tmp);
+		xs_host_api()->theme_draw_full(p, tcr, "backdrop",
+		                               0, 0, cw, ch);
+		cairo_destroy(tcr);
+		cairo_save(cr);
+		cairo_set_source_surface(cr, tmp, cx, cy);
+		cairo_paint_with_alpha(cr, priv->bg_opacity);
+		cairo_restore(cr);
+		cairo_surface_destroy(tmp);
 	}
 	/* углы */
 	if (xs_core_theme_has(p, "frame-tl"))
