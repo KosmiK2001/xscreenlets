@@ -1436,6 +1436,9 @@ static void xs_core_show_properties(XsPlugin *p)
         gtk_container_set_border_width(GTK_CONTAINER(inner_page), 10);
         row = 0;
 
+        /* Scale рисует core, ЕСЛИ плагин не просил наоборот
+         * (лаунчер: свой комбо «метод + поля») */
+        if (!(p->type && strcmp(p->type, "launcher") == 0)) {
         gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Scale"),
                         0, row, 1, 1);
         {
@@ -1462,6 +1465,7 @@ static void xs_core_show_properties(XsPlugin *p)
                              G_CALLBACK(xs_core_prop_scale_changed), p);
         }
         row++;
+        }
         gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Opacity"),
                         0, row, 1, 1);
         {

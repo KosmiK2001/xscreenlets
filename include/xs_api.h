@@ -137,6 +137,8 @@ struct _XsHostApi {
 	 * кламп позиций, move, переснятие фона */
 	void (*refit_guests)(XsPlugin *host, int cx, int cy, int cw,
 	                     int ch);
+	/* 1 = core не рисует свой Scale-спиннер (плагин рисует свой) */
+	int no_core_scale;
 };
 
 #endif /* XS_API_H */

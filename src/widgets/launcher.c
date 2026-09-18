@@ -687,6 +687,70 @@ static void fl_end_size_changed(GtkSpinButton *spin, gpointer data)
 		gtk_widget_queue_draw(p->win);
 }
 
+/* Обновить видимость полей Scale/End size по текущему режиму */
+static void launcher_update_mode_widgets(PrivData *priv,
+                                         GtkWidget *scale_row,
+                                         GtkWidget *end_row)
+{
+	gboolean end = priv->scale_mode &&
+	               strcmp(priv->scale_mode, "end_size") == 0;
+
+	gtk_widget_set_visible(scale_row, !end);
+	gtk_widget_set_visible(end_row, end);
+}
+
+/* Смена метода в combo: сохранить, обновить поля, размер окна */
+static void launcher_mode_changed(GtkComboBox *combo, gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	char *sel;
+	GtkWidget *scale_row, *end_row;
+
+	if (!p || !p->priv || !p->win)
+		return;
+	priv = p->priv;
+	sel = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
+	if (!sel || !sel[0]) {
+		g_free(sel);
+		return;
+	}
+	g_free(priv->scale_mode);
+	priv->scale_mode = g_strdup(sel);
+	xs_host_api()->conf_set_str(priv->kf, p->name, "scale_mode",
+	                            priv->scale_mode);
+	xs_core_plugin_conf_flush(p->name);
+	g_free(sel);
+
+	scale_row = g_object_get_data(G_OBJECT(p->win), "xs-scale-row");
+	end_row = g_object_get_data(G_OBJECT(p->win), "xs-end-row");
+	launcher_update_mode_widgets(priv, scale_row, end_row);
+
+	/* применить новый размер окна */
+	launcher_apply_icon(p, priv);
+	gtk_widget_queue_draw(p->win);
+}
+
+/* Scale spin лаунчера (свой, внутри mode=scale) */
+static void launcher_prop_scale_changed(GtkSpinButton *spin,
+                                        gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	GKeyFile *kf;
+
+	if (!p || !p->priv)
+		return;
+	priv = p->priv;
+	kf = xs_core_plugin_conf(p->name);
+	priv->scale = gtk_spin_button_get_value(spin);
+	g_key_file_set_double(kf, p->name, "scale", priv->scale);
+	xs_core_plugin_conf_flush(p->name);
+	launcher_apply_icon(p, priv);
+	if (p->win)
+		gtk_widget_queue_draw(p->win);
+}
+
 static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 {
 	PrivData *priv;
@@ -740,57 +804,85 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 	                    "The image to display on this Launcher ...", fc);
 	(void)w;
 	g_signal_connect(fc, "file-set", G_CALLBACK(launcher_icon_set), p);
-
-	/* Режим масштабирования: от Scale или от End size */
 	{
-		static const char *const modes[] = {
-		    "scale", "end_size", NULL
-		};
-		const char *cur = priv->scale_mode ? priv->scale_mode
-		                                   : "scale";
-		GtkWidget *w = xs_prop_add_choices(
-		    GTK_BOX(page), "Resize mode",
-		    "scale = natural × Scale (End size игнорируется); "
-		    "end_size = жёсткий размер End size (Scale не влияет)",
-		    modes, cur);
-		GtkWidget *lbl_w, *lbl_h;
-		GtkAdjustment *adj_w, *adj_h;
-		GtkWidget *ew, *eh, *hbx;
+		GtkWidget *combo = gtk_combo_box_text_new();
+		GtkWidget *scale_row;    /* spin Scale (свой, не core) */
+		GtkWidget *end_row;      /* End size w×h */
+		GtkAdjustment *adj;
 
-		g_signal_connect(w, "changed",
-		                 G_CALLBACK(fl_mode_changed), p);
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
+		                               "scale");
+		gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
+		                               "end_size");
+		if (priv->scale_mode &&
+		    strcmp(priv->scale_mode, "end_size") == 0)
+			gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 1);
+		else
+			gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
+		xs_prop_add_row(GTK_BOX(page), "Resize method",
+		                "scale = оригинал × Scale; end_size = "
+		                "жёсткий размер в px",
+		                combo);
 
-		/* End size: спиннеры (активны в любом режиме, но применяются
-		 * только в end_size) */
-		adj_w = gtk_adjustment_new(priv->end_size_w, 0, 4096, 1, 16,
-		                           0);
-		adj_h = gtk_adjustment_new(priv->end_size_h, 0, 4096, 1, 16,
-		                           0);
-		ew = gtk_spin_button_new(adj_w, 1, 0);
-		eh = gtk_spin_button_new(adj_h, 1, 0);
-		gtk_widget_set_tooltip_text(
-		    ew, "Конечная ширина картинки в px (mode=end_size)");
-		gtk_widget_set_tooltip_text(
-		    eh, "Конечная высота картинки в px (mode=end_size)");
+		/* свой Scale spin (core-Scale для лаунчера скрыт) */
+		adj = gtk_adjustment_new(priv->scale, 0.01, 10.0, 0.01,
+		                         0.1, 0.0);
 		{
-			GtkWidget *hbx = gtk_box_new(
-			    GTK_ORIENTATION_HORIZONTAL, 4);
+			GtkWidget *spin = gtk_spin_button_new(adj, 0.01, 2);
 
-			gtk_box_pack_start(GTK_BOX(hbx), ew, TRUE, TRUE, 0);
-			gtk_box_pack_start(GTK_BOX(hbx), eh, TRUE, TRUE, 0);
-			xs_prop_add_row(GTK_BOX(page), "End size (px)",
-			                "Жёсткий размер картинки "
-			                "(mode=end_size)",
-			                hbx);
+			scale_row = xs_prop_add_row(
+			    GTK_BOX(page), "Scale",
+			    "Множитель к natural-размеру изображения",
+			    spin);
+			g_signal_connect(spin, "value-changed",
+			                 G_CALLBACK(launcher_prop_scale_changed),
+			                 p);
 		}
-		g_object_set_data_full(G_OBJECT(ew), "xs-key",
-		                       g_strdup("end_size_w"), g_free);
-		g_object_set_data_full(G_OBJECT(eh), "xs-key",
-		                       g_strdup("end_size_h"), g_free);
-		g_signal_connect(ew, "value-changed",
-		                 G_CALLBACK(fl_end_size_changed), p);
-		g_signal_connect(eh, "value-changed",
-		                 G_CALLBACK(fl_end_size_changed), p);
+
+		/* End size w×h */
+		{
+			GtkWidget *ew, *eh;
+
+			adj = gtk_adjustment_new(priv->end_size_w, 0,
+			                         4096, 1, 16, 0);
+			ew = gtk_spin_button_new(adj, 1, 0);
+			adj = gtk_adjustment_new(priv->end_size_h, 0,
+			                         4096, 1, 16, 0);
+			eh = gtk_spin_button_new(adj, 1, 0);
+			{
+				GtkWidget *hbx = gtk_box_new(
+				    GTK_ORIENTATION_HORIZONTAL, 4);
+
+				gtk_box_pack_start(GTK_BOX(hbx), ew, TRUE,
+				                   TRUE, 0);
+				gtk_box_pack_start(GTK_BOX(hbx), eh, TRUE,
+				                   TRUE, 0);
+				end_row = xs_prop_add_row(
+				    GTK_BOX(page), "End size (px)",
+				    "Жёсткий размер картинки", hbx);
+			}
+			g_object_set_data_full(G_OBJECT(ew), "xs-key",
+			                       g_strdup("end_size_w"), g_free);
+			g_object_set_data_full(G_OBJECT(eh), "xs-key",
+			                       g_strdup("end_size_h"), g_free);
+			g_signal_connect(ew, "value-changed",
+			                 G_CALLBACK(fl_end_size_changed), p);
+			g_signal_connect(eh, "value-changed",
+			                 G_CALLBACK(fl_end_size_changed), p);
+		}
+
+		/* показ/скрытие зависимых полей по режиму */
+		launcher_update_mode_widgets(priv, scale_row, end_row);
+
+		/* смена метода: сохранить, обновить поля и размер окна */
+		g_signal_connect(combo, "changed",
+		                 G_CALLBACK(launcher_mode_changed), p);
+		g_object_set_data_full(G_OBJECT(p->win), "xs-scale-row",
+		                        scale_row,
+		                        (GDestroyNotify)gtk_widget_destroy);
+		g_object_set_data_full(G_OBJECT(p->win), "xs-end-row",
+		                        end_row,
+		                        (GDestroyNotify)gtk_widget_destroy);
 	}
 
 	gtk_widget_show_all(page);
