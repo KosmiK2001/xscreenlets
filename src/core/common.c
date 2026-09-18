@@ -387,6 +387,13 @@ typedef struct {
 } GuestBgCtx;
 static gpointer guest_bg_ctx_new(XsPlugin *host, XsPlugin *guest);
 static gboolean host_update_guest_backdrop_idle(gpointer data);
+/* повторное применение позиции гостя (фикс «съеденного» первого move) */
+typedef struct {
+    XsPlugin *host;
+    XsPlugin *guest;
+} GuestReapplyCtx;
+static gboolean guest_reapply_pos_idle(gpointer data);
+static gpointer guest_reapply_ctx_new(XsPlugin *host, XsPlugin *guest);
 /* создать новый инстанс типа и включить гостем хоста */
 static XsPlugin *start_guest_new(XsPlugin *host, const char *type);
 /* списки для диалогов frame_launcher */
@@ -986,6 +993,10 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
                 state->y = 0;
                 g_key_file_set_integer(kf, p->name, "y", 0);
             }
+            xs_log_impl("guest pos: %s spinner(%d,%d) -> (%d,%d) max=(%d,%d)",
+                        p->name, strcmp(key, "x") == 0 ? v : state->x,
+                        strcmp(key, "x") == 0 ? state->y : v,
+                        state->x, state->y, max_x, max_y);
             xs_core_plugin_conf_flush(p->name);
             /* синхронизируем спиннер с клампнутым значением */
             gtk_spin_button_set_value(spin, strcmp(key, "x") == 0
@@ -3293,6 +3304,14 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             /* фон рамки под гостем: снимок кадра (idle, после draw) */
             g_timeout_add(120, host_update_guest_backdrop_idle,
                           guest_bg_ctx_new(host, g));
+            /* переприменить позицию: child-окна «съедают» первый move
+             * после репарента (60/200/450 мс) */
+            g_timeout_add(60, guest_reapply_pos_idle,
+                          guest_reapply_ctx_new(host, g));
+            g_timeout_add(200, guest_reapply_pos_idle,
+                          guest_reapply_ctx_new(host, g));
+            g_timeout_add(450, guest_reapply_pos_idle,
+                          guest_reapply_ctx_new(host, g));
             xs_log_impl("guest '%s' re-parented into '%s' at %d,%d",
                         guest_name, host->name, cx + gs->x, cy + gs->y);
         }
@@ -3335,6 +3354,10 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
         GdkWindow *cw = gtk_widget_get_window(content);
         int cx = 0, cy = 0;
 
+        xs_log_impl("refit: gw=%p cw=%p (fixed has %s)",
+                    (void *)gw, (void *)cw,
+                    cw ? "win" : "NO win");
+
         if (gw && !cw)
             cw = gtk_widget_get_window(host->win);
         if (cw == gtk_widget_get_window(host->win)) {
@@ -3372,6 +3395,14 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             /* фон рамки под гостем: снимок кадра (idle, после draw) */
             g_timeout_add(120, host_update_guest_backdrop_idle,
                           guest_bg_ctx_new(host, g));
+            /* переприменить позицию: child-окна «съедают» первый move
+             * после репарента (60/200/450 мс) */
+            g_timeout_add(60, guest_reapply_pos_idle,
+                          guest_reapply_ctx_new(host, g));
+            g_timeout_add(200, guest_reapply_pos_idle,
+                          guest_reapply_ctx_new(host, g));
+            g_timeout_add(450, guest_reapply_pos_idle,
+                          guest_reapply_ctx_new(host, g));
         }
     }
     xs_log_impl("guest '%s' hosted by '%s'", guest_name, host->name);
@@ -3495,6 +3526,41 @@ static void host_update_guest_backdrop(XsPlugin *host, XsPlugin *g)
 static gpointer guest_bg_ctx_new(XsPlugin *host, XsPlugin *guest)
 {
     GuestBgCtx *c = g_new0(GuestBgCtx, 1);
+
+    c->host = host;
+    c->guest = guest;
+    return c;
+}
+
+/* Повторно применить позицию гостя (child-окна иногда «съедают»
+ * первый move сразу после репарента — спиннеры 0→1→0 это лечили;
+ * теперь лечит демон автоматически). */
+static gboolean guest_reapply_pos_idle(gpointer data)
+{
+    GuestReapplyCtx *c = data;
+    XsWinState *ggs;
+    gint *xy;
+    int cx = 0, cy = 0;
+
+    if (c->host && c->host->priv && c->host->win &&
+        c->guest && c->guest->priv && c->guest->win) {
+        ggs = g_object_get_data(G_OBJECT(c->guest->win), "xs-state");
+        xy = g_object_get_data(G_OBJECT(c->host->win),
+                               "xs-content-xy");
+        if (ggs && xy) {
+            cx = xy[0];
+            cy = xy[1];
+            gtk_window_move(GTK_WINDOW(c->guest->win),
+                            cx + ggs->x, cy + ggs->y);
+        }
+    }
+    g_free(c);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer guest_reapply_ctx_new(XsPlugin *host, XsPlugin *guest)
+{
+    GuestReapplyCtx *c = g_new0(GuestReapplyCtx, 1);
 
     c->host = host;
     c->guest = guest;
