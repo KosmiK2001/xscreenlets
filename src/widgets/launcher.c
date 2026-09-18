@@ -321,7 +321,11 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 		int saved_h = xs_host_api()->conf_int(kf, p->name,
 		                                      "icon_h", 0);
 
-		if (saved_w > 0 && saved_h > 0) {
+		/* natural-размер ВСЕГДА от SVG (get_dimensions/viewBox):
+		 * сохранённые значения могли остаться от старого бага
+		 * (intrinsic 64x64), они — только fallback */
+		if (saved_w > 0 && saved_h > 0 &&
+		    (priv->icon_w <= 32 || priv->icon_h <= 32)) {
 			priv->icon_w = saved_w;
 			priv->icon_h = saved_h;
 		}
@@ -336,12 +340,17 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 	{
 		int ww = xs_host_api()->conf_int(kf, p->name, "win_w", 0);
 		int wh = xs_host_api()->conf_int(kf, p->name, "win_h", 0);
+		int saved_w = xs_host_api()->conf_int(kf, p->name,
+		                                      "icon_w", 0);
 		int w = (int)(priv->icon_w * priv->scale);
 		int h = (int)(priv->icon_h * priv->scale);
 
 		if (w < 8) w = 8;
 		if (h < 8) h = 8;
-		if (ww >= 8 && wh >= 8) {
+		/* win_w/h приоритетны ТОЛЬКО если natural-размер иконки не
+		 * менялся между запусками (иначе пересчитать от scale) */
+		if (ww >= 8 && wh >= 8 && saved_w > 0 &&
+		    saved_w == priv->icon_w && saved_h == priv->icon_h) {
 			w = ww;
 			h = wh;
 		}
