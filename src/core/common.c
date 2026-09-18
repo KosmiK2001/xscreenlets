@@ -3611,10 +3611,11 @@ static XsPlugin *start_guest_new(XsPlugin *host, const char *type)
                 break;
             }
         }
-        gs->x = cx + 16 * (n % 6);
-        gs->y = cy + 16 * (n % 6);
-        if (gs->x > avail_w) gs->x = cx;
-        if (gs->y > avail_h) gs->y = cy;
+        /* state->x/y — координаты ВНУТРИ content-зоны (без cx/cy!) */
+        gs->x = 16 * (n % 6);
+        gs->y = 16 * (n % 6);
+        if (gs->x > avail_w) gs->x = 0;
+        if (gs->y > avail_h) gs->y = 0;
         g_key_file_set_integer(kf, g->name, "x", gs->x);
         g_key_file_set_integer(kf, g->name, "y", gs->y);
     }

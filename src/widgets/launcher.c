@@ -293,6 +293,26 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 	priv->x = xs_host_api()->conf_int(kf, p->name, "x", 80);
 	priv->y = xs_host_api()->conf_int(kf, p->name, "y", 80);
 
+	/* NATURAL-размер иконки сохранён в конфиге (SVG без width/height
+	 * в px возвращает разный intrinsic размер между запусками —
+	 * из-за этого после рестарта лаунчер становился микроскопическим).
+	 * Конфиг главнее: 1-й запуск пишет, последующие читают. */
+	{
+		int saved_w = xs_host_api()->conf_int(kf, p->name,
+		                                      "icon_w", 0);
+		int saved_h = xs_host_api()->conf_int(kf, p->name,
+		                                      "icon_h", 0);
+
+		if (saved_w > 0 && saved_h > 0) {
+			priv->icon_w = saved_w;
+			priv->icon_h = saved_h;
+		}
+		xs_host_api()->conf_set_int(kf, p->name, "icon_w",
+		                            priv->icon_w);
+		xs_host_api()->conf_set_int(kf, p->name, "icon_h",
+		                            priv->icon_h);
+	}
+
 	p->win = xs_host_api()->make_window(p, priv->x, priv->y,
 	                                    (int)(priv->icon_w * priv->scale),
 	                                    (int)(priv->icon_h * priv->scale));
@@ -436,6 +456,8 @@ static void launcher_icon_set(GtkFileChooserButton *btn, gpointer data)
 	g_free(priv->icon_path);
 	priv->icon_path = fn;
 	g_key_file_set_string(priv->kf, p->name, "icon", priv->icon_path);
+	g_key_file_set_integer(priv->kf, p->name, "icon_w", priv->icon_w);
+	g_key_file_set_integer(priv->kf, p->name, "icon_h", priv->icon_h);
 	xs_core_plugin_conf_flush(p->name);
 	launcher_apply_icon(p, priv);
 	if (p->win)
