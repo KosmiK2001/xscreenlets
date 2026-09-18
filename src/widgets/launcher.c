@@ -54,6 +54,18 @@ static gboolean launcher_load_icon(PrivData *priv, const char *path)
 			    out_w > 0 && out_h > 0) {
 				priv->icon_w = (int)out_w;
 				priv->icon_h = (int)out_h;
+			} else {
+				/* Нет width/height в px (только viewBox):
+				 * natural-размер = размер viewBox, иначе
+				 * между запусками icon_w «прыгает» и
+				 * масштаб слетает. */
+				RsvgDimensionData dim;
+
+				rsvg_handle_get_dimensions(priv->svg, &dim);
+				if (dim.width > 0 && dim.height > 0) {
+					priv->icon_w = dim.width;
+					priv->icon_h = dim.height;
+				}
 			}
 		}
 	} else {
