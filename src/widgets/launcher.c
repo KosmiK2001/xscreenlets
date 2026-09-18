@@ -77,14 +77,13 @@ static GdkPixbuf *launcher_render_buffer(PrivData *priv, int target_w,
 			nat_w = dim.width;
 			nat_h = dim.height;
 		}
-		if (priv->end_size_w > 0) {
-			target_w = priv->end_size_w;
-			target_h = priv->end_size_h > 0
-			               ? priv->end_size_h : target_w;
-		} else {
-			target_w = (int)(nat_w * priv->scale);
-			target_h = (int)(nat_h * priv->scale);
-		}
+		/* итог = (end_size по оси, иначе natural) × scale */
+		target_w = (int)((priv->end_size_w > 0
+		                      ? priv->end_size_w : nat_w) *
+		                 priv->scale);
+		target_h = (int)((priv->end_size_h > 0
+		                      ? priv->end_size_h : nat_h) *
+		                 priv->scale);
 		if (target_w < 1) target_w = 1;
 		if (target_h < 1) target_h = 1;
 		surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
@@ -106,16 +105,15 @@ static GdkPixbuf *launcher_render_buffer(PrivData *priv, int target_w,
 				g_error_free(err);
 			return NULL;
 		}
-		if (priv->end_size_w > 0) {
-			target_w = priv->end_size_w;
-			target_h = priv->end_size_h > 0
-			               ? priv->end_size_h : target_w;
-		} else {
-			target_w = (int)(gdk_pixbuf_get_width(full) *
-			                 priv->scale);
-			target_h = (int)(gdk_pixbuf_get_height(full) *
-			                 priv->scale);
-		}
+		/* итог = (end_size по оси, иначе natural) × scale */
+		target_w = (int)((priv->end_size_w > 0
+		                      ? priv->end_size_w
+		                      : gdk_pixbuf_get_width(full)) *
+		                 priv->scale);
+		target_h = (int)((priv->end_size_h > 0
+		                      ? priv->end_size_h
+		                      : gdk_pixbuf_get_height(full)) *
+		                 priv->scale);
 		if (target_w < 1) target_w = 1;
 		if (target_h < 1) target_h = 1;
 		scaled = gdk_pixbuf_scale_simple(full, target_w, target_h,
@@ -168,12 +166,6 @@ static void launcher_target_size(PrivData *priv, int *tw, int *th)
 	GdkPixbuf *probe;
 	GError *err = NULL;
 
-	if (priv->end_size_w > 0) {
-		*tw = priv->end_size_w;
-		*th = priv->end_size_h > 0 ? priv->end_size_h
-		                           : priv->end_size_w;
-		return;
-	}
 	if (priv->icon_path &&
 	    (g_str_has_suffix(priv->icon_path, ".svg") ||
 	     g_str_has_suffix(priv->icon_path, ".SVG"))) {
@@ -195,10 +187,13 @@ static void launcher_target_size(PrivData *priv, int *tw, int *th)
 			g_object_unref(probe);
 		}
 	}
-	if (nw < 1) nw = 64;
-	if (nh < 1) nh = 64;
-	*tw = (int)(nw * priv->scale);
-	*th = (int)(nh * priv->scale);
+	/* АСИММЕТРИЧНЫЙ end_size: w/h независимы; 0 по оси =
+	 * natural × scale по этой оси. Scale применяется и к
+	 * end_size (умножение) — ручная правка + зум вместе. */
+	*tw = (int)((priv->end_size_w > 0 ? priv->end_size_w : nw) *
+	            priv->scale);
+	*th = (int)((priv->end_size_h > 0 ? priv->end_size_h : nh) *
+	            priv->scale);
 	if (*tw < 8) *tw = 8;
 	if (*th < 8) *th = 8;
 }
