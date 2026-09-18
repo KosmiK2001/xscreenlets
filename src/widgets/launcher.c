@@ -316,10 +316,23 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
 	PrivData *priv = p->priv;
+	cairo_surface_t *host_bg;
 
 	if (!priv)
 		return;
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	/* гость рамки: первым слоем — фон рамки под нами (иначе
+	 * прозрачные пиксели показали бы рабочий стол) */
+	host_bg = xs_host_api()->get_host_backdrop
+	              ? xs_host_api()->get_host_backdrop(p) : NULL;
+	if (host_bg) {
+		cairo_save(cr);
+		cairo_set_source_surface(cr, host_bg, 0, 0);
+		cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+		cairo_paint(cr);
+		cairo_restore(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	}
 	if (priv->pixbuf) {
 		gdk_cairo_set_source_pixbuf(cr, priv->pixbuf, 0, 0);
 		cairo_save(cr);

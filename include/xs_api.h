@@ -126,6 +126,10 @@ struct _XsHostApi {
 	/* создать НОВЫЙ инстанс типа type и включить его гостем хоста
 	 * (конфиг генерится с UUID; в автостарт демона не попадает) */
 	XsPlugin *(*start_guest_new)(XsPlugin *host, const char *type);
+	/* фон под гостем из темы хозяина (снимок кадра рамки; гостю
+	 * рисовать его cairo_set_source_surface+paint в draw() первым
+	 * слоем; NULL = нет — рисовать как обычно) */
+	cairo_surface_t *(*get_host_backdrop)(XsPlugin *p);
 };
 
 #endif /* XS_API_H */

@@ -378,6 +378,15 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
  * конфига по запросу плагина-хоста, с защитой от циклов --- */
 static XsPlugin *start_guest(XsPlugin *host, const char *guest_name);
 static void stop_guest(XsPlugin *host, const char *guest_name);
+/* снимок куска фона рамки под гостем (в data окна "xs-host-backdrop") */
+static void host_update_guest_backdrop(XsPlugin *host, XsPlugin *g);
+/* контекст отложенного снимка */
+typedef struct {
+    XsPlugin *host;
+    XsPlugin *guest;
+} GuestBgCtx;
+static gpointer guest_bg_ctx_new(XsPlugin *host, XsPlugin *guest);
+static gboolean host_update_guest_backdrop_idle(gpointer data);
 /* создать новый инстанс типа и включить гостем хоста */
 static XsPlugin *start_guest_new(XsPlugin *host, const char *type);
 /* списки для диалогов frame_launcher */
@@ -3177,6 +3186,9 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             xs_core_apply_window_flags(gs);
             /* гость больше не main_daemon: за него отвечает frame */
             xs_core_guest_set_started_by(g, "plugin");
+            /* фон рамки под гостем: снимок кадра (idle, после draw) */
+            g_timeout_add(120, host_update_guest_backdrop_idle,
+                          guest_bg_ctx_new(host, g));
             xs_log_impl("guest '%s' re-parented into '%s' at %d,%d",
                         guest_name, host->name, cx + gs->x, cy + gs->y);
         }
@@ -3245,6 +3257,9 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
             gs->keep_below = FALSE;
             xs_core_apply_window_flags(gs);
             xs_core_guest_set_started_by(g, "plugin");
+            /* фон рамки под гостем: снимок кадра (idle, после draw) */
+            g_timeout_add(120, host_update_guest_backdrop_idle,
+                          guest_bg_ctx_new(host, g));
         }
     }
     xs_log_impl("guest '%s' hosted by '%s'", guest_name, host->name);
@@ -3296,6 +3311,91 @@ static void stop_guest(XsPlugin *host, const char *guest_name)
     (void)host;
     if (g)
         xs_core_delete_instance(g);
+}
+
+/* Копия куска отрисованного кадра хоста под гостем: гость рисует её
+ * своим фоном (композитор не смешивает child-окно с родителем, поэтому
+ * прозрачные пиксели гостя показывали бы рабочий стол). */
+static cairo_surface_t *host_backdrop_snapshot(XsPlugin *host, int gx,
+                                               int gy, int gw, int gh)
+{
+    XsWinState *hs;
+    cairo_surface_t *src, *dst;
+    cairo_t *cr;
+
+    if (!host || !host->win || gw <= 0 || gh <= 0)
+        return NULL;
+    hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
+    if (!hs || !hs->frame)
+        return NULL;
+    src = hs->frame;
+    {
+        int sw = cairo_image_surface_get_width(src);
+        int sh = cairo_image_surface_get_height(src);
+
+        if (gx < 0) gx = 0;
+        if (gy < 0) gy = 0;
+        if (gx + gw > sw) gw = sw - gx;
+        if (gy + gh > sh) gh = sh - gy;
+        if (gw <= 0 || gh <= 0)
+            return NULL;
+    }
+    dst = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, gw, gh);
+    cr = cairo_create(dst);
+    cairo_set_source_surface(cr, src, -gx, -gy);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    return dst;
+}
+
+static void host_update_guest_backdrop(XsPlugin *host, XsPlugin *g)
+{
+    XsWinState *gs;
+    cairo_surface_t *snap;
+
+    if (!host || !host->win || !g || !g->win)
+        return;
+    gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+    if (!gs)
+        return;
+    snap = host_backdrop_snapshot(host, gs->x, gs->y,
+                                  gs->w ? gs->w : 1, gs->h ? gs->h : 1);
+    if (!snap)
+        return;
+    g_object_set_data_full(G_OBJECT(g->win), "xs-host-backdrop",
+                           snap,
+                           (GDestroyNotify)cairo_surface_destroy);
+    gtk_widget_queue_draw(g->win);
+}
+
+/* контекст отложенного снимка (GuestBgCtx объявлен в форвардах) */
+static gpointer guest_bg_ctx_new(XsPlugin *host, XsPlugin *guest)
+{
+    GuestBgCtx *c = g_new0(GuestBgCtx, 1);
+
+    c->host = host;
+    c->guest = guest;
+    return c;
+}
+
+static gboolean host_update_guest_backdrop_idle(gpointer data)
+{
+    GuestBgCtx *c = data;
+
+    /* оба должны быть живы (priv != NULL) */
+    if (c->host && c->host->priv && c->guest && c->guest->priv)
+        host_update_guest_backdrop(c->host, c->guest);
+    g_free(c);
+    return G_SOURCE_REMOVE;
+}
+
+/* Гость: фон из кадра хозяина (data окна "xs-host-backdrop"). */
+static cairo_surface_t *host_get_backdrop(XsPlugin *p)
+{
+    if (!p || !p->win)
+        return NULL;
+    return g_object_get_data(G_OBJECT(p->win), "xs-host-backdrop");
 }
 
 /* Создать НОВЫЙ инстанс типа type и включить его гостем хоста:
@@ -3442,7 +3542,8 @@ static XsHostApi host_api = {
     .theme_draw_native = host_theme_draw_native,
     .start_guest = start_guest,
     .stop_guest = stop_guest,
-    .start_guest_new = start_guest_new
+    .start_guest_new = start_guest_new,
+    .get_host_backdrop = host_get_backdrop
 };
 
 void xs_core_cleanup_plugin_window(XsPlugin *p)
