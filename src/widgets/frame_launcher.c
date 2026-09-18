@@ -20,6 +20,7 @@ typedef struct {
 	int x, y;
 	int width, height;       /* внешний размер */
 	int shadow;              /* зона затенения px (2-4) */
+	gboolean inside_transparent; /* тема без фона (nobg) */
 	int frame_l, frame_r, frame_t, frame_b; /* толщина рамки (тема) */
 	int guest_count;
 	char **guests;           /* имена гостей (guests_1..N) */
@@ -44,6 +45,9 @@ static void fl_read_theme_frame(PrivData *priv, const char *dir)
 		                                       "frame_top", NULL);
 		priv->frame_b = g_key_file_get_integer(kf, "frame_launcher",
 		                                       "frame_bottom", NULL);
+		priv->inside_transparent =
+		    g_key_file_get_boolean(kf, "frame_launcher",
+		                           "inside_transparent", NULL);
 	}
 	g_key_file_free(kf);
 	g_free(path);
@@ -321,18 +325,20 @@ static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 		return;
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	fl_content_rect(priv, &cx, &cy, &cw, &ch);
-	if (nine) {
-		/* backdrop рисуется внутри 9-slice первым слоем */
-		fl_draw_frame_nine_slice(p, priv, cr, w, h);
-		return;
-	}
-	/* фон content-зоны (backdrop), полупрозрачный */
-	if (priv->bg_opacity > 0.0) {
+	/* ФОН content-зоны ВСЕГДА рисует код (как в самой первой теме):
+	 * тёмное дымчатое стекло × bg_opacity — КРОМЕ тем с флагом
+	 * inside_transparent (nobg: внутри полностью прозрачно).
+	 * Темы с backdrop.svg добавляют свой слой поверх в 9-slice. */
+	if (priv->bg_opacity > 0.0 && !priv->inside_transparent) {
 		cairo_save(cr);
 		cairo_set_source_rgba(cr, 0.06, 0.06, 0.08, priv->bg_opacity);
 		cairo_rectangle(cr, cx, cy, cw, ch);
 		cairo_fill(cr);
 		cairo_restore(cr);
+	}
+	if (nine) {
+		fl_draw_frame_nine_slice(p, priv, cr, w, h);
+		return;
 	}
 	/* рамка из темы (элемент frame, растянут на всё окно) */
 	if (xs_core_theme_has(p, "frame")) {
@@ -455,6 +461,7 @@ static void fl_theme_combo_changed(GtkComboBox *combo, gpointer data)
 	priv->frame_r = 0;
 	priv->frame_t = 0;
 	priv->frame_b = 0;
+	priv->inside_transparent = FALSE;
 	/* живое применение темы: перезагрузить и перерисовать */
 	fl_load_theme(p, priv);
 	if (!priv->frame_l) priv->frame_l = 4;
