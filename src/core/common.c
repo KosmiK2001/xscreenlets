@@ -2656,8 +2656,15 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
         gint *xy;
         int cx, cy, cw, ch, nx, ny, gw, gh;
         gboolean clamped = FALSE;
-        GdkWindow *gdkwin = gtk_widget_get_window(window);
 
+        /* первый configure после репарента несёт устаревшие
+         * (экранные) координаты — игнорируем, позицию уже задал
+         * gtk_window_move в host-ветке */
+        if (g_object_get_data(G_OBJECT(window), "xs-guest-first-cfg")) {
+            g_object_set_data(G_OBJECT(window), "xs-guest-first-cfg",
+                              NULL);
+            return FALSE;
+        }
         if (!host || !host->win)
             return FALSE;
         hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
@@ -3241,6 +3248,14 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                             gdk_x11_window_get_xid(gw),
                             gdk_x11_window_get_xid(cw),
                             cx + gs->x, cy + gs->y);
+            /* синхронизировать GTK-кэш позиции: первый configure после
+             * репарента несёт СТАРЫЕ (экранные) координаты, из-за них
+             * кламп уносил гостя в угол. Явный move + флаг первого
+             * configure: */
+            gtk_window_move(GTK_WINDOW(g->win),
+                            cx + gs->x, cy + gs->y);
+            g_object_set_data(G_OBJECT(g->win), "xs-guest-first-cfg",
+                              GINT_TO_POINTER(1));
             /* Гость — child окна рамки: рисуется поверх родителя
              * автоматически, keep_below НЕ нужен (иначе WM рвёт
              * иерархию и появляется «прозрачный квадрат»).
@@ -3315,6 +3330,14 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                             gdk_x11_window_get_xid(gw),
                             gdk_x11_window_get_xid(cw),
                             cx + gs->x, cy + gs->y);
+            /* синхронизировать GTK-кэш позиции: первый configure после
+             * репарента несёт СТАРЫЕ (экранные) координаты, из-за них
+             * кламп уносил гостя в угол. Явный move + флаг первого
+             * configure: */
+            gtk_window_move(GTK_WINDOW(g->win),
+                            cx + gs->x, cy + gs->y);
+            g_object_set_data(G_OBJECT(g->win), "xs-guest-first-cfg",
+                              GINT_TO_POINTER(1));
             /* Гость — child окна рамки: рисуется поверх родителя
              * автоматически, keep_below НЕ нужен. */
             gs->keep_below = FALSE;
