@@ -724,7 +724,9 @@ static void launcher_mode_changed(GtkComboBox *combo, gpointer data)
 
 	scale_row = g_object_get_data(G_OBJECT(p->win), "xs-scale-row");
 	end_row = g_object_get_data(G_OBJECT(p->win), "xs-end-row");
-	launcher_update_mode_widgets(priv, scale_row, end_row);
+	if (scale_row && end_row && GTK_IS_WIDGET(scale_row) &&
+	    GTK_IS_WIDGET(end_row))
+		launcher_update_mode_widgets(priv, scale_row, end_row);
 
 	/* применить новый размер окна */
 	launcher_apply_icon(p, priv);
@@ -877,12 +879,8 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 		/* смена метода: сохранить, обновить поля и размер окна */
 		g_signal_connect(combo, "changed",
 		                 G_CALLBACK(launcher_mode_changed), p);
-		g_object_set_data_full(G_OBJECT(p->win), "xs-scale-row",
-		                        scale_row,
-		                        (GDestroyNotify)gtk_widget_destroy);
-		g_object_set_data_full(G_OBJECT(p->win), "xs-end-row",
-		                        end_row,
-		                        (GDestroyNotify)gtk_widget_destroy);
+		g_object_set_data(G_OBJECT(p->win), "xs-scale-row", scale_row);
+		g_object_set_data(G_OBJECT(p->win), "xs-end-row", end_row);
 	}
 
 	gtk_widget_show_all(page);
