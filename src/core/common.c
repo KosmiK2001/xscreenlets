@@ -992,6 +992,15 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
                                                 ? state->x : state->y);
             gtk_window_move(GTK_WINDOW(p->win),
                             cx + state->x, cy + state->y);
+            /* фон под гостем изменился — обновить снимок (двойной:
+             * сразу и после отрисовки кадра) */
+            {
+                GuestBgCtx *c1 = guest_bg_ctx_new(host, p);
+                GuestBgCtx *c2 = guest_bg_ctx_new(host, p);
+
+                g_timeout_add(120, host_update_guest_backdrop_idle, c1);
+                g_timeout_add(500, host_update_guest_backdrop_idle, c2);
+            }
         } else {
             gtk_window_move(GTK_WINDOW(p->win),
                             strcmp(key, "x") == 0 ? v : state->x,
