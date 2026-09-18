@@ -946,10 +946,30 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
         state->x = v;
     else
         state->y = v;
-    if (!state->locked)
-        gtk_window_move(GTK_WINDOW(p->win),
-                        strcmp(key, "x") == 0 ? v : state->x,
-                        strcmp(key, "x") == 0 ? state->y : v);
+    if (!state->locked) {
+        /* гость рамки: v — координаты ВНУТРИ content-зоны →
+         * пересчёт в координаты родителя (cx/cy) */
+        const char *host_name = g_object_get_data(G_OBJECT(p->win),
+                                                  "xs-guest-host");
+        XsPlugin *host = host_name ? find_plugin_by_name(host_name)
+                                   : NULL;
+        gint *xy = (host && host->win)
+                       ? g_object_get_data(G_OBJECT(host->win),
+                                           "xs-content-xy")
+                       : NULL;
+
+        if (xy) {
+            gtk_window_move(GTK_WINDOW(p->win),
+                            strcmp(key, "x") == 0 ? xy[0] + v
+                                                  : xy[0] + state->x,
+                            strcmp(key, "x") == 0 ? xy[1] + state->y
+                                                  : xy[1] + v);
+        } else {
+            gtk_window_move(GTK_WINDOW(p->win),
+                            strcmp(key, "x") == 0 ? v : state->x,
+                            strcmp(key, "x") == 0 ? state->y : v);
+        }
+    }
 }
 
 /* --- синхронизация spin-кнопок X/Y Properties с окном апплета при его
@@ -2650,15 +2670,15 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
         cw = hs->w - cx * 2;
         ch = hs->h - cy * 2;
         gtk_window_get_position(GTK_WINDOW(window), &x, &y);
-        nx = x;
-        ny = y;
+        /* X позиции child-окна ОТНОСИТЕЛЬНЫ родителя → переводим в
+         * координаты content-зоны (в них храним/клампим) */
+        nx = x - cx;
+        ny = y - cy;
         gtk_window_get_size(GTK_WINDOW(window), &gw, &gh);
         if (nx < 0) { nx = 0; clamped = TRUE; }
         if (ny < 0) { ny = 0; clamped = TRUE; }
-        if (nx + gw > cw) { nx = cw - gw; clamped = TRUE; }
-        if (ny + gh > ch) { ny = ch - gh; clamped = TRUE; }
-        if (nx > cw) { nx = cw / 2; clamped = TRUE; }
-        if (ny > ch) { ny = ch / 2; clamped = TRUE; }
+        if (nx + gw > cw) { nx = (cw > gw) ? cw - gw : 0; clamped = TRUE; }
+        if (ny + gh > ch) { ny = (ch > gh) ? ch - gh : 0; clamped = TRUE; }
         state->x = nx;
         state->y = ny;
         if (clamped) {
