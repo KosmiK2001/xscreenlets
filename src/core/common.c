@@ -3471,8 +3471,18 @@ static void host_update_guest_backdrop(XsPlugin *host, XsPlugin *g)
     gs = g_object_get_data(G_OBJECT(g->win), "xs-state");
     if (!gs)
         return;
-    snap = host_backdrop_snapshot(host, gs->x, gs->y,
-                                  gs->w ? gs->w : 1, gs->h ? gs->h : 1);
+    /* снимок куска кадра ХОСТА там, где физически лежит окно гостя:
+     * его позиция в координатах родителя = content_xy + state->x/y */
+    {
+        gint *xy = host->win ? g_object_get_data(
+            G_OBJECT(host->win), "xs-content-xy") : NULL;
+        int ox = xy ? xy[0] : 0;
+        int oy = xy ? xy[1] : 0;
+
+        snap = host_backdrop_snapshot(host, ox + gs->x, oy + gs->y,
+                                      gs->w ? gs->w : 1,
+                                      gs->h ? gs->h : 1);
+    }
     if (!snap)
         return;
     g_object_set_data_full(G_OBJECT(g->win), "xs-host-backdrop",
