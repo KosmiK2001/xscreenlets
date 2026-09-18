@@ -1766,6 +1766,35 @@ static gboolean on_scroll(GtkWidget *widget, GdkEventScroll *event,
     return FALSE;
 }
 
+/* Курсор вошёл/вышел: коллбеки плагина (подсветка и т.п.). */
+static gboolean on_enter_notify(GtkWidget *widget, GdkEventCrossing *ev,
+                                gpointer data)
+{
+    XsPlugin *p = data;
+
+    (void)widget;
+    (void)ev;
+    if (!p || !p->win)
+        return FALSE;
+    if (p->ops && p->ops->enter)
+        p->ops->enter(p);
+    return FALSE;
+}
+
+static gboolean on_leave_notify(GtkWidget *widget, GdkEventCrossing *ev,
+                                gpointer data)
+{
+    XsPlugin *p = data;
+
+    (void)widget;
+    (void)ev;
+    if (!p || !p->win)
+        return FALSE;
+    if (p->ops && p->ops->leave)
+        p->ops->leave(p);
+    return FALSE;
+}
+
 static gboolean on_motion(GtkWidget *widget, GdkEventMotion *event,
                           gpointer data)
 {
@@ -3000,10 +3029,16 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     g_signal_connect(window, "button-press-event", G_CALLBACK(on_button), p);
     g_signal_connect(window, "button-release-event", G_CALLBACK(on_button), p);
     g_signal_connect(window, "scroll-event", G_CALLBACK(on_scroll), p);
+    g_signal_connect(window, "enter-notify-event",
+                     G_CALLBACK(on_enter_notify), p);
+    g_signal_connect(window, "leave-notify-event",
+                     G_CALLBACK(on_leave_notify), p);
     g_signal_connect(window, "motion-notify-event", G_CALLBACK(on_motion), p);
     gtk_widget_add_events(window,
                           GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
                               GDK_SCROLL_MASK |
+                              GDK_ENTER_NOTIFY_MASK |
+                              GDK_LEAVE_NOTIFY_MASK |
                               GDK_POINTER_MOTION_MASK |
                               GDK_POINTER_MOTION_HINT_MASK);
     gtk_widget_show_all(window);

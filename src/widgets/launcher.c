@@ -22,15 +22,49 @@ typedef struct {
 	char *label;            /* tooltip/подпись */
 	int end_size_w, end_size_h; /* end_size: конечный размер px */
 	int win_w, win_h;       /* итоговый размер окна (память) */
+	gboolean hovered;       /* курсор над лаунчером (подсветка) */
+	double click_glow;      /* 0..1 затухающая вспышка клика */
+	guint glow_id;          /* таймер затухания вспышки */
 } PrivData;
 
-/* ---------- иконка ---------- */
-
-static void launcher_clear_icon(PrivData *priv)
+/* затухание вспышки клика: 40 мс шаг, ~0.4 сек */
+static gboolean launcher_glow_tick(gpointer data)
 {
-	/* картинка больше не держится в памяти: буфер строится на
-	 * время отрисовки и сбрасывается (см. launcher_render_buffer) */
-	(void)priv;
+	XsPlugin *p = data;
+	PrivData *priv = p ? p->priv : NULL;
+
+	if (!priv)
+		return G_SOURCE_REMOVE;
+	priv->click_glow -= 0.1;
+	if (priv->click_glow <= 0.0) {
+		priv->click_glow = 0.0;
+		priv->glow_id = 0;
+	} else if (p->win) {
+		gtk_widget_queue_draw(p->win);
+	}
+	return G_SOURCE_REMOVE;
+}
+
+static void launcher_enter(XsPlugin *p)
+{
+	PrivData *priv = p ? p->priv : NULL;
+
+	if (!priv)
+		return;
+	priv->hovered = TRUE;
+	if (p->win)
+		gtk_widget_queue_draw(p->win);
+}
+
+static void launcher_leave(XsPlugin *p)
+{
+	PrivData *priv = p ? p->priv : NULL;
+
+	if (!priv)
+		return;
+	priv->hovered = FALSE;
+	if (p->win)
+		gtk_widget_queue_draw(p->win);
 }
 
 /* Новая логика картинки-отрисовка:
@@ -400,7 +434,6 @@ static int launcher_init(XsPlugin *p, GKeyFile *kf)
 	}
 	if (!p->win) {
 		p->host->log("launcher: failed to create window");
-		launcher_clear_icon(priv);
 		g_free(priv->action);
 		g_free(priv->icon_path);
 		g_free(priv->label);
@@ -446,6 +479,36 @@ static void launcher_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 			g_object_unref(buf);
 		}
 	}
+	/* hover: мягкая светлая вуаль поверх иконки */
+	if (priv->hovered) {
+		cairo_save(cr);
+		cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.18);
+		cairo_rectangle(cr, 0, 0, w, h);
+		cairo_fill(cr);
+		cairo_restore(cr);
+	}
+	/* click glow: тёплая вспышка «что-то запустилось» */
+	if (priv->click_glow > 0.0) {
+		cairo_save(cr);
+		cairo_set_source_rgba(cr, 1.0, 0.85, 0.3,
+		                      0.45 * priv->click_glow);
+		cairo_rectangle(cr, 0, 0, w, h);
+		cairo_fill(cr);
+		cairo_restore(cr);
+	}
+}
+
+static void launcher_start_glow(XsPlugin *p)
+{
+	PrivData *priv = p ? p->priv : NULL;
+
+	if (!priv)
+		return;
+	priv->click_glow = 1.0;
+	if (!priv->glow_id)
+		priv->glow_id = g_timeout_add(40, launcher_glow_tick, p);
+	if (p->win)
+		gtk_widget_queue_draw(p->win);
 }
 
 static gboolean launcher_button(XsPlugin *p, GdkEventButton *ev)
@@ -455,6 +518,7 @@ static gboolean launcher_button(XsPlugin *p, GdkEventButton *ev)
 	if (!priv || ev->type != GDK_BUTTON_PRESS)
 		return FALSE;
 	if (ev->button == 1) {
+		launcher_start_glow(p); /* визуал: апплет что-то запустил */
 		launcher_launch(priv);
 		return TRUE;
 	}
@@ -466,7 +530,10 @@ static void launcher_shutdown(XsPlugin *p)
 	PrivData *priv = p->priv;
 
 	if (priv) {
-		launcher_clear_icon(priv);
+		if (priv->glow_id) {
+			g_source_remove(priv->glow_id);
+			priv->glow_id = 0;
+		}
 		g_free(priv->action);
 		g_free(priv->icon_path);
 		g_free(priv->label);
@@ -669,7 +736,9 @@ static XsPluginOps ops = {
 	.menu = NULL,
 	.menu_cmd = launcher_menu_cmd,
 	.properties = launcher_properties,
-	.fill_themes = NULL
+	.fill_themes = NULL,
+	.enter = launcher_enter,
+	.leave = launcher_leave
 };
 
 static XsPluginDesc desc = {

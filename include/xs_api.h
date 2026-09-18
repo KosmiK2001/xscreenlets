@@ -59,6 +59,9 @@ struct _XsPluginOps {
 	void (*fill_themes)(XsPlugin *p, GtkListStore *store);
 	/* событие колеса мыши на окне: return TRUE = обработано */
 	gboolean (*scroll)(XsPlugin *p, GdkEventScroll *ev);
+	/* курсор вошёл/вышел из окна апплета (подсветка и т.п.) */
+	void (*enter)(XsPlugin *p);
+	void (*leave)(XsPlugin *p);
 };
 
 typedef struct {
