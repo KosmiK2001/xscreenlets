@@ -948,7 +948,8 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
         state->y = v;
     if (!state->locked) {
         /* гость рамки: v — координаты ВНУТРИ content-зоны →
-         * пересчёт в координаты родителя (cx/cy) */
+         * КЛАМП в зону (не вылезать за рамку) и пересчёт в
+         * координаты родителя (cx/cy) */
         const char *host_name = g_object_get_data(G_OBJECT(p->win),
                                                   "xs-guest-host");
         XsPlugin *host = host_name ? find_plugin_by_name(host_name)
@@ -959,11 +960,38 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
                        : NULL;
 
         if (xy) {
+            XsWinState *hs = g_object_get_data(
+                G_OBJECT(host->win), "xs-state");
+            int cx = xy[0], cy = xy[1];
+            int gw = 0, gh = 0, max_x, max_y;
+
+            gtk_window_get_size(GTK_WINDOW(p->win), &gw, &gh);
+            max_x = hs ? hs->w - cx * 2 - gw : 0;
+            max_y = hs ? hs->h - cy * 2 - gh : 0;
+            if (max_x < 0) max_x = 0;
+            if (max_y < 0) max_y = 0;
+            if (state->x > max_x) {
+                state->x = max_x;
+                g_key_file_set_integer(kf, p->name, "x", max_x);
+            }
+            if (state->y > max_y) {
+                state->y = max_y;
+                g_key_file_set_integer(kf, p->name, "y", max_y);
+            }
+            if (state->x < 0) {
+                state->x = 0;
+                g_key_file_set_integer(kf, p->name, "x", 0);
+            }
+            if (state->y < 0) {
+                state->y = 0;
+                g_key_file_set_integer(kf, p->name, "y", 0);
+            }
+            xs_core_plugin_conf_flush(p->name);
+            /* синхронизируем спиннер с клампнутым значением */
+            gtk_spin_button_set_value(spin, strcmp(key, "x") == 0
+                                                ? state->x : state->y);
             gtk_window_move(GTK_WINDOW(p->win),
-                            strcmp(key, "x") == 0 ? xy[0] + v
-                                                  : xy[0] + state->x,
-                            strcmp(key, "x") == 0 ? xy[1] + state->y
-                                                  : xy[1] + v);
+                            cx + state->x, cy + state->y);
         } else {
             gtk_window_move(GTK_WINDOW(p->win),
                             strcmp(key, "x") == 0 ? v : state->x,
@@ -2655,7 +2683,6 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
         XsWinState *hs;
         gint *xy;
         int cx, cy, cw, ch, nx, ny, gw, gh;
-        gboolean clamped = FALSE;
 
         /* первый configure после репарента несёт устаревшие
          * (экранные) координаты — игнорируем, позицию уже задал
@@ -2676,23 +2703,13 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
         /* content-зона в координатах родителя */
         cw = hs->w - cx * 2;
         ch = hs->h - cy * 2;
-        gtk_window_get_position(GTK_WINDOW(window), &x, &y);
-        /* X позиции child-окна ОТНОСИТЕЛЬНЫ родителя → переводим в
-         * координаты content-зоны (в них храним/клампим) */
-        nx = x - cx;
-        ny = y - cy;
-        gtk_window_get_size(GTK_WINDOW(window), &gw, &gh);
-        if (nx < 0) { nx = 0; clamped = TRUE; }
-        if (ny < 0) { ny = 0; clamped = TRUE; }
-        if (nx + gw > cw) { nx = (cw > gw) ? cw - gw : 0; clamped = TRUE; }
-        if (ny + gh > ch) { ny = (ch > gh) ? ch - gh : 0; clamped = TRUE; }
-        state->x = nx;
-        state->y = ny;
-        if (clamped) {
-            gtk_window_move(GTK_WINDOW(window), cx + nx, cy + ny);
-        }
-        /* фон под гостем меняется при его движении — обновить (debounce
-         * через таймер: после завершения драга) */
+        /* Позиция гостя известна ТОЛЬКО нам (state->x/y): child-окно
+         * двигается исключительно нашими move (репарент/спиннеры).
+         * Любое чтение позиции из GDK после репарента ненадёжно
+         * (возвращает экранные координаты) — поэтому здесь НИЧЕГО
+         * не читаем и не клампим. configure от наших move просто
+         * обновляет снимок фона. */
+        (void)x; (void)y;
         {
             GuestBgCtx *c = guest_bg_ctx_new(host, p);
 
