@@ -130,6 +130,10 @@ struct _XsHostApi {
 	 * рисовать его cairo_set_source_surface+paint в draw() первым
 	 * слоем; NULL = нет — рисовать как обычно) */
 	cairo_surface_t *(*get_host_backdrop)(XsPlugin *p);
+	/* пересчитать гостей под НОВУЮ content-зону (смена темы/размера):
+	 * кламп позиций, move, переснятие фона */
+	void (*refit_guests)(XsPlugin *host, int cx, int cy, int cw,
+	                     int ch);
 };
 
 #endif /* XS_API_H */

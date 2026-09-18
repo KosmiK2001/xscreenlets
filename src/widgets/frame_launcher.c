@@ -449,8 +449,35 @@ static void fl_theme_combo_changed(GtkComboBox *combo, gpointer data)
 	xs_host_api()->conf_set_str(priv->kf, p->name, "theme",
 	                            priv->theme);
 	xs_core_plugin_conf_flush(p->name);
+	/* сбросить толщины: тема задаст свои (дефолт 4px), иначе
+	 * останутся старые от предыдущей темы */
+	priv->frame_l = 0;
+	priv->frame_r = 0;
+	priv->frame_t = 0;
+	priv->frame_b = 0;
 	/* живое применение темы: перезагрузить и перерисовать */
 	fl_load_theme(p, priv);
+	if (!priv->frame_l) priv->frame_l = 4;
+	if (!priv->frame_r) priv->frame_r = 4;
+	if (!priv->frame_t) priv->frame_t = 4;
+	if (!priv->frame_b) priv->frame_b = 4;
+	{
+		GtkWidget *fixed = g_object_get_data(G_OBJECT(p->win),
+		                                     "xs-content");
+		gint *xy = g_object_get_data(G_OBJECT(p->win),
+		                             "xs-content-xy");
+		int cx, cy, cw, ch;
+
+		fl_content_rect(priv, &cx, &cy, &cw, &ch);
+		if (fixed)
+			gtk_widget_set_size_request(fixed, cw, ch);
+		if (xy) {
+			xy[0] = cx;
+			xy[1] = cy;
+		}
+		/* позиции гостей пересчитает демон: */
+		xs_host_api()->refit_guests(p, cx, cy, cw, ch);
+	}
 	gtk_widget_queue_draw(p->win);
 }
 

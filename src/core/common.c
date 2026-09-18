@@ -3520,6 +3520,57 @@ static cairo_surface_t *host_get_backdrop(XsPlugin *p)
     return g_object_get_data(G_OBJECT(p->win), "xs-host-backdrop");
 }
 
+/* Пересчитать гостей под новую content-зону (смена темы/размера):
+ * кламп позиций в [0..cw-gw]/[0..ch-gh], move, переснятие фона. */
+static void host_refit_guests(XsPlugin *host, int cx, int cy, int cw,
+                              int ch)
+{
+    gsize i;
+
+    if (!host || !host->win || !host->name || cw <= 0 || ch <= 0)
+        return;
+    for (i = 0; g_plugins && i < g_plugins->len; i++) {
+        XsPlugin *g = g_ptr_array_index(g_plugins, i);
+        const char *gHost;
+        XsWinState *ggs;
+        GKeyFile *gkf;
+        int gw = 0, gh = 0, max_x, max_y;
+        gboolean changed = FALSE;
+        GuestBgCtx *c1, *c2;
+
+        if (!g || !g->win || !g->name)
+            continue;
+        gHost = g_object_get_data(G_OBJECT(g->win), "xs-guest-host");
+
+        if (!gHost || strcmp(gHost, host->name) != 0)
+            continue;
+        ggs = g_object_get_data(G_OBJECT(g->win), "xs-state");
+        if (!ggs)
+            continue;
+        gtk_window_get_size(GTK_WINDOW(g->win), &gw, &gh);
+        max_x = cw - gw;
+        max_y = ch - gh;
+        if (max_x < 0) max_x = 0;
+        if (max_y < 0) max_y = 0;
+        if (ggs->x > max_x) { ggs->x = max_x; changed = TRUE; }
+        if (ggs->y > max_y) { ggs->y = max_y; changed = TRUE; }
+        if (ggs->x < 0) { ggs->x = 0; changed = TRUE; }
+        if (ggs->y < 0) { ggs->y = 0; changed = TRUE; }
+        if (changed) {
+            gkf = xs_core_plugin_conf(g->name);
+            g_key_file_set_integer(gkf, g->name, "x", ggs->x);
+            g_key_file_set_integer(gkf, g->name, "y", ggs->y);
+            xs_core_plugin_conf_flush(g->name);
+        }
+        gtk_window_move(GTK_WINDOW(g->win),
+                        cx + ggs->x, cy + ggs->y);
+        c1 = guest_bg_ctx_new(host, g);
+        g_timeout_add(120, host_update_guest_backdrop_idle, c1);
+        c2 = guest_bg_ctx_new(host, g);
+        g_timeout_add(500, host_update_guest_backdrop_idle, c2);
+    }
+}
+
 /* Создать НОВЫЙ инстанс типа type и включить его гостем хоста:
  * генерируем UUID-конфиг (started_by=plugin, symlink не создаётся),
  * позиция гостя — внутри видимой зоны рамки. */
@@ -3665,7 +3716,8 @@ static XsHostApi host_api = {
     .start_guest = start_guest,
     .stop_guest = stop_guest,
     .start_guest_new = start_guest_new,
-    .get_host_backdrop = host_get_backdrop
+    .get_host_backdrop = host_get_backdrop,
+    .refit_guests = host_refit_guests
 };
 
 void xs_core_cleanup_plugin_window(XsPlugin *p)
