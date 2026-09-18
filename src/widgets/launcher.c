@@ -156,18 +156,24 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 			    CAIRO_FORMAT_ARGB32, target_w, target_h);
 			cairo_t *tcr = cairo_create(s);
 
-			if (!scaled) {
-				xs_host_api()->log(
-				    "launcher: scale_simple NULL for %s (%dx%d)",
-				    priv->icon_path, target_w, target_h);
-				cairo_destroy(tcr);
-				cairo_surface_destroy(s);
-				g_object_unref(full);
-				return NULL;
+			if (scaled) {
+				gdk_cairo_set_source_pixbuf(tcr, scaled,
+				                            0, 0);
+				cairo_paint(tcr);
+				g_object_unref(scaled);
+			} else {
+				/* fallback: растянуть full без scale_simple
+				 * (NULL от него — известная странность на
+				 * мелких размерах) */
+				gdk_cairo_set_source_pixbuf(tcr, full, 0,
+				                            0);
+				cairo_scale(tcr,
+				            (double)target_w /
+				                gdk_pixbuf_get_width(full),
+				            (double)target_h /
+				                gdk_pixbuf_get_height(full));
+				cairo_paint(tcr);
 			}
-			gdk_cairo_set_source_pixbuf(tcr, scaled, 0, 0);
-			cairo_set_operator(tcr, CAIRO_OPERATOR_SOURCE);
-			cairo_paint(tcr);
 			cairo_destroy(tcr);
 			g_object_unref(scaled);
 			g_object_unref(full);
