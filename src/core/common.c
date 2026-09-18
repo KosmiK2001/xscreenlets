@@ -2626,10 +2626,53 @@ on_configure_event(GtkWidget *window, GdkEventConfigure *event, gpointer data)
         return FALSE;
 
     /* Гость внутри frame_launcher: координаты относительно рамки не
-     * пишем в конфиг (позицию гостя задаёт хозяин; иначе конфиг
-     * замусоривается «стольными» координатами и все гости съезжают). */
-    if (g_object_get_data(G_OBJECT(window), "xs-guest-host"))
+     * пишем в конфиг; при драге КЛАМПИМ гостя в content-зону хозяина
+     * (гость не может вылезти за рамку) и обновляем снимок фона. */
+    if (g_object_get_data(G_OBJECT(window), "xs-guest-host")) {
+        const char *host_name = g_object_get_data(G_OBJECT(window),
+                                                  "xs-guest-host");
+        XsPlugin *host = find_plugin_by_name(host_name);
+        XsWinState *hs;
+        gint *xy;
+        int cx, cy, cw, ch, nx, ny, gw, gh;
+        gboolean clamped = FALSE;
+        GdkWindow *gdkwin = gtk_widget_get_window(window);
+
+        if (!host || !host->win)
+            return FALSE;
+        hs = g_object_get_data(G_OBJECT(host->win), "xs-state");
+        if (!hs)
+            return FALSE;
+        xy = g_object_get_data(G_OBJECT(host->win), "xs-content-xy");
+        cx = xy ? xy[0] : 0;
+        cy = xy ? xy[1] : 0;
+        /* content-зона в координатах родителя */
+        cw = hs->w - cx * 2;
+        ch = hs->h - cy * 2;
+        gtk_window_get_position(GTK_WINDOW(window), &x, &y);
+        nx = x;
+        ny = y;
+        gtk_window_get_size(GTK_WINDOW(window), &gw, &gh);
+        if (nx < 0) { nx = 0; clamped = TRUE; }
+        if (ny < 0) { ny = 0; clamped = TRUE; }
+        if (nx + gw > cw) { nx = cw - gw; clamped = TRUE; }
+        if (ny + gh > ch) { ny = ch - gh; clamped = TRUE; }
+        if (nx > cw) { nx = cw / 2; clamped = TRUE; }
+        if (ny > ch) { ny = ch / 2; clamped = TRUE; }
+        state->x = nx;
+        state->y = ny;
+        if (clamped) {
+            gtk_window_move(GTK_WINDOW(window), cx + nx, cy + ny);
+        }
+        /* фон под гостем меняется при его движении — обновить (debounce
+         * через таймер: после завершения драга) */
+        {
+            GuestBgCtx *c = guest_bg_ctx_new(host, p);
+
+            g_timeout_add(300, host_update_guest_backdrop_idle, c);
+        }
         return FALSE;
+    }
 
     /* Заморозка на время правки User label: configure-event не пишет
      * x/y в конфиг (rename может двигать окно через WM). Снимается в
