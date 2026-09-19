@@ -1918,13 +1918,36 @@ void xs_core_shutdown_all(void)
     if (g_conf && g_conf_path && g_conf_path[0] != '\0')
         xs_core_conf_flush();
     if (g_plugins) {
-        for (i = 0; i < g_plugins->len; i++) {
-            XsPlugin *p = g_ptr_array_index(g_plugins, i);
-            if (p) {
+        /* снимок указателей: fl_shutdown рамки удаляет гостей из
+         * g_plugins (через stop_guest) — итерация по живому массиву
+         * съезжала по индексам → пропуски/двойной shutdown →
+         * BadWindow при destroy окон. Порядок: сначала не-рамки
+         * (гости), затем рамки. */
+        GPtrArray *snap = g_ptr_array_sized_new(g_plugins->len);
+
+        for (i = 0; i < g_plugins->len; i++)
+            if (g_ptr_array_index(g_plugins, i))
+                g_ptr_array_add(snap,
+                                g_ptr_array_index(g_plugins, i));
+        for (i = 0; i < snap->len; i++) {
+            XsPlugin *p = g_ptr_array_index(snap, i);
+
+            if (p && !(p->type && strcmp(p->type, "frame_launcher") == 0))
                 xs_core_shutdown_plugin(p);
-                g_free((char *)p->name);
-            }
         }
+        for (i = 0; i < snap->len; i++) {
+            XsPlugin *p = g_ptr_array_index(snap, i);
+
+            if (p && p->type && strcmp(p->type, "frame_launcher") == 0)
+                xs_core_shutdown_plugin(p);
+        }
+        for (i = 0; i < snap->len; i++) {
+            XsPlugin *p = g_ptr_array_index(snap, i);
+
+            if (p)
+                g_free((char *)p->name);
+        }
+        g_ptr_array_free(snap, TRUE);
         g_ptr_array_free(g_plugins, TRUE);
         g_plugins = NULL;
     }
@@ -3731,6 +3754,20 @@ static gpointer guest_bg_ctx_new(XsPlugin *host, XsPlugin *guest)
     return c;
 }
 
+/* Инстанс ещё зарегистрирован (указатель валиден, не уничтожен)? */
+static gboolean plugin_alive(XsPlugin *p)
+{
+    gsize i;
+
+    if (!p || !g_plugins)
+        return FALSE;
+    for (i = 0; i < g_plugins->len; i++) {
+        if (g_ptr_array_index(g_plugins, i) == p)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 /* Повторно применить позицию гостя (child-окна иногда «съедают»
  * первый move сразу после репарента — спиннеры 0→1→0 это лечили;
  * теперь лечит демон автоматически). */
@@ -3741,8 +3778,9 @@ static gboolean guest_reapply_pos_idle(gpointer data)
     gint *xy;
     int cx = 0, cy = 0;
 
-    if (c->host && c->host->priv && c->host->win &&
-        c->guest && c->guest->priv && c->guest->win) {
+    if (plugin_alive(c->host) && plugin_alive(c->guest) &&
+        c->host->win && c->host->priv && c->guest->win &&
+        c->guest->priv) {
         ggs = g_object_get_data(G_OBJECT(c->guest->win), "xs-state");
         xy = g_object_get_data(G_OBJECT(c->host->win),
                                "xs-content-xy");
@@ -3770,8 +3808,9 @@ static gboolean host_update_guest_backdrop_idle(gpointer data)
 {
     GuestBgCtx *c = data;
 
-    /* оба должны быть живы (priv != NULL) */
-    if (c->host && c->host->priv && c->guest && c->guest->priv)
+    /* оба должны быть живы (зарегистрированы + priv != NULL) */
+    if (plugin_alive(c->host) && plugin_alive(c->guest) &&
+        c->host->priv && c->guest->priv)
         host_update_guest_backdrop(c->host, c->guest);
     g_free(c);
     return G_SOURCE_REMOVE;
