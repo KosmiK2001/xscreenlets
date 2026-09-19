@@ -1807,11 +1807,8 @@ static gboolean on_leave_notify(GtkWidget *widget, GdkEventCrossing *ev,
     (void)ev;
     if (!p || !p->win)
         return FALSE;
-    if (p->ops && p->ops->leave) {
-        xs_log_impl("leave-notify: %s leave=%p", p->name,
-                    (void *)p->ops->leave);
+    if (p->ops && p->ops->leave)
         p->ops->leave(p);
-    }
     return FALSE;
 }
 

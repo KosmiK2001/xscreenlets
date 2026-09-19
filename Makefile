@@ -60,11 +60,11 @@ $(TARGET_FL_PLUGIN): $(BUILD_DIR) $(OBJS_FL)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
 
-# Pattern rules for object files
-$(BUILD_DIR)/%.o: src/core/%.c
+# Pattern rules for object files (пересборка при изменении заголовков)
+$(BUILD_DIR)/%.o: src/core/%.c include/xs_api.h src/core/common.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: src/widgets/%.c
+$(BUILD_DIR)/%.o: src/widgets/%.c include/xs_api.h src/core/common.h
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 clean:
