@@ -324,6 +324,21 @@ static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	if (!priv)
 		return;
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	/* гость рамки: первым слоем — фон ВНЕШНЕГО хоста (кусок его
+	 * кадра под нами), иначе прозрачные пиксели nobg-темы гостя
+	 * показали бы рабочий стол сквозь внешний frame */
+	if (xs_host_api()->get_host_backdrop) {
+		cairo_surface_t *host_bg =
+		    xs_host_api()->get_host_backdrop(p);
+
+		if (host_bg) {
+			cairo_save(cr);
+			cairo_set_source_surface(cr, host_bg, 0, 0);
+			cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+			cairo_paint(cr);
+			cairo_restore(cr);
+		}
+	}
 	fl_content_rect(priv, &cx, &cy, &cw, &ch);
 	/* ФОН content-зоны ВСЕГДА рисует код (как в самой первой теме):
 	 * тёмное дымчатое стекло × bg_opacity — КРОМЕ тем с флагом
