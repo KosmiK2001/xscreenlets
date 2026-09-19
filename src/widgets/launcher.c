@@ -72,6 +72,9 @@ static void launcher_leave(XsPlugin *p)
 	if (!priv)
 		return;
 	priv->hovered = FALSE;
+	/* курсор ушёл при зажатой ЛКМ: снять pressed, чтобы glow
+	 * не завис навсегда */
+	priv->pressed = FALSE;
 	if (p->win)
 		gtk_widget_queue_draw(p->win);
 }
