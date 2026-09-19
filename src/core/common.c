@@ -1759,14 +1759,10 @@ static gboolean on_button(GtkWidget *widget, GdkEventButton *event,
     state = g_object_get_data(G_OBJECT(p->win), "xs-state");
     if (!state)
         return FALSE;
-    /* press → плагин (popup/анимация); release → ВСЕГДА плагину:
-     * click-анимация лаунчера завершается именно на release */
+    /* press → плагин (popup/анимация); release → плагину тоже:
+     * click-анимация лаунчера завершается на release.
+     * ОДИН вызов на событие — иначе launch срабатывает дважды. */
     handled = p->ops && p->ops->button ? p->ops->button(p, event) : FALSE;
-    if (event->type == GDK_BUTTON_RELEASE) {
-        if (p->ops && p->ops->button)
-            return p->ops->button(p, event);
-        return FALSE;
-    }
     if (!handled && event->button == 3) {
         xs_core_popup_menu(p, event);
         return TRUE;
