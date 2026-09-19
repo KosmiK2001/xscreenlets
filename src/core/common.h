@@ -123,7 +123,9 @@ char *xs_core_next_instance_name(const char *type);
  * инстанса ещё нет своих. Возвращает 0 при успехе. */
 int xs_core_add_instance(const char *type);
 /* Удалить инстанс: shutdown + очистка (секция конфига сохраняется как есть). */
-void xs_core_delete_instance(XsPlugin *p);
+void xs_core_delete_instance_full(XsPlugin *p, gboolean delete_conf);
+void xs_core_remove_guest_entry(const char *name);
+#define xs_core_delete_instance(p) xs_core_delete_instance_full(p, TRUE)
 /* Записать текущий набор инстансов в [instances] главного конфига
  * (реализация в main.c). */
 void xs_core_save_instances(void);

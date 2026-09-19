@@ -1901,8 +1901,8 @@ void xs_core_dispatch_cmd(XsPlugin *p, const char *cmd)
 
         xs_core_add_instance(type);
     } else if (strcmp(cmd, "delete") == 0) {
-        /* удалить этот инстанс (окно уже уничтожится, меню закрыто через idle) */
-        xs_core_delete_instance(p);
+        /* удалить этот инстанс ВМЕСТЕ с конфигом (окно уже уничтожится) */
+        xs_core_delete_instance_full(p, TRUE);
     } else if (strcmp(cmd, "quit") == 0) {
         xs_core_shutdown_all();
         gtk_main_quit();
@@ -2330,7 +2330,101 @@ int xs_dead_link_dialog(GtkWindow *parent, const char *linkname,
     return res;
 }
 
-void xs_core_delete_instance(XsPlugin *p)
+
+/* Удалить гостевую запись name из guests_-списка всех frame_launcher
+ * конфигов (сдвиг хвоста, чтобы список оставался плотным). */
+void xs_core_remove_guest_entry(const char *name)
+{
+    GDir *dir;
+
+    if (!name || !name[0] || !g_plugin_conf_dir)
+        return;
+    dir = g_dir_open(g_plugin_conf_dir, 0, NULL);
+    if (!dir)
+        return;
+    for (;;) {
+        const char *fn = g_dir_read_name(dir);
+        char *path, *data;
+        GKeyFile *kf;
+        gsize i, n;
+        int removed = 0;
+
+        if (!fn)
+            break;
+        if (!g_str_has_suffix(fn, ".conf") ||
+            !g_str_has_prefix(fn, "frame_launcher-"))
+            continue;
+        path = g_build_filename(g_plugin_conf_dir, fn, NULL);
+        kf = g_key_file_new();
+        if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE,
+                                       NULL)) {
+            g_key_file_free(kf);
+            g_free(path);
+            continue;
+        }
+        {
+            gchar **groups = g_key_file_get_groups(kf, NULL);
+            const char *host = groups && groups[0] ? groups[0] : NULL;
+
+            if (host) {
+                for (i = 1; i <= 64; i++) {
+                    char *k = g_strdup_printf("guests_%d", (int)i);
+                    char *v = g_key_file_get_string(kf, host, k,
+                                                    NULL);
+
+                    if (v && v[0]) {
+                        if (strcmp(v, name) == 0) {
+                            int j;
+
+                            /* сдвиг: guests_i = guests_i+1 ... */
+                            for (j = i; j < 64; j++) {
+                                char *kj =
+                                    g_strdup_printf("guests_%d", j);
+                                char *kj1 = g_strdup_printf(
+                                    "guests_%d", j + 1);
+                                char *v1 = g_key_file_get_string(
+                                    kf, host, kj1, NULL);
+
+                                if (v1 && v1[0]) {
+                                    g_key_file_set_string(kf, host,
+                                                          kj, v1);
+                                    g_free(v1);
+                                } else {
+                                    g_key_file_remove_key(kf, host,
+                                                          kj, NULL);
+                                }
+                                g_free(kj);
+                                g_free(kj1);
+                                if (!v1 || !v1[0])
+                                    break;
+                            }
+                            removed++;
+                            i--; /* проверим тот же слот снова */
+                        }
+                        g_free(v);
+                    } else {
+                        g_free(k);
+                        break;
+                    }
+                    g_free(k);
+                }
+                if (removed) {
+                    g_key_file_save_to_file(kf, path, NULL);
+                    xs_log_impl("guest entry '%s' removed from %s",
+                                name, fn);
+                }
+            }
+            g_strfreev(groups);
+        }
+        g_key_file_free(kf);
+        g_free(path);
+        (void)data;
+        (void)n;
+    }
+    g_dir_close(dir);
+}
+
+void xs_core_delete_instance_full(XsPlugin *p, gboolean delete_conf)
 {
     char *name_copy;
 
@@ -2349,10 +2443,10 @@ void xs_core_delete_instance(XsPlugin *p)
         unlink(link);
         g_free(link);
     }
-    /* ПОЛЬЗОВАТЕЛЬСКОЕ удаление = удалить и конфиг: иначе после
-     * рестарта инстанс «воскресает» (гость рамки снова запускается
-     * из списка гостей хоста). Убираем и файл, и кэш. */
-    {
+    /* Явное «Delete this» — удалить и конфиг (иначе после рестарта
+     * инстанс «воскресает»). Временная остановка (галочка frame,
+     * рестарт-кнопка) конфиг сохраняет. */
+    if (delete_conf) {
         char *path = xs_plugin_conf_path(name_copy);
 
         if (unlink(path) != 0 && errno != ENOENT)
@@ -2361,9 +2455,11 @@ void xs_core_delete_instance(XsPlugin *p)
         else
             xs_log_impl("config deleted: %s", path);
         g_free(path);
+        if (g_plugin_confs)
+            g_hash_table_remove(g_plugin_confs, name_copy);
+        /* вычистить имя из guests_N всех frame-конфигов */
+        xs_core_remove_guest_entry(name_copy);
     }
-    if (g_plugin_confs)
-        g_hash_table_remove(g_plugin_confs, name_copy);
     g_free(name_copy);
     xs_core_save_instances();
 }
@@ -3532,7 +3628,7 @@ static void stop_guest(XsPlugin *host, const char *guest_name)
 
     (void)host;
     if (g)
-        xs_core_delete_instance(g);
+        xs_core_delete_instance_full(g, FALSE);
 }
 
 /* Копия куска отрисованного кадра хоста под гостем: гость рисует её
