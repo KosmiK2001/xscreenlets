@@ -23,6 +23,12 @@ typedef struct {
 	int end_size_w, end_size_h; /* end_size: конечный размер px */
 	int win_w, win_h;       /* итоговый размер окна (память) */
 	char *scale_mode;       /* "scale" | "end_size" */
+	/* кэш отрисованного буфера (сбрасывается при изменениях) */
+	cairo_surface_t *cached_buf;
+	int cached_w, cached_h;
+	char *cached_icon;
+	double cached_scale;
+	int cached_esw, cached_esh;
 	gboolean hovered;       /* курсор над лаунчером (подсветка) */
 	gboolean pressed;       /* ЛКМ удерживается (click-анимация) */
 	double click_glow;      /* 0..1 затухающая вспышка клика */
@@ -94,15 +100,28 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
                                                int target_w,
                                                int target_h)
 {
-	GdkPixbuf *full = NULL;
-	GdkPixbuf *scaled = NULL;
-	cairo_surface_t *surf = NULL;
-	GError *err = NULL;
-
 	if (!priv->icon_path || !priv->icon_path[0])
 		return NULL;
 	if (target_w < 1) target_w = 1;
 	if (target_h < 1) target_h = 1;
+
+	/* кэш: тот же файл/размер/масштаб → не перерисовываем.
+	 * Быстрая мышь = десятки draw в сек: без кэша каждый draw
+	 * читал файл и делал scale_simple — гонок нет, но CPU/segv
+	 * риски при частичной инициализации. */
+	if (priv->cached_buf && priv->cached_w == target_w &&
+	    priv->cached_h == target_h && priv->cached_icon &&
+	    strcmp(priv->cached_icon, priv->icon_path) == 0 &&
+	    priv->cached_scale == priv->scale &&
+	    priv->cached_esw == priv->end_size_w &&
+	    priv->cached_esh == priv->end_size_h) {
+		return cairo_surface_reference(priv->cached_buf);
+	}
+
+	GdkPixbuf *full = NULL;
+	GdkPixbuf *scaled = NULL;
+	cairo_surface_t *surf = NULL;
+	GError *err = NULL;
 
 	if (g_str_has_suffix(priv->icon_path, ".svg") ||
 	    g_str_has_suffix(priv->icon_path, ".SVG")) {
@@ -127,7 +146,17 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 		rsvg_handle_render_document(svg, tcr, &vp, NULL);
 		cairo_destroy(tcr);
 		g_object_unref(svg);
-		return surf;
+		if (priv->cached_buf)
+			cairo_surface_destroy(priv->cached_buf);
+		priv->cached_buf = cairo_surface_reference(surf);
+		priv->cached_w = target_w;
+		priv->cached_h = target_h;
+		g_free(priv->cached_icon);
+		priv->cached_icon = g_strdup(priv->icon_path);
+		priv->cached_scale = priv->scale;
+		priv->cached_esw = priv->end_size_w;
+		priv->cached_esh = priv->end_size_h;
+		return cairo_surface_reference(surf);
 	} else {
 		/* растр: загрузка full → scale */
 		full = gdk_pixbuf_new_from_file(priv->icon_path, &err);
@@ -151,8 +180,23 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 			}
 			cairo_destroy(tcr);
 			g_object_unref(full);
-			return s;
+			if (priv->cached_buf)
+				cairo_surface_destroy(priv->cached_buf);
+			priv->cached_buf = cairo_surface_reference(s);
+			priv->cached_w = target_w;
+			priv->cached_h = target_h;
+			g_free(priv->cached_icon);
+			priv->cached_icon = g_strdup(priv->icon_path);
+			priv->cached_scale = priv->scale;
+			priv->cached_esw = priv->end_size_w;
+			priv->cached_esh = priv->end_size_h;
+			return cairo_surface_reference(s);
 		}
+	}
+	/* ошибка рендера: сбросить кэш, чтобы retry был возможен */
+	if (priv->cached_buf) {
+		cairo_surface_destroy(priv->cached_buf);
+		priv->cached_buf = NULL;
 	}
 	return NULL;
 }
@@ -572,6 +616,11 @@ static void launcher_shutdown(XsPlugin *p)
 			g_source_remove(priv->glow_id);
 			priv->glow_id = 0;
 		}
+		if (priv->cached_buf) {
+			cairo_surface_destroy(priv->cached_buf);
+			priv->cached_buf = NULL;
+		}
+		g_free(priv->cached_icon);
 		g_free(priv->action);
 		g_free(priv->icon_path);
 		g_free(priv->label);
