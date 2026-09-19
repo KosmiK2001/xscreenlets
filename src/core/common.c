@@ -1792,9 +1792,8 @@ static gboolean on_enter_notify(GtkWidget *widget, GdkEventCrossing *ev,
     (void)ev;
     if (!p || !p->win)
         return FALSE;
-    /* ВРЕМЕННО отключено: старые .so с коротким XsPluginOps читают
-     * enter/leave за границей структуры (segv). Вернуть после полной
-     * пересборки/переустановки всех so. */
+    if (p->ops && p->ops->enter)
+        p->ops->enter(p);
     return FALSE;
 }
 
@@ -1807,7 +1806,8 @@ static gboolean on_leave_notify(GtkWidget *widget, GdkEventCrossing *ev,
     (void)ev;
     if (!p || !p->win)
         return FALSE;
-    /* ВРЕМЕННО отключено (см. on_enter_notify) */
+    if (p->ops && p->ops->leave)
+        p->ops->leave(p);
     return FALSE;
 }
 

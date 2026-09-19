@@ -24,6 +24,7 @@ typedef struct {
 	int win_w, win_h;       /* итоговый размер окна (память) */
 	char *scale_mode;       /* "scale" | "end_size" */
 	gboolean hovered;       /* курсор над лаунчером (подсветка) */
+	gboolean pressed;       /* ЛКМ удерживается (click-анимация) */
 	double click_glow;      /* 0..1 затухающая вспышка клика */
 	guint glow_id;          /* таймер затухания вспышки */
 } PrivData;
@@ -36,6 +37,13 @@ static gboolean launcher_glow_tick(gpointer data)
 
 	if (!priv)
 		return G_SOURCE_REMOVE;
+	/* пока кнопка удерживается (press без release) — свечение
+	 * держится полным; затухание стартует по release */
+	if (priv->pressed) {
+		if (p->win)
+			gtk_widget_queue_draw(p->win);
+		return G_SOURCE_CONTINUE;
+	}
 	priv->click_glow -= 0.05;
 	if (priv->click_glow <= 0.0) {
 		priv->click_glow = 0.0;
@@ -43,7 +51,7 @@ static gboolean launcher_glow_tick(gpointer data)
 	} else if (p->win) {
 		gtk_widget_queue_draw(p->win);
 	}
-	return G_SOURCE_REMOVE;
+	return G_SOURCE_CONTINUE;
 }
 
 static void launcher_enter(XsPlugin *p)
@@ -530,10 +538,22 @@ static gboolean launcher_button(XsPlugin *p, GdkEventButton *ev)
 {
 	PrivData *priv = p->priv;
 
-	if (!priv || ev->type != GDK_BUTTON_PRESS)
+	if (!priv)
 		return FALSE;
-	if (ev->button == 1) {
-		launcher_start_glow(p); /* визуал: апплет что-то запустил */
+	/* CLICK-АНИМАЦИЯ: press → вспышка полная; release → затухание */
+	if (ev->type == GDK_BUTTON_PRESS && ev->button == 1) {
+		priv->pressed = TRUE;
+		priv->click_glow = 1.0;
+		if (!priv->glow_id)
+			priv->glow_id = g_timeout_add(50,
+			                              launcher_glow_tick, p);
+		if (p->win)
+			gtk_widget_queue_draw(p->win);
+		return TRUE; /* ждём release */
+	}
+	if (ev->type == GDK_BUTTON_RELEASE && ev->button == 1) {
+		priv->pressed = FALSE;
+		launcher_start_glow(p); /* затухание + запуск */
 		launcher_launch(priv);
 		return TRUE;
 	}
