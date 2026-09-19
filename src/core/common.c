@@ -2355,7 +2355,7 @@ void xs_core_delete_instance(XsPlugin *p)
     {
         char *path = xs_plugin_conf_path(name_copy);
 
-        if (g_unlink(path) != 0 && errno != ENOENT)
+        if (unlink(path) != 0 && errno != ENOENT)
             xs_log_impl("cannot delete config %s: %s", path,
                         g_strerror(errno));
         else
