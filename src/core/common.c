@@ -1,5 +1,6 @@
 #include <unistd.h> /* symlink, unlink, rmdir */
 #include <stdio.h>  /* remove */
+#include <errno.h>  /* errno, ENOENT */
 
 #include "common.h"
 #include "tray.h"
@@ -2341,14 +2342,28 @@ void xs_core_delete_instance(XsPlugin *p)
     xs_core_unregister_plugin(p);
     xs_core_free_plugin(p);
     xs_tray_rebuild();
-    /* Убрать symlink из plugins_on; конфиг в .plugins остаётся
-     * (инстанс можно снова включить, выбрав его при мёртвом symlink). */
+    /* Удалить symlink из plugins_on */
     if (g_plugin_onoff_dir) {
         char *link = g_build_filename(g_plugin_onoff_dir, name_copy, NULL);
 
         unlink(link);
         g_free(link);
     }
+    /* ПОЛЬЗОВАТЕЛЬСКОЕ удаление = удалить и конфиг: иначе после
+     * рестарта инстанс «воскресает» (гость рамки снова запускается
+     * из списка гостей хоста). Убираем и файл, и кэш. */
+    {
+        char *path = xs_plugin_conf_path(name_copy);
+
+        if (g_unlink(path) != 0 && errno != ENOENT)
+            xs_log_impl("cannot delete config %s: %s", path,
+                        g_strerror(errno));
+        else
+            xs_log_impl("config deleted: %s", path);
+        g_free(path);
+    }
+    if (g_plugin_confs)
+        g_hash_table_remove(g_plugin_confs, name_copy);
     g_free(name_copy);
     xs_core_save_instances();
 }
