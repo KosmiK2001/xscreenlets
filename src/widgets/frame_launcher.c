@@ -168,6 +168,40 @@ static int fl_init(XsPlugin *p, GKeyFile *kf)
 	priv->y = xs_host_api()->conf_int(kf, p->name, "y", 80);
 	priv->width = xs_host_api()->conf_int(kf, p->name, "width", 300);
 	priv->height = xs_host_api()->conf_int(kf, p->name, "height", 400);
+	/* новые инстансы: записать дефолты в конфиг, чтобы Properties
+	 * и окно всегда показывали одно и то же (иначе спиннеры
+	 * показывали min=60 при отсутствии ключей) */
+	{
+		gboolean dirty = FALSE;
+
+		if (!g_key_file_has_key(kf, p->name, "width", NULL)) {
+			g_key_file_set_integer(kf, p->name, "width",
+			                       priv->width);
+			dirty = TRUE;
+		}
+		if (!g_key_file_has_key(kf, p->name, "height", NULL)) {
+			g_key_file_set_integer(kf, p->name, "height",
+			                       priv->height);
+			dirty = TRUE;
+		}
+		if (!g_key_file_has_key(kf, p->name, "x", NULL)) {
+			g_key_file_set_integer(kf, p->name, "x", priv->x);
+			dirty = TRUE;
+		}
+		if (!g_key_file_has_key(kf, p->name, "y", NULL)) {
+			g_key_file_set_integer(kf, p->name, "y", priv->y);
+			dirty = TRUE;
+		}
+		if (!g_key_file_has_key(kf, p->name, "bg_opacity", NULL)) {
+			char *s = g_strdup_printf("%g", priv->bg_opacity);
+
+			g_key_file_set_string(kf, p->name, "bg_opacity", s);
+			g_free(s);
+			dirty = TRUE;
+		}
+		if (dirty)
+			xs_core_plugin_conf_flush(p->name);
+	}
 	priv->shadow = xs_host_api()->conf_int(kf, p->name, "shadow", 3);
 	if (priv->shadow < 0)
 		priv->shadow = 0;
