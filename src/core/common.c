@@ -259,22 +259,28 @@ static void xs_onoff_relink(const char *old_name, const char *new_name)
 
     if (!g_plugin_onoff_dir || !new_name || !new_name[0])
         return;
+    char *new_conf = g_strdup_printf("%s.conf", new_name);
+    char *old_conf = (old_name && old_name[0])
+                         ? g_strdup_printf("%s.conf", old_name) : NULL;
+
     dir = g_path_get_dirname(g_plugin_onoff_dir);
-    newlink = g_build_filename(g_plugin_onoff_dir, new_name, NULL);
+    newlink = g_build_filename(g_plugin_onoff_dir, new_conf, NULL);
     unlink(newlink);
     {
         char *target = g_build_filename(dir, ".plugins",
-                                        new_name, NULL);
+                                        new_conf, NULL);
 
         if (symlink(target, newlink) != 0)
             xs_log_impl("symlink %s -> %s failed", newlink, target);
         g_free(target);
     }
-    if (old_name && old_name[0]) {
-        oldlink = g_build_filename(g_plugin_onoff_dir, old_name, NULL);
+    if (old_conf) {
+        oldlink = g_build_filename(g_plugin_onoff_dir, old_conf, NULL);
         unlink(oldlink);
         g_free(oldlink);
     }
+    g_free(new_conf);
+    g_free(old_conf);
     g_free(newlink);
     g_free(dir);
 }
