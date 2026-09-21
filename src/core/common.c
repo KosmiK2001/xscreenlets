@@ -2441,11 +2441,22 @@ void xs_core_remove_guest_entry(const char *name)
 void xs_core_delete_instance_full(XsPlugin *p, gboolean delete_conf)
 {
     char *name_copy;
+    char *host_name_copy = NULL;
 
     if (!p)
         return;
     xs_log_impl("deleting instance %s", p->name);
     name_copy = g_strdup(p->name);
+    /* имя хоста (если удаляемый — гость) читаем ДО shutdown:
+     * gtk_widget_destroy снимает все data с окна */
+    {
+        char *h = NULL;
+
+        if (p->win && G_IS_OBJECT(p->win))
+            h = g_strdup(g_object_get_data(G_OBJECT(p->win),
+                                           "xs-guest-host"));
+        host_name_copy = h;
+    }
     xs_core_shutdown_plugin(p);
     xs_core_unregister_plugin(p);
     xs_core_free_plugin(p);
@@ -2475,19 +2486,14 @@ void xs_core_delete_instance_full(XsPlugin *p, gboolean delete_conf)
         xs_core_remove_guest_entry(name_copy);
         /* уведомить frame-хоста (если удалённый был его гостем):
          * он перечитает список и обновит Properties */
-        if (p && p->win && G_IS_OBJECT(p->win)) {
-            const char *host_name = g_object_get_data(
-                G_OBJECT(p->win), "xs-guest-host");
+        if (host_name_copy && host_name_copy[0]) {
+            XsPlugin *host = find_plugin_by_name(host_name_copy);
 
-            if (host_name && host_name[0]) {
-                XsPlugin *host = find_plugin_by_name(host_name);
-
-                if (host && host->ops &&
-                    host->ops->guest_list_changed)
-                    host->ops->guest_list_changed(host);
-            }
+            if (host && host->ops && host->ops->guest_list_changed)
+                host->ops->guest_list_changed(host);
         }
     }
+    g_free(host_name_copy);
     g_free(name_copy);
     xs_core_save_instances();
 }
