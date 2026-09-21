@@ -54,6 +54,10 @@ static gboolean launcher_glow_tick(gpointer data)
 	if (priv->click_glow <= 0.0) {
 		priv->click_glow = 0.0;
 		priv->glow_id = 0;
+		return G_SOURCE_REMOVE; /* ВАЖНО: убить источник,
+		 * иначе вечный таймер с glow_id=0 переживёт
+		 * shutdown (g_source_remove не найдёт) и
+		 * segfault'ится по освобождённому priv */
 	} else if (p->win) {
 		gtk_widget_queue_draw(p->win);
 	}
