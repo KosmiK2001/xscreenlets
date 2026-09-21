@@ -2343,9 +2343,10 @@ void xs_core_remove_guest_entry(const char *name)
         return;
     for (;;) {
         const char *fn = g_dir_read_name(dir);
-        char *path, *data;
+        char *path, *inst;
         GKeyFile *kf;
-        gsize i, n;
+        gboolean cache;
+        gsize i;
         int removed = 0;
 
         if (!fn)
@@ -2353,13 +2354,24 @@ void xs_core_remove_guest_entry(const char *name)
         if (!g_str_has_suffix(fn, ".conf") ||
             !g_str_has_prefix(fn, "frame_launcher-"))
             continue;
+        inst = g_strndup(fn, strlen(fn) - 5); /* имя без .conf */
         path = g_build_filename(g_plugin_conf_dir, fn, NULL);
-        kf = g_key_file_new();
-        if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE,
-                                       NULL)) {
-            g_key_file_free(kf);
-            g_free(path);
-            continue;
+        /* ПРАВИМ КЭШ-запись (источник flush'ей), если она есть —
+         * правка только файла перетиралась следующим flush
+         * родителя, и гостя «воскрешало» в списке. */
+        cache = g_plugin_confs &&
+                g_hash_table_contains(g_plugin_confs, inst);
+        if (cache) {
+            kf = g_hash_table_lookup(g_plugin_confs, inst);
+        } else {
+            kf = g_key_file_new();
+            if (!g_key_file_load_from_file(kf, path,
+                                           G_KEY_FILE_NONE, NULL)) {
+                g_key_file_free(kf);
+                g_free(path);
+                g_free(inst);
+                continue;
+            }
         }
         {
             gchar **groups = g_key_file_get_groups(kf, NULL);
@@ -2375,7 +2387,7 @@ void xs_core_remove_guest_entry(const char *name)
                         if (strcmp(v, name) == 0) {
                             int j;
 
-                            /* сдвиг: guests_i = guests_i+1 ... */
+                            /* сдвиг хвоста: guests_i = guests_i+1 */
                             for (j = i; j < 64; j++) {
                                 char *kj =
                                     g_strdup_printf("guests_%d", j);
@@ -2398,27 +2410,30 @@ void xs_core_remove_guest_entry(const char *name)
                                     break;
                             }
                             removed++;
-                            i--; /* проверим тот же слот снова */
+                            i--; /* тот же слот может содержать
+                                    имя ещё раз */
                         }
                         g_free(v);
                     } else {
-                        g_free(k);
                         break;
                     }
                     g_free(k);
                 }
                 if (removed) {
-                    g_key_file_save_to_file(kf, path, NULL);
+                    if (cache)
+                        xs_core_plugin_conf_flush(inst);
+                    else
+                        g_key_file_save_to_file(kf, path, NULL);
                     xs_log_impl("guest entry '%s' removed from %s",
                                 name, fn);
                 }
             }
             g_strfreev(groups);
         }
-        g_key_file_free(kf);
+        if (!cache)
+            g_key_file_free(kf);
         g_free(path);
-        (void)data;
-        (void)n;
+        g_free(inst);
     }
     g_dir_close(dir);
 }
