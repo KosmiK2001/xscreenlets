@@ -2473,6 +2473,20 @@ void xs_core_delete_instance_full(XsPlugin *p, gboolean delete_conf)
             g_hash_table_remove(g_plugin_confs, name_copy);
         /* вычистить имя из guests_N всех frame-конфигов */
         xs_core_remove_guest_entry(name_copy);
+        /* уведомить frame-хоста (если удалённый был его гостем):
+         * он перечитает список и обновит Properties */
+        if (p && p->win && G_IS_OBJECT(p->win)) {
+            const char *host_name = g_object_get_data(
+                G_OBJECT(p->win), "xs-guest-host");
+
+            if (host_name && host_name[0]) {
+                XsPlugin *host = find_plugin_by_name(host_name);
+
+                if (host && host->ops &&
+                    host->ops->guest_list_changed)
+                    host->ops->guest_list_changed(host);
+            }
+        }
     }
     g_free(name_copy);
     xs_core_save_instances();

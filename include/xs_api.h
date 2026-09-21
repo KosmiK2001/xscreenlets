@@ -62,6 +62,9 @@ struct _XsPluginOps {
 	/* курсор вошёл/вышел из окна апплета (подсветка и т.п.) */
 	void (*enter)(XsPlugin *p);
 	void (*leave)(XsPlugin *p);
+	/* список гостей хоста изменился (удалён/добавлен): перечитать
+	 * priv->guests[] и обновить открытый список в Properties */
+	void (*guest_list_changed)(XsPlugin *p);
 };
 
 typedef struct {

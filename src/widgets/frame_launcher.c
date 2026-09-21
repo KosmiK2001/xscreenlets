@@ -1165,6 +1165,58 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 	gtk_widget_show_all(page);
 }
 
+static void fl_guest_list_changed(XsPlugin *p)
+{
+	PrivData *priv = p ? p->priv : NULL;
+	int i;
+
+	if (!priv || !p->win || !p->win)
+		return;
+	/* перечитать guests_N из кэша конфига (common уже вычистил
+	 * удалённого гостя) */
+	for (i = 0; i < priv->guest_count; i++)
+		g_free(priv->guests[i]);
+	priv->guest_count = 0;
+	for (i = 0; i < 32; i++) {
+		char *key = g_strdup_printf("guests_%d", i + 1);
+		char *v = xs_host_api()->conf_str(priv->kf, p->name,
+		                                  key, "");
+
+		g_free(key);
+		if (!v[0]) {
+			g_free(v);
+			break;
+		}
+		priv->guests = g_realloc(priv->guests,
+		                         (i + 1) * sizeof(char *));
+		priv->guests[i] = v;
+	}
+	priv->guest_count = i;
+	/* обновить открытый список в Properties, если он показан */
+	if (fl_guests_store && fl_guests_plugin == p) {
+		gtk_list_store_clear(fl_guests_store);
+
+		for (i = 0; i < priv->guest_count; i++) {
+			GtkTreeIter it;
+			gboolean enabled = TRUE;
+			char *key = g_strdup_printf("guests_%d_off",
+			                            i + 1);
+			char *v = xs_host_api()->conf_str(priv->kf,
+			                                  p->name, key,
+			                                  "");
+
+			g_free(key);
+			if (v && v[0])
+				enabled = FALSE;
+			g_free(v);
+			gtk_list_store_append(fl_guests_store, &it);
+			gtk_list_store_set(fl_guests_store, &it, 0,
+			                   enabled, 1, priv->guests[i],
+			                   2, priv->guests[i], -1);
+		}
+	}
+}
+
 static XsPluginOps ops = {
 	.init = fl_init,
 	.draw = fl_draw,
@@ -1175,7 +1227,10 @@ static XsPluginOps ops = {
 	.menu = NULL,
 	.menu_cmd = NULL,
 	.properties = fl_properties,
-	.fill_themes = NULL
+	.fill_themes = NULL,
+	.enter = NULL,
+	.leave = NULL,
+	.guest_list_changed = fl_guest_list_changed
 };
 
 static XsPluginDesc desc = {
