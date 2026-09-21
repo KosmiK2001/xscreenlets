@@ -2241,10 +2241,14 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
         for (k = 0; k < G_N_ELEMENTS(inherit); k++) {
             char *v = conf_str(pkf, proto->name, inherit[k], NULL);
 
-            if (v) {
+            /* только если у инстанса ещё НЕТ своего значения:
+             * при рестарте гостя конфиг существует — свой theme
+             * перетирать нельзя (баг «тема гостя = тема родителя») */
+            if (v && !g_key_file_has_key(kf, name, inherit[k], NULL)) {
                 g_key_file_set_string(kf, name, inherit[k], v);
                 g_free(v);
-            }
+            } else
+                g_free(v);
         }
     }
     p = g_new0(XsPlugin, 1);
