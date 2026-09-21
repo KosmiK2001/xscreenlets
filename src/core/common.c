@@ -2631,6 +2631,26 @@ static gboolean xs_core_input_shape_idle(XsPlugin *p)
         state->shape_pending = FALSE;
         return G_SOURCE_REMOVE;
     }
+    /* frame_launcher: input = ВСЁ окно. У nobg-тем внутренность
+     * прозрачна (alpha=0) — пиксельный регион оставлял бы только
+     * рамку, и ПКМ «пробивал» прозрачную зону до рабочего стола. */
+    if (p->type && strcmp(p->type, "frame_launcher") == 0) {
+        cairo_rectangle_int_t full;
+
+        full.x = 0;
+        full.y = 0;
+        full.width = width;
+        full.height = height;
+        cairo_region_union_rectangle(region, &full);
+        window = gtk_widget_get_window(state->win);
+        if (window)
+            gdk_window_input_shape_combine_region(window, region,
+                                                  0, 0);
+        cairo_region_destroy(region);
+        state->last_shape_us = now;
+        state->shape_pending = FALSE;
+        return G_SOURCE_REMOVE;
+    }
     /* Строчное построение региона: один прямоугольник на строку непрозрачности */
     for (y = 0; y < height; y++) {
         const unsigned char *row = pixels + (gsize)y * (gsize)stride;
