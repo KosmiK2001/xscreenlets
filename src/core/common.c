@@ -2134,35 +2134,11 @@ char *xs_core_next_instance_name(const char *type)
  * у существующего инстанса этого типа (gmodule держит модуль живым). */
 int xs_core_add_instance(const char *type)
 {
-    XsPlugin *proto = NULL;
-    XsPlugin *p;
-    char *iname;
-    GKeyFile *kf;
-    gsize i;
-    gboolean is_guest = FALSE;
-
-    /* вариант с заданным именем (гости): type == NULL разрешён */
-    if (type && !type[0])
-        type = NULL;
-
-    if (!g_plugins)
+    /* Прототип не обязателен: xs_core_add_instance_for_host сам
+     * умеет взять ops из загруженного модуля (.so), когда живых
+     * инстансов типа нет (например, frame_launcher ещё не запущен). */
+    if (!type || !type[0] || !g_plugins)
         return -1;
-    if (!type) {
-        /* guests-режим вызывается только через _for_host */
-        return -1;
-    }
-    for (i = 0; i < g_plugins->len; i++) {
-        XsPlugin *q = g_ptr_array_index(g_plugins, i);
-
-        if (q && xs_core_plugin_type(q) && strcmp(xs_core_plugin_type(q), type) == 0) {
-            proto = q;
-            break;
-        }
-    }
-    if (!proto || !proto->ops || !proto->ops->init) {
-        xs_log_impl("add: no loaded plugin of type '%s'", type);
-        return -1;
-    }
     return xs_core_add_instance_for_host(type, NULL) != NULL ? 0 : -1;
 }
 
