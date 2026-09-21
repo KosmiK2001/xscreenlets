@@ -248,15 +248,17 @@ void xs_tray_rebuild(void)
         GtkWidget *sub = gtk_menu_new();
         GHashTable *types = g_hash_table_new(g_str_hash, g_str_equal);
         GList *sorted = NULL;
+        /* ВСЕ загруженные типы (модули .so), а не типы запущенных:
+         * иначе тип исчезает из меню, пока не запущен ни один
+         * инстанс этого типа (замкнутый круг). */
+        char **all_types = xs_core_list_plugin_types();
 
-        for (gsize i = 0; i < xs_core_plugin_count(); i++) {
-            XsPlugin *p = xs_core_plugin_at(i);
-            const char *t = p ? xs_core_plugin_type(p) : NULL;
-
-            if (t && !g_hash_table_contains(types, t)) {
-                g_hash_table_add(types, (gpointer)t);
-                sorted = g_list_prepend(sorted, (gpointer)t);
-            }
+        if (all_types) {
+            for (char **t = all_types; *t; t++)
+                if (!g_hash_table_contains(types, *t)) {
+                    g_hash_table_add(types, (gpointer)*t);
+                    sorted = g_list_prepend(sorted, (gpointer)*t);
+                }
         }
         sorted = g_list_sort(sorted, (GCompareFunc)strcmp);
         for (GList *l = sorted; l; l = l->next) {

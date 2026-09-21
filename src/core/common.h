@@ -116,6 +116,7 @@ XsPlugin *xs_core_plugin_at(gsize index);
 
 /* Мультиинстанс: тип плагина инстанса ("clock" для name "clock-2") */
 const char *xs_core_plugin_type(XsPlugin *p);
+char **xs_core_list_plugin_types(void);
 /* Найти свободное имя инстанса: "name", "name-2", "name-3", ... */
 char *xs_core_next_instance_name(const char *type);
 /* Создать новый инстанс типа type (загрузка .so не требуется — модуль уже
