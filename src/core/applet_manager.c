@@ -338,7 +338,7 @@ static void am_add_running_child(GtkTreeIter *parent,
     gtk_tree_store_append(am_run_store, &it, parent);
     gtk_tree_store_set(am_run_store, &it,
                        0, pb,
-                       1, name,
+                       1, xs_core_plugin_type(p),
                        2, t && t[0] ? t : name,
                        -1);
     if (pb)
@@ -392,13 +392,13 @@ void am_refresh_running_tree(void)
         GdkPixbuf *pb;
         char *t = am_conf_get(roots[i], "user_label");
 
-        pb = am_type_icon(
-            xs_core_plugin_type(xs_core_find_instance(roots[i])),
-            16);
+        XsPlugin *rp = xs_core_find_instance(roots[i]);
+
+        pb = am_type_icon(xs_core_plugin_type(rp), 16);
         gtk_tree_store_append(am_run_store, &it, NULL);
         gtk_tree_store_set(am_run_store, &it,
                            0, pb,
-                           1, roots[i],
+                           1, xs_core_plugin_type(rp),
                            2, t && t[0] ? t : roots[i],
                            -1);
         if (pb)
