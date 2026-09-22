@@ -2030,6 +2030,35 @@ void xs_core_shutdown_plugin(XsPlugin *p)
     xs_core_cleanup_plugin_window(p);
 }
 
+/* Перезапуск одного инстанса в reload: skip если уже удалён из
+ * g_plugins (рамка остановила гостя во время её shutdown). */
+static gboolean plugin_alive(XsPlugin *p);
+
+static void am_reload_one(XsPlugin *p, GPtrArray *snap)
+{
+    gsize idx = 0;
+
+    (void)snap;
+    /* рамка могла остановить гостя во время её shutdown */
+    if (!plugin_alive(p))
+        return;
+    xs_tray_remove_plugin(p);
+    if (p->ops && p->ops->shutdown)
+        p->ops->shutdown(p);
+    xs_core_cleanup_plugin_window(p);
+    if (!p->ops || !p->ops->init ||
+        p->ops->init(p, xs_core_plugin_conf(p->name)) != 0 ||
+        !p->win) {
+        xs_log_impl("reload: %s initialization failed", p->name);
+        if (g_plugins && g_ptr_array_find(g_plugins, p, (guint *)&idx)) {
+            g_ptr_array_remove_index(g_plugins, idx);
+        }
+        xs_core_free_plugin(p);
+    } else {
+        xs_core_save_plugin_position(p);
+    }
+}
+
 void xs_core_reload(void)
 {
     gsize i;
@@ -2047,23 +2076,32 @@ void xs_core_reload(void)
 
     if (!g_plugins)
         return;
-    for (i = 0; i < g_plugins->len; i++) {
-        XsPlugin *p = g_ptr_array_index(g_plugins, i);
-        if (!p)
-            continue;
-        xs_tray_remove_plugin(p);
-        if (p->ops && p->ops->shutdown)
-            p->ops->shutdown(p);
-        xs_core_cleanup_plugin_window(p);
-        if (!p->ops || !p->ops->init ||
-            p->ops->init(p, xs_core_plugin_conf(p->name)) != 0 || !p->win) {
-            xs_log_impl("reload: %s initialization failed", p->name);
-            g_ptr_array_remove_index_fast(g_plugins, i);
-            i--;
-            xs_core_free_plugin(p);
-        } else {
-            xs_core_save_plugin_position(p);
+    /* Снимок указателей + два прохода (гости, затем рамки):
+     * fl_shutdown рамки удаляет гостей из g_plugins — итерация
+     * по живому массиву давала use-after-free (BadWindow/падение
+     * при «Restart Applets»). */
+    {
+        GPtrArray *snap = g_ptr_array_sized_new(g_plugins->len);
+
+        for (i = 0; i < g_plugins->len; i++)
+            if (g_ptr_array_index(g_plugins, i))
+                g_ptr_array_add(snap,
+                                g_ptr_array_index(g_plugins, i));
+        for (i = 0; i < snap->len; i++) {
+            XsPlugin *p = g_ptr_array_index(snap, i);
+
+            if (p && p->type &&
+                strcmp(p->type, "frame_launcher") != 0)
+                am_reload_one(p, snap);
         }
+        for (i = 0; i < snap->len; i++) {
+            XsPlugin *p = g_ptr_array_index(snap, i);
+
+            if (p && p->type &&
+                strcmp(p->type, "frame_launcher") == 0)
+                am_reload_one(p, snap);
+        }
+        g_ptr_array_free(snap, TRUE);
     }
     xs_tray_rebuild();
 }
