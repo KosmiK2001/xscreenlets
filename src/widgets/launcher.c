@@ -697,6 +697,8 @@ static void launcher_icon_set(GtkFileChooserButton *btn, gpointer data)
 	priv->icon_path = fn;
 	g_key_file_set_string(priv->kf, p->name, "icon", priv->icon_path);
 	xs_core_plugin_conf_flush(p->name);
+	xs_host_api()->log("launcher %s: icon set '%s' (saved)",
+	                   p->name, priv->icon_path);
 	launcher_apply_icon(p, priv);
 	if (p->win)
 		gtk_widget_queue_draw(p->win);
