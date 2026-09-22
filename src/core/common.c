@@ -762,21 +762,15 @@ static gboolean xs_prop_label_rename_cb(gpointer data)
             g_key_file_free(nk);
         }
     }
-    /* Кэш после записи файла содержит старую секцию — перезагрузить
-     * целиком из файла, иначе новые значения (x/y и пр.) уйдут в новую
-     * секцию кэша, а плагины прочитают неполную (сброс позиции). */
-    if (g_plugin_confs) {
-        gpointer key, val;
-
-        if (g_hash_table_steal_extended(g_plugin_confs, newname,
-                                        &key, &val)) {
-            xs_plugin_conf_free_value(val);
-            g_free(key);
-        }
-        kf = g_key_file_new();
-        g_key_file_load_from_file(kf, newpath, G_KEY_FILE_NONE, NULL);
-        g_hash_table_insert(g_plugin_confs, g_strdup(newname), kf);
-    }
+    /* Кэш после записи файла содержит старую секцию — перечитать
+     * файл В ТОТ ЖЕ объект (steal+insert создавал ВТОРОЙ объект:
+     * priv->kf плагинов продолжал указывать на старый, их правки
+     * (icon/scale) писались в осиротевший кэш и терялись при
+     * следующем flush по имени). */
+    kf = g_hash_table_lookup(g_plugin_confs, newname);
+    if (kf)
+        g_key_file_load_from_file(kf, newpath, G_KEY_FILE_NONE,
+                                  NULL);
     /* 4) symlink в plugins_on: только для main_daemon-инстансов.
      * Гость рамки (xs-guest-host) symlink не имеет/не создаёт:
      * запускает его хозяин, а не демон. При этом мусорные ссылки
