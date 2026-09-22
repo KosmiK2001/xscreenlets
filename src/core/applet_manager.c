@@ -410,11 +410,14 @@ static GtkWidget *am_build_running_page(void)
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_AUTOMATIC,
                                    GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(scroll, TRUE);
     am_run_store = gtk_tree_store_new(3, GDK_TYPE_PIXBUF,
                                       G_TYPE_STRING, G_TYPE_STRING);
     tree = gtk_tree_view_new_with_model(
         GTK_TREE_MODEL(am_run_store));
     gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
+    gtk_style_context_add_class(
+        gtk_widget_get_style_context(tree), "am-tree");
 
     c = gtk_tree_view_column_new();
     gtk_tree_view_column_set_title(c, "Applet");
@@ -643,6 +646,8 @@ static GtkWidget *am_build_configs_page(void)
     tree = gtk_tree_view_new_with_model(
         GTK_TREE_MODEL(am_conf_store));
     gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
+    gtk_style_context_add_class(
+        gtk_widget_get_style_context(tree), "am-tree");
 
     c = gtk_tree_view_column_new_with_attributes("Instance",
         gtk_cell_renderer_text_new(), "text", AM_CONF_NAME, NULL);
@@ -665,6 +670,8 @@ static GtkWidget *am_build_configs_page(void)
 
     hb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_container_set_border_width(GTK_CONTAINER(hb), 6);
+    gtk_style_context_add_class(
+        gtk_widget_get_style_context(hb), "am-toolbar");
     btn = gtk_button_new_with_label("Удалить конфиг");
     g_signal_connect(btn, "clicked", G_CALLBACK(am_conf_delete),
                      NULL);
@@ -702,7 +709,20 @@ static void am_window_destroy(GtkWidget *w, gpointer data)
 void xs_applet_manager_show(void)
 {
     GtkWidget *nb;
+    static GtkCssProvider *css = NULL;
 
+    if (!css) {
+        css = gtk_css_provider_new();
+        gtk_css_provider_load_from_data(
+            css,
+            ".am-tree, .am-tree * { font-size: 14px; }"
+            ".am-toolbar button { font-size: 13px; padding: 4px 12px; }",
+            -1, NULL);
+        gtk_style_context_add_provider_for_screen(
+            gdk_screen_get_default(),
+            GTK_STYLE_PROVIDER(css),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
     if (am_window) {
         gtk_window_present(GTK_WINDOW(am_window));
         return;
