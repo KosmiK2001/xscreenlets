@@ -532,16 +532,14 @@ char *am_conf_host_of(const char *inst)
                 char *k = g_strdup_printf("guests_%d", j);
                 char *v = g_key_file_get_string(kf, groups[0],
                                                 k, NULL);
+                gboolean has = v && v[0];
 
-                if (v && v[0] && strcmp(v, inst) == 0)
+                if (has && strcmp(v, inst) == 0)
                     found = g_strdup(names[i]);
                 g_free(v);
                 g_free(k);
-                if (!v || !v[0]) {
-                    g_free(v);
-                    g_free(k);
+                if (!has)
                     break;
-                }
             }
             g_strfreev(groups);
         }
