@@ -75,10 +75,12 @@ static int am_conf_get_int(const char *inst, const char *key, int d)
 /* есть ли у инстанса symlink автозапуска */
 static gboolean am_autostart_enabled(const char *inst)
 {
-    char *lnk = g_build_filename(xs_core_onoff_dir(), inst,
-                                 ".conf", NULL);
+    char *nm = g_strdup_printf("%s.conf", inst);
+    char *lnk = g_build_filename(xs_core_onoff_dir(), nm, NULL);
     gboolean on = g_file_test(lnk, G_FILE_TEST_IS_SYMLINK) &&
                   g_file_test(lnk, G_FILE_TEST_EXISTS);
+
+    g_free(nm);
 
     g_free(lnk);
     return on;
@@ -86,21 +88,23 @@ static gboolean am_autostart_enabled(const char *inst)
 
 static void am_autostart_set(const char *inst, gboolean on)
 {
-    char *lnk = g_build_filename(xs_core_onoff_dir(), inst,
-                                 ".conf", NULL);
+    char *nm = g_strdup_printf("%s.conf", inst);
+    char *lnk = g_build_filename(xs_core_onoff_dir(), nm, NULL);
 
     unlink(lnk);
     if (on) {
         const char *odir = xs_core_onoff_dir();
         char *dir = g_path_get_dirname(odir);
-        char *target = g_build_filename(dir, ".plugins", inst,
-                                        ".conf", NULL);
+        char *tn = g_strdup_printf("%s.conf", inst);
+        char *target = g_build_filename(dir, ".plugins", tn, NULL);
 
         if (symlink(target, lnk) != 0)
             g_message("am: symlink %s failed", lnk);
         g_free(target);
+        g_free(tn);
         g_free(dir);
     }
+    g_free(nm);
     g_free(lnk);
 }
 
@@ -503,6 +507,8 @@ static void am_conf_add_row(const char *inst)
                        AM_CONF_AUTOSTART, autostart,
                        AM_CONF_LABEL, lab && lab[0] ? lab : inst,
                        -1);
+    xs_log_impl("am: conf %s autostart=%d guest=%d",
+                inst, autostart, is_guest);
     g_free(type);
     g_free(lab);
     g_free(host);
