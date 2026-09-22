@@ -2084,6 +2084,13 @@ void xs_core_reload(void)
         for (i = 0; i < snap->len; i++) {
             XsPlugin *p = g_ptr_array_index(snap, i);
 
+            /* гостей рамки не трогаем: их жизненным циклом
+             * управляет хост, окна репарентнуты в рамку —
+             * самостоятельный re-init выкинул бы их на стол */
+            if (p && p->win && G_IS_OBJECT(p->win) &&
+                g_object_get_data(G_OBJECT(p->win),
+                                  "xs-guest-host"))
+                continue;
             if (p && p->type &&
                 strcmp(p->type, "frame_launcher") != 0)
                 am_reload_one(p, snap);
