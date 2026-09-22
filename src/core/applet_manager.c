@@ -104,20 +104,21 @@ static void am_autostart_set(const char *inst, gboolean on)
     g_free(lnk);
 }
 
-/* иконка типа: /usr/share/screenlets/<Type>/icon.{svg,png} */
+/* иконка типа: СВОИ icons/ рядом с плагинами (не зависим от
+ * python-версии), затем fallback /usr/share/screenlets/<Type>/ */
 static GdkPixbuf *am_type_icon(const char *type, int size)
 {
-    static const char *dirs[] = {
-        "/usr/share/screenlets", NULL
-    };
-    const char *exts[] = { "svg", "png", NULL };
     GdkPixbuf *pb = NULL;
-    int i, j;
+    const char *exts[] = { "svg", "png", NULL };
+    int j;
+    const char *pd = xs_core_plugdir();
 
-    for (i = 0; dirs[i] && !pb; i++) {
+    if (pd && type) {
+        char *icons_dir = g_build_filename(pd, "..", "icons", NULL);
+
         for (j = 0; exts[j] && !pb; j++) {
-            char *path = g_build_filename(dirs[i], type,
-                                          "icon.", exts[j], NULL);
+            char *path = g_build_filename(icons_dir, type,
+                                          exts[j], NULL);
             GError *err = NULL;
 
             pb = gdk_pixbuf_new_from_file_at_scale(
@@ -125,6 +126,27 @@ static GdkPixbuf *am_type_icon(const char *type, int size)
             if (err)
                 g_error_free(err);
             g_free(path);
+        }
+        g_free(icons_dir);
+    }
+    {
+        static const char *dirs[] = {
+            "/usr/share/screenlets", NULL
+        };
+        int i;
+
+        for (i = 0; dirs[i] && !pb; i++) {
+            for (j = 0; exts[j] && !pb; j++) {
+                char *path = g_build_filename(dirs[i], type,
+                                              "icon.", exts[j], NULL);
+                GError *err = NULL;
+
+                pb = gdk_pixbuf_new_from_file_at_scale(
+                    path, size, size, TRUE, &err);
+                if (err)
+                    g_error_free(err);
+                g_free(path);
+            }
         }
     }
     if (!pb)

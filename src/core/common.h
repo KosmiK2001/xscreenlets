@@ -102,6 +102,7 @@ void xs_core_plugin_conf_flush(const char *name);
 const char *xs_core_onoff_dir(void);
 /* Каталог реальных конфигов (~/.config/xscreenlets/.plugins) */
 const char *xs_core_plugins_dir(void);
+const char *xs_core_plugdir(void);
 /* найти живой инстанс по имени (NULL если не запущен) */
 char **xs_core_list_running_daemon_instances(int *count);
 XsPlugin *xs_core_find_instance(const char *name);

@@ -10,6 +10,11 @@
 
 static char *g_conf_path = NULL;
 static char *g_plugdir = NULL;
+
+const char *xs_core_plugdir(void)
+{
+    return g_plugdir;
+}
 static GPtrArray *g_loaded_modules = NULL;
 static guint g_sighup_source_id = 0;
 
