@@ -450,13 +450,14 @@ static GtkWidget *am_build_running_page(void)
 
 /* ============ Вкладка 3: Configs ============ */
 
-static GtkListStore *am_conf_store = NULL;
+static GtkTreeStore *am_conf_store = NULL;
 
 enum {
     AM_CONF_NAME = 0,
     AM_CONF_TYPE,
     AM_CONF_STARTED,
     AM_CONF_AUTOSTART,
+    AM_CONF_LABEL,
     AM_CONF_N
 };
 
@@ -469,6 +470,131 @@ static gboolean am_is_guest(const char *inst)
     return guest;
 }
 
+static char *am_conf_host_of(const char *inst);
+static gboolean am_conf_find_row(const char *inst, GtkTreeIter *out);
+
+/* добавить конфиг inst в дерево; если он гость — найти host и
+ * повесить ребёнком (иначе — корень) */
+static void am_conf_add_row(const char *inst)
+{
+    GtkTreeIter it, *parent = NULL;
+    char *host = NULL;
+    char *type = am_conf_get(inst, "xs_type");
+    char *sb = am_conf_get(inst, "started_by");
+    gboolean is_guest = sb && strcmp(sb, "plugin") == 0;
+    gboolean autostart = am_autostart_enabled(inst);
+    GtkTreeIter hit;
+    char *lab = am_conf_get(inst, "user_label");
+
+    g_free(sb);
+    /* гость: ищем строку хоста в дереве (хост уже добавлен —
+     * корни добавляем первыми, hosts_before_guests) */
+    if (is_guest) {
+        host = am_conf_host_of(inst);
+        if (host && am_conf_find_row(host, &hit))
+            parent = &hit;
+    }
+    gtk_tree_store_append(am_conf_store, &it, parent);
+    gtk_tree_store_set(am_conf_store, &it,
+                       AM_CONF_NAME, inst,
+                       AM_CONF_TYPE, type ? type : "?",
+                       AM_CONF_STARTED,
+                           is_guest ? "plugin" : "main_daemon",
+                       AM_CONF_AUTOSTART, autostart,
+                       AM_CONF_LABEL, lab && lab[0] ? lab : inst,
+                       -1);
+    g_free(type);
+    g_free(lab);
+    g_free(host);
+}
+
+/* хост инстанса (по guests_N всех frame-конфигов) */
+char *am_conf_host_of(const char *inst)
+{
+    int n, i;
+    char **names = am_list_conf_names(&n);
+    char *found = NULL;
+
+    for (i = 0; i < n && !found; i++) {
+        GKeyFile *kf = xs_core_plugin_conf(names[i]);
+        int j;
+
+        if (!kf)
+            continue;
+        {
+            gchar **groups = g_key_file_get_groups(kf, NULL);
+
+            if (!groups || !groups[0]) {
+                g_strfreev(groups);
+                continue;
+            }
+            for (j = 1; j <= 64 && !found; j++) {
+                char *k = g_strdup_printf("guests_%d", j);
+                char *v = g_key_file_get_string(kf, groups[0],
+                                                k, NULL);
+
+                if (v && v[0] && strcmp(v, inst) == 0)
+                    found = g_strdup(names[i]);
+                g_free(v);
+                g_free(k);
+                if (!v || !v[0]) {
+                    g_free(v);
+                    g_free(k);
+                    break;
+                }
+            }
+            g_strfreev(groups);
+        }
+    }
+    g_strfreev(names);
+    return found;
+}
+
+/* найти уже добавленную строку хоста в дереве */
+gboolean am_conf_find_row(const char *inst, GtkTreeIter *out)
+{
+    GtkTreeIter it;
+    gboolean ok = gtk_tree_model_get_iter_first(
+        GTK_TREE_MODEL(am_conf_store), &it);
+
+    while (ok) {
+        char *nm = NULL;
+
+        gtk_tree_model_get(GTK_TREE_MODEL(am_conf_store), &it,
+                           AM_CONF_NAME, &nm, -1);
+        if (nm && strcmp(nm, inst) == 0) {
+            *out = it;
+            g_free(nm);
+            return TRUE;
+        }
+        g_free(nm);
+        /* спуск в детей */
+        {
+            GtkTreeIter ch;
+            gboolean has = gtk_tree_model_iter_children(
+                GTK_TREE_MODEL(am_conf_store), &ch, &it);
+
+            while (has) {
+                char *cn = NULL;
+
+                gtk_tree_model_get(GTK_TREE_MODEL(am_conf_store),
+                                   &ch, AM_CONF_NAME, &cn, -1);
+                if (cn && strcmp(cn, inst) == 0) {
+                    *out = ch;
+                    g_free(cn);
+                    return TRUE;
+                }
+                g_free(cn);
+                has = gtk_tree_model_iter_next(
+                    GTK_TREE_MODEL(am_conf_store), &ch);
+            }
+        }
+        ok = gtk_tree_model_iter_next(
+            GTK_TREE_MODEL(am_conf_store), &it);
+    }
+    return FALSE;
+}
+
 static void am_refresh_conf_list(void)
 {
     int n, i;
@@ -476,23 +602,22 @@ static void am_refresh_conf_list(void)
 
     if (!am_conf_store)
         return;
-    gtk_list_store_clear(am_conf_store);
+    gtk_tree_store_clear(am_conf_store);
     names = am_list_conf_names(&n);
+    /* ПРОХОД 1: все НЕ-гости (корни), затем ПРОХОД 2: гости
+     * (их хосты уже в дереве) */
     for (i = 0; i < n; i++) {
-        GtkTreeIter it;
-        char *type = am_conf_get(names[i], "xs_type");
         char *sb = am_conf_get(names[i], "started_by");
-        gboolean autostart = am_autostart_enabled(names[i]);
 
-        gtk_list_store_append(am_conf_store, &it);
-        gtk_list_store_set(am_conf_store, &it,
-                           AM_CONF_NAME, names[i],
-                           AM_CONF_TYPE, type ? type : "?",
-                           AM_CONF_STARTED,
-                               sb ? sb : "main_daemon",
-                           AM_CONF_AUTOSTART, autostart,
-                           -1);
-        g_free(type);
+        if (!sb || strcmp(sb, "main_daemon") == 0)
+            am_conf_add_row(names[i]);
+        g_free(sb);
+    }
+    for (i = 0; i < n; i++) {
+        char *sb = am_conf_get(names[i], "started_by");
+
+        if (sb && strcmp(sb, "plugin") == 0)
+            am_conf_add_row(names[i]);
         g_free(sb);
     }
     g_strfreev(names);
@@ -526,7 +651,7 @@ static void am_autostart_toggled(GtkCellRendererToggle *cell,
             gtk_widget_destroy(dlg);
         } else {
             am_autostart_set(name, !cur);
-            gtk_list_store_set(am_conf_store, &it,
+            gtk_tree_store_set(am_conf_store, &it,
                                AM_CONF_AUTOSTART, !cur, -1);
         }
         g_free(name);
@@ -649,9 +774,9 @@ static GtkWidget *am_build_configs_page(void)
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_AUTOMATIC,
                                    GTK_POLICY_AUTOMATIC);
-    am_conf_store = gtk_list_store_new(AM_CONF_N, G_TYPE_STRING,
+    am_conf_store = gtk_tree_store_new(AM_CONF_N, G_TYPE_STRING,
                                        G_TYPE_STRING, G_TYPE_STRING,
-                                       G_TYPE_BOOLEAN);
+                                       G_TYPE_BOOLEAN, G_TYPE_STRING);
     tree = gtk_tree_view_new_with_model(
         GTK_TREE_MODEL(am_conf_store));
     gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
@@ -669,10 +794,12 @@ static GtkWidget *am_build_configs_page(void)
         am_text_renderer(14.0), "text", AM_CONF_STARTED, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
     r = gtk_cell_renderer_toggle_new();
+    g_object_set(r, "activatable", TRUE, NULL);
     g_signal_connect(r, "toggled", G_CALLBACK(am_autostart_toggled),
                      NULL);
     c = gtk_tree_view_column_new_with_attributes("Autostart", r,
-        "active", AM_CONF_AUTOSTART, NULL);
+        "active", AM_CONF_AUTOSTART,
+        "activatable", AM_CONF_AUTOSTART, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
 
     gtk_container_add(GTK_CONTAINER(scroll), tree);
