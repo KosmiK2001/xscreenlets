@@ -24,7 +24,7 @@ SRC_CALENDAR = src/widgets/calendar.c
 SRC_LAUNCHER = src/widgets/launcher.c
 SRC_FL = src/widgets/frame_launcher.c
 
-OBJS_COMMON = $(BUILD_DIR)/common.o
+OBJS_COMMON = $(BUILD_DIR)/common.o $(BUILD_DIR)/applet_manager.o
 OBJS_TRAY = $(BUILD_DIR)/tray.o
 OBJS_MAIN = $(BUILD_DIR)/main.o
 OBJS_CLOCK = $(BUILD_DIR)/clock.o

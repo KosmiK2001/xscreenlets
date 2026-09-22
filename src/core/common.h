@@ -100,6 +100,15 @@ GKeyFile *xs_core_plugin_conf(const char *name);
 void xs_core_plugin_conf_flush(const char *name);
 /* Каталог включённых конфигов (plugins_on); NULL до xs_core_init(). */
 const char *xs_core_onoff_dir(void);
+/* Каталог реальных конфигов (~/.config/xscreenlets/.plugins) */
+const char *xs_core_plugins_dir(void);
+/* найти живой инстанс по имени (NULL если не запущен) */
+char **xs_core_list_running_daemon_instances(int *count);
+XsPlugin *xs_core_find_instance(const char *name);
+/* выкинуть кэш конфига инстанса (после ручной правки файла) */
+void xs_core_drop_conf_cache(const char *name);
+/* окно Applet management (applet_manager.c) */
+void xs_applet_manager_show(void);
 /* Диалог мёртвого symlink'а (определён в common.c): 1=удалить,
  * 0=выбран другой конфиг (имя в *new_name), -1=отмена. */
 int xs_dead_link_dialog(GtkWindow *parent, const char *linkname,

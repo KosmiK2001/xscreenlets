@@ -240,6 +240,12 @@ const char *xs_core_onoff_dir(void)
     return g_plugin_onoff_dir;
 }
 
+/* Каталог реальных конфигов (использует applet_manager). */
+const char *xs_core_plugins_dir(void)
+{
+    return g_plugin_conf_dir;
+}
+
 /* Короткий UUID (8 hex-символов) для имени инстанса. */
 static void xs_short_uuid(char buf[9])
 {
@@ -622,6 +628,18 @@ static gboolean xs_conf_name_taken(const char *name, const char *old_name)
 }
 
 static XsPlugin *find_plugin_by_name(const char *name);
+XsPlugin *xs_core_find_instance(const char *name)
+{
+    if (!name || !name[0] || !g_plugins)
+        return NULL;
+    return find_plugin_by_name(name);
+}
+
+void xs_core_drop_conf_cache(const char *name)
+{
+    if (g_plugin_confs && name && name[0])
+        g_hash_table_remove(g_plugin_confs, name);
+}
 static void xs_tray_add_plugin_wrapper(XsPlugin *p);
 
 static gboolean xs_prop_label_rename_cb(gpointer data)

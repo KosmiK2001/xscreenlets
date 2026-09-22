@@ -43,6 +43,13 @@ static void on_launch_activate(GtkMenuItem *mi, gpointer data)
 
 /* Restart all: пересоздать все инстансы из [instances] (как
  * restart_all_screenlets: всё закрыть и запустить заново) */
+static void on_applet_mgmt_activate(GtkMenuItem *mi, gpointer data)
+{
+    (void)mi;
+    (void)data;
+    xs_applet_manager_show();
+}
+
 static void on_restart_activate(GtkMenuItem *mi, gpointer data)
 {
     (void)mi;
@@ -242,67 +249,14 @@ void xs_tray_rebuild(void)
     }
     g_list_free(children);
 
-    /* --- Launch <тип>: все загруженные типы плагинов --- */
+    /* --- Applet management: окно с тремя вкладками --- */
     {
-        GtkWidget *launch_mi = gtk_menu_item_new_with_label("Launch Applet");
-        GtkWidget *sub = gtk_menu_new();
-        GHashTable *types = g_hash_table_new(g_str_hash, g_str_equal);
-        GList *sorted = NULL;
-        /* ВСЕ загруженные типы (модули .so), а не типы запущенных:
-         * иначе тип исчезает из меню, пока не запущен ни один
-         * инстанс этого типа (замкнутый круг). */
-        char **all_types = xs_core_list_plugin_types();
+        GtkWidget *am = gtk_menu_item_new_with_label(
+            "Applet management");
 
-        if (all_types) {
-            for (char **t = all_types; *t; t++)
-                if (!g_hash_table_contains(types, *t)) {
-                    g_hash_table_add(types, (gpointer)*t);
-                    sorted = g_list_prepend(sorted, (gpointer)*t);
-                }
-        }
-        sorted = g_list_sort(sorted, (GCompareFunc)strcmp);
-        for (GList *l = sorted; l; l = l->next) {
-            const char *t = l->data;
-            GtkWidget *it = gtk_menu_item_new_with_label(t);
-
-            g_object_set_data_full(G_OBJECT(it), "xs-type",
-                                   g_strdup(t), g_free);
-            g_signal_connect(it, "activate",
-                             G_CALLBACK(on_launch_activate), NULL);
-            gtk_menu_shell_append(GTK_MENU_SHELL(sub), it);
-        }
-        g_list_free(sorted);
-        g_hash_table_destroy(types);
-        gtk_menu_item_set_submenu(GTK_MENU_ITEM(launch_mi), sub);
-        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), launch_mi);
-    }
-
-    /* --- Running Instances: подменю наполнит xs_tray_add_plugin --- */
-    {
-        GtkWidget *run_mi = gtk_menu_item_new_with_label("Running Instances");
-        GtkWidget *sub = gtk_menu_new();
-
-        gtk_menu_item_set_submenu(GTK_MENU_ITEM(run_mi), sub);
-        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
-        for (gsize i = 0; i < xs_core_plugin_count(); i++) {
-            XsPlugin *p = xs_core_plugin_at(i);
-            GKeyFile *kf;
-            char *sb;
-
-            if (!p || !p->name)
-                continue;
-            /* гость рамки (started_by=plugin) не показывается:
-             * его запуском управляет хозяин, не демон */
-            kf = xs_core_plugin_conf(p->name);
-            sb = kf ? g_key_file_get_string(kf, p->name,
-                                            "started_by", NULL) : NULL;
-            if (sb && strcmp(sb, "main_daemon") != 0) {
-                g_free(sb);
-                continue;
-            }
-            g_free(sb);
-            xs_tray_add_plugin(p);
-        }
+        g_signal_connect(am, "activate",
+                         G_CALLBACK(on_applet_mgmt_activate), NULL);
+        gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), am);
     }
 
     GtkWidget *sep = gtk_separator_menu_item_new();
