@@ -2028,6 +2028,48 @@ void xs_core_shutdown_plugin(XsPlugin *p)
  * g_plugins (рамка остановила гостя во время её shutdown). */
 static gboolean plugin_alive(XsPlugin *p);
 
+/* Полный перезапуск рамки: гасим живых гостей (конфиги сохраняем),
+ * затем саму рамку; fl_init при re-init сам стартует гостей из
+ * guests_N — все reparent/backdrop-процедуры отрабатывают штатно. */
+static void am_reload_frame(XsPlugin *host)
+{
+    gsize i;
+    XsWinState *st;
+
+    if (!host || !host->win)
+        return;
+    st = g_object_get_data(G_OBJECT(host->win), "xs-state");
+    /* живые гости: shutdown+free, конфиг сохраняется */
+    for (i = 0; g_plugins && i < g_plugins->len; i++) {
+        XsPlugin *g = g_ptr_array_index(g_plugins, i);
+
+        if (!g || !g->win)
+            continue;
+        if (g_object_get_data(G_OBJECT(g->win),
+                              "xs-guest-host") &&
+            g_strcmp0(g_object_get_data(G_OBJECT(g->win),
+                                        "xs-guest-host"),
+                      host->name) == 0) {
+            xs_core_delete_instance_full(g, FALSE);
+            i = (gsize)-1; /* массив изменился — начать заново */
+            continue;
+        }
+    }
+    /* сама рамка */
+    xs_tray_remove_plugin(host);
+    if (host->ops && host->ops->shutdown)
+        host->ops->shutdown(host);
+    xs_core_cleanup_plugin_window(host);
+    if (host->ops && host->ops->init &&
+        host->ops->init(host,
+                        xs_core_plugin_conf(host->name)) == 0 &&
+        host->win) {
+        xs_core_save_plugin_position(host);
+    } else {
+        xs_log_impl("reload: %s (frame) init failed", host->name);
+    }
+}
+
 static void am_reload_one(XsPlugin *p, GPtrArray *snap)
 {
     gsize idx = 0;
@@ -2084,9 +2126,7 @@ void xs_core_reload(void)
         for (i = 0; i < snap->len; i++) {
             XsPlugin *p = g_ptr_array_index(snap, i);
 
-            /* гостей рамки не трогаем: их жизненным циклом
-             * управляет хост, окна репарентнуты в рамку —
-             * самостоятельный re-init выкинул бы их на стол */
+            /* гости и рамки обрабатываются am_reload_frame */
             if (p && p->win && G_IS_OBJECT(p->win) &&
                 g_object_get_data(G_OBJECT(p->win),
                                   "xs-guest-host"))
@@ -2095,17 +2135,16 @@ void xs_core_reload(void)
                 strcmp(p->type, "frame_launcher") != 0)
                 am_reload_one(p, snap);
         }
-        /* Рамки НЕ перезапускаем: fl_shutdown удаляет гостей
-         * (stop_guest), а гости уже погашены первым проходом —
-         * повторный shutdown → SIGSEGV. Настройки рамки применяются
-         * через Properties сразу; гости переживают Restart. */
+        /* Рамки: полный перезапуск с гостями (единая операция —
+         * гости не гасятся отдельно, чтобы не было повторного
+         * shutdown). */
         for (i = 0; i < snap->len; i++) {
             XsPlugin *p = g_ptr_array_index(snap, i);
 
             if (p && p->type &&
-                strcmp(p->type, "frame_launcher") == 0) {
-                xs_core_save_plugin_position(p);
-            }
+                strcmp(p->type, "frame_launcher") == 0 &&
+                plugin_alive(p))
+                am_reload_frame(p);
         }
         g_ptr_array_free(snap, TRUE);
     }
