@@ -246,6 +246,12 @@ const char *xs_core_plugins_dir(void)
     return g_plugin_conf_dir;
 }
 
+/* Слабая реализация: у standalone (xclock) нет main.c с plugdir. */
+__attribute__((weak)) const char *xs_core_plugdir(void)
+{
+    return NULL;
+}
+
 /* Короткий UUID (8 hex-символов) для имени инстанса. */
 static void xs_short_uuid(char buf[9])
 {
