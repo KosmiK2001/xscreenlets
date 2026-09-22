@@ -116,10 +116,13 @@ static GdkPixbuf *am_type_icon(const char *type, int size)
     if (pd && type) {
         char *icons_dir = g_build_filename(pd, "..", "icons", NULL);
 
+
         for (j = 0; exts[j] && !pb; j++) {
-            char *path = g_build_filename(icons_dir, type,
-                                          exts[j], NULL);
+            char *fname = g_strdup_printf("%s.%s", type, exts[j]);
+            char *path = g_build_filename(icons_dir, fname, NULL);
             GError *err = NULL;
+
+            g_free(fname);
 
             pb = gdk_pixbuf_new_from_file_at_scale(
                 path, size, size, TRUE, &err);
@@ -149,10 +152,13 @@ static GdkPixbuf *am_type_icon(const char *type, int size)
             }
         }
     }
-    if (!pb)
+    if (!pb) {
+        xs_log_impl("am: icon fallback for type '%s'",
+                    type ? type : "(null)");
         pb = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
                                       "application-x-executable",
                                       size, 0, NULL);
+    }
     return pb;
 }
 
