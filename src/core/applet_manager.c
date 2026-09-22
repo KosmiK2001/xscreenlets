@@ -162,6 +162,15 @@ static GdkPixbuf *am_type_icon(const char *type, int size)
     return pb;
 }
 
+/* текст-рендерер с заданным размером шрифта */
+static GtkCellRenderer *am_text_renderer(double pts)
+{
+    GtkCellRenderer *r = gtk_cell_renderer_text_new();
+
+    g_object_set(r, "size-points", pts, NULL);
+    return r;
+}
+
 /* ============ Вкладка 1: Applets (значки типов) ============ */
 
 static void am_launch_type(GtkButton *b, gpointer data)
@@ -424,12 +433,12 @@ static GtkWidget *am_build_running_page(void)
     r = gtk_cell_renderer_pixbuf_new();
     gtk_tree_view_column_pack_start(c, r, FALSE);
     gtk_tree_view_column_set_attributes(c, r, "pixbuf", 0, NULL);
-    r = gtk_cell_renderer_text_new();
+    r = am_text_renderer(14.0);
     gtk_tree_view_column_pack_start(c, r, TRUE);
     gtk_tree_view_column_set_attributes(c, r, "text", 2, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
 
-    r = gtk_cell_renderer_text_new();
+    r = am_text_renderer(14.0);
     c = gtk_tree_view_column_new_with_attributes("Instance", r,
                                                  "text", 1, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
@@ -650,14 +659,14 @@ static GtkWidget *am_build_configs_page(void)
         gtk_widget_get_style_context(tree), "am-tree");
 
     c = gtk_tree_view_column_new_with_attributes("Instance",
-        gtk_cell_renderer_text_new(), "text", AM_CONF_NAME, NULL);
+        am_text_renderer(14.0), "text", AM_CONF_NAME, NULL);
     gtk_tree_view_column_set_expand(c, TRUE);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
     c = gtk_tree_view_column_new_with_attributes("Type",
-        gtk_cell_renderer_text_new(), "text", AM_CONF_TYPE, NULL);
+        am_text_renderer(14.0), "text", AM_CONF_TYPE, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
     c = gtk_tree_view_column_new_with_attributes("Started by",
-        gtk_cell_renderer_text_new(), "text", AM_CONF_STARTED, NULL);
+        am_text_renderer(14.0), "text", AM_CONF_STARTED, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
     r = gtk_cell_renderer_toggle_new();
     g_signal_connect(r, "toggled", G_CALLBACK(am_autostart_toggled),
