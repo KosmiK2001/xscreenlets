@@ -4037,8 +4037,9 @@ char **xs_core_list_running_daemon_instances(int *count)
                                                   "started_by", NULL)
                           : NULL;
 
-            /* в список попадают только main_daemon-инстансы */
-            if (sb && strcmp(sb, "main_daemon") == 0)
+            /* main_daemon-инстансы; ОТСУТСТВИЕ started_by =
+             * main_daemon (старые конфиги clock/calendar) */
+            if (!sb || strcmp(sb, "main_daemon") == 0)
                 out[n++] = g_strdup(q->name);
             g_free(sb);
         }
