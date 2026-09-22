@@ -435,12 +435,12 @@ static GtkWidget *am_build_running_page(void)
     gtk_tree_view_column_set_attributes(c, r, "pixbuf", 0, NULL);
     r = am_text_renderer(14.0);
     gtk_tree_view_column_pack_start(c, r, TRUE);
-    gtk_tree_view_column_set_attributes(c, r, "text", 2, NULL);
+    gtk_tree_view_column_set_attributes(c, r, "text", 1, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
 
     r = am_text_renderer(14.0);
     c = gtk_tree_view_column_new_with_attributes("Instance", r,
-                                                 "text", 1, NULL);
+                                                 "text", 2, NULL);
     gtk_tree_view_append_column(GTK_TREE_VIEW(tree), c);
 
     gtk_container_add(GTK_CONTAINER(scroll), tree);
