@@ -2088,12 +2088,17 @@ void xs_core_reload(void)
                 strcmp(p->type, "frame_launcher") != 0)
                 am_reload_one(p, snap);
         }
+        /* Рамки НЕ перезапускаем: fl_shutdown удаляет гостей
+         * (stop_guest), а гости уже погашены первым проходом —
+         * повторный shutdown → SIGSEGV. Настройки рамки применяются
+         * через Properties сразу; гости переживают Restart. */
         for (i = 0; i < snap->len; i++) {
             XsPlugin *p = g_ptr_array_index(snap, i);
 
             if (p && p->type &&
-                strcmp(p->type, "frame_launcher") == 0)
-                am_reload_one(p, snap);
+                strcmp(p->type, "frame_launcher") == 0) {
+                xs_core_save_plugin_position(p);
+            }
         }
         g_ptr_array_free(snap, TRUE);
     }
