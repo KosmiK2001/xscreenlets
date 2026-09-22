@@ -2117,36 +2117,36 @@ void xs_core_reload(void)
      * по живому массиву давала use-after-free (BadWindow/падение
      * при «Restart Applets»). */
     {
-        GPtrArray *snap = g_ptr_array_sized_new(g_plugins->len);
+        /* ТРИ списка, типы копируются ДО любых удалений: после
+         * am_reload_frame указатели гостей в snap становятся
+         * невалидными — читать p->type по ним нельзя (SIGSEGV). */
+        GPtrArray *frames = g_ptr_array_sized_new(g_plugins->len);
+        GPtrArray *plain = g_ptr_array_sized_new(g_plugins->len);
 
-        for (i = 0; i < g_plugins->len; i++)
-            if (g_ptr_array_index(g_plugins, i))
-                g_ptr_array_add(snap,
-                                g_ptr_array_index(g_plugins, i));
-        for (i = 0; i < snap->len; i++) {
-            XsPlugin *p = g_ptr_array_index(snap, i);
+        for (i = 0; i < g_plugins->len; i++) {
+            XsPlugin *p = g_ptr_array_index(g_plugins, i);
 
-            /* гости и рамки обрабатываются am_reload_frame */
-            if (p && p->win && G_IS_OBJECT(p->win) &&
+            if (!p)
+                continue;
+            /* гость рамки? (тип определяем ДО удалений) */
+            if (p->win && G_IS_OBJECT(p->win) &&
                 g_object_get_data(G_OBJECT(p->win),
                                   "xs-guest-host"))
-                continue;
-            if (p && p->type &&
-                strcmp(p->type, "frame_launcher") != 0)
-                am_reload_one(p, snap);
+                continue; /* жизненный цикл = рамка-хост */
+            if (p->type &&
+                strcmp(p->type, "frame_launcher") == 0)
+                g_ptr_array_add(frames, p);
+            else
+                g_ptr_array_add(plain, p);
         }
-        /* Рамки: полный перезапуск с гостями (единая операция —
-         * гости не гасятся отдельно, чтобы не было повторного
-         * shutdown). */
-        for (i = 0; i < snap->len; i++) {
-            XsPlugin *p = g_ptr_array_index(snap, i);
-
-            if (p && p->type &&
-                strcmp(p->type, "frame_launcher") == 0 &&
-                plugin_alive(p))
-                am_reload_frame(p);
-        }
-        g_ptr_array_free(snap, TRUE);
+        /* 1) корневые апплеты */
+        for (i = 0; i < plain->len; i++)
+            am_reload_one(g_ptr_array_index(plain, i), plain);
+        /* 2) рамки: полным циклом, с гостями */
+        for (i = 0; i < frames->len; i++)
+            am_reload_frame(g_ptr_array_index(frames, i));
+        g_ptr_array_free(plain, TRUE);
+        g_ptr_array_free(frames, TRUE);
     }
     xs_tray_rebuild();
 }
