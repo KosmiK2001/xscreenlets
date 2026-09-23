@@ -10,6 +10,9 @@ Xscreenlets — замена устаревших screenlets (python2+PyGTK) д�
 - librsvg-2.0
 - gmodule-2.0
 - glib-2.0
+- gio-2.0
+- libsoup-3.0
+- libxml-2.0
 
 Сборка производится с флагами `-O2 -Wall -Wextra` без предупреждений.
 
@@ -19,11 +22,14 @@ Xscreenlets — замена устаревших screenlets (python2+PyGTK) д�
 make
 ```
 
-Создастся четыре артефакта в каталоге `build/`:
-- `build/xscreenletsd` — демон
-- `build/clock.so` — плагин часов
-- `build/calendar.so` — плагин календаря (замена ClearCalendar)
-- `build/xclock` — standalone версия часов (для отладки)
+Создаются артефакты в каталоге `build/`:
+- `build/xscreenletsd` — демон;
+- `build/clock.so` — плагин часов;
+- `build/calendar.so` — плагин календаря;
+- `build/launcher.so` — плагин запуска приложений;
+- `build/frame_launcher.so` — плагин рамки с гостями;
+- `build/clearrss.so` — C/GTK3-порт ClearRss;
+- `build/xclock` — standalone версия часов.
 
 Сборка без предупреждений:
 ```bash
@@ -37,9 +43,10 @@ make install
 ```
 
 По умолчанию устанавливает в `~/bin/` и `~/lib/xscreenlets/plugins/`:
-- `~/bin/xscreenletsd`
-- `~/lib/xscreenlets/plugins/clock.so`
-- `~/lib/xscreenlets/plugins/calendar.so`
+- `~/bin/xscreenletsd`;
+- все плагины `.so`, включая `clearrss.so`;
+- иконку `~/lib/xscreenlets/icons/clearrss.svg`;
+- темы `default` и `Simple` в `~/lib/xscreenlets/themes/clearrss/`.
 
 Поддерживаются переменные `PREFIX` и `DESTDIR`:
 ```bash
@@ -58,9 +65,37 @@ make install DESTDIR=/tmp/xscreenlets PREFIX=/usr
 xscreenletsd
 ```
 
-Демон читает конфиг из `~/.config/xscreenlets/xscreenletsd.conf` и загружает плагины из каталога, указанного при запуске (`--plugdir DIR`) или по умолчанию из `~/lib/xscreenlets/plugins` (install-каталог; системный путь `/usr/lib64/xscreenlets/plugins` — через `--plugdir`).
+Или явно с каталогом плагинов:
 
-### Standalone часы
+```bash
+DISPLAY=:0 ~/bin/xscreenletsd --plugdir ~/lib/xscreenlets/plugins --debug
+```
+
+Демон читает конфигурацию текущей схемы из
+`~/.config/xscreenlets/.plugins/`, а автозапуск — из symlink'ов в
+`~/.config/xscreenlets/plugins_on/`. Плагин `clearrss` сам не создаёт и не
+изменяет symlink'и автозапуска.
+
+### ClearRss
+
+C/GTK3-порт оригинального `/usr/share/screenlets/ClearRss/ClearRssScreenlet.py`:
+
+- RSS и Atom через `libsoup-3.0` и `libxml-2.0`;
+- асинхронная сеть и worker-разбор XML без блокировки GTK;
+- Properties для `feed_name`, `feed_url`, `update_interval`, шрифта и цветов;
+- Refresh, Previous item и Next item;
+- нижние кнопки прокрутки и прокрутка колесом;
+- `View this News` открывает канал через `xdg-open` без shell-инъекции;
+- темы `default` и `Simple` с локальными SVG-ассетами.
+
+Имя типа — `clearrss`. Конфиг инстанса создаётся демоном и хранится как
+`~/.config/xscreenlets/.plugins/clearrss-UUID8-метка.conf`; секция конфига
+равна имени инстанса. Для гостя `frame_launcher` добавляется только ключ
+`started_by=plugin`; плагин не редактирует `plugins_on` и список гостей.
+
+Подробный план переноса: `PLAN-CLEARRSS.md`.
+
+## Standalone часы
 ```bash
 ~/bin/xclock
 ```

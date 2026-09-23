@@ -1,7 +1,8 @@
 CC = gcc
-CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0)
+CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0)
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
+LDFLAGS_RSS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 libxml-2.0) -lm
 LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm -lX11
 
 PREFIX ?= $(HOME)
@@ -14,6 +15,7 @@ TARGET_PLUGIN = $(BUILD_DIR)/clock.so
 TARGET_CAL_PLUGIN = $(BUILD_DIR)/calendar.so
 TARGET_LAU_PLUGIN = $(BUILD_DIR)/launcher.so
 TARGET_FL_PLUGIN = $(BUILD_DIR)/frame_launcher.so
+TARGET_RSS_PLUGIN = $(BUILD_DIR)/clearrss.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
 SRC_COMMON = src/core/common.c
@@ -23,6 +25,7 @@ SRC_CLOCK = src/widgets/clock.c
 SRC_CALENDAR = src/widgets/calendar.c
 SRC_LAUNCHER = src/widgets/launcher.c
 SRC_FL = src/widgets/frame_launcher.c
+SRC_RSS = src/widgets/clearrss.c
 
 OBJS_COMMON = $(BUILD_DIR)/common.o $(BUILD_DIR)/applet_manager.o
 OBJS_TRAY = $(BUILD_DIR)/tray.o
@@ -32,12 +35,13 @@ OBJS_STANDALONE_CLOCK = $(BUILD_DIR)/standalone_clock.o
 OBJS_CALENDAR = $(BUILD_DIR)/calendar.o
 OBJS_LAUNCHER = $(BUILD_DIR)/launcher.o
 OBJS_FL = $(BUILD_DIR)/frame_launcher.o
+OBJS_RSS = $(BUILD_DIR)/clearrss.o
 OBJS_COMMON_DBG = $(BUILD_DIR)/common_dbg.o
 OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_STANDALONE)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -56,6 +60,9 @@ $(TARGET_LAU_PLUGIN): $(BUILD_DIR) $(OBJS_LAUNCHER)
 
 $(TARGET_FL_PLUGIN): $(BUILD_DIR) $(OBJS_FL)
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_FL) $(LDFLAGS_PLUGIN)
+
+$(TARGET_RSS_PLUGIN): $(BUILD_DIR) $(OBJS_RSS)
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_RSS) $(LDFLAGS_RSS_PLUGIN)
 
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
@@ -77,6 +84,14 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/clock.so
 	$(INSTALL) -m 0755 $(TARGET_CAL_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/calendar.so
 	$(INSTALL) -m 0755 $(TARGET_LAU_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/launcher.so
+	$(INSTALL) -m 0755 $(TARGET_FL_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/frame_launcher.so
+	$(INSTALL) -m 0755 $(TARGET_RSS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/clearrss.so
+	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
+	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg
+	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default
+	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple
+	$(INSTALL) -m 0644 themes/clearrss/default/background.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default/background.svg
+	$(INSTALL) -m 0644 themes/clearrss/Simple/background.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple/background.svg
 
 run: all
 	@echo "To run the daemon: ./$(TARGET_DAEMON)"
