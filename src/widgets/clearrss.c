@@ -1870,6 +1870,55 @@ static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
     return row;
 }
 
+static GtkWidget *rss_text_settings_row(XsPlugin *p, PrivData *priv)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *label = gtk_label_new("Text");
+    GtkWidget *font;
+    GtkWidget *spacer;
+    GtkWidget *color;
+    GdkRGBA rgba = {
+        priv->text_color[0], priv->text_color[1],
+        priv->text_color[2], priv->text_color[3]
+    };
+
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_size_request(label, 180, 28);
+    gtk_box_pack_start(GTK_BOX(row), label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row),
+                       gtk_separator_new(GTK_ORIENTATION_VERTICAL),
+                       FALSE, TRUE, 5);
+    gtk_widget_set_size_request(row, -1, 28);
+    gtk_widget_set_hexpand(row, TRUE);
+
+    font = gtk_font_button_new();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    if (priv->text_font)
+        gtk_font_button_set_font_name(GTK_FONT_BUTTON(font), priv->text_font);
+#pragma GCC diagnostic pop
+    gtk_widget_set_tooltip_text(font, "Text font and size");
+    gtk_widget_set_halign(font, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(row), font, FALSE, TRUE, 0);
+    g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("font"),
+                           g_free);
+    g_signal_connect(font, "font-set", G_CALLBACK(rss_font_set), p);
+
+    spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_pack_start(GTK_BOX(row), spacer, TRUE, TRUE, 0);
+
+    color = gtk_color_button_new_with_rgba(&rgba);
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
+    gtk_widget_set_tooltip_text(color, "Text color");
+    gtk_widget_set_halign(color, GTK_ALIGN_END);
+    gtk_box_pack_start(GTK_BOX(row), color, FALSE, TRUE, 0);
+    g_object_set_data_full(G_OBJECT(color), "xs-key", g_strdup("rgba_color"),
+                           g_free);
+    g_signal_connect(color, "color-set", G_CALLBACK(rss_color_set), p);
+    return row;
+}
+
 static void rss_properties(XsPlugin *p, GtkNotebook *nb)
 {
     PrivData *priv = p ? p->priv : NULL;
@@ -1935,12 +1984,8 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_box_pack_start(GTK_BOX(text_box), rss_time_settings_row(p, priv),
                            FALSE, FALSE, 0);
         gtk_box_pack_start(GTK_BOX(text_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 3);
-        w = xs_prop_add_font(GTK_BOX(text_box), "Text Font", "Text font", priv->text_font);
-        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("font"), g_free);
-        g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
-        w = xs_prop_add_color(GTK_BOX(text_box), "Text Color", "Default text color", priv->text_color[0], priv->text_color[1], priv->text_color[2], priv->text_color[3]);
-        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("rgba_color"), g_free);
-        g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
+        gtk_box_pack_start(GTK_BOX(text_box), rss_text_settings_row(p, priv),
+                           FALSE, FALSE, 0);
         gtk_box_pack_start(GTK_BOX(text_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 3);
         w = xs_prop_add_color(GTK_BOX(text_box), "Back color", "Only with the default theme", priv->background_color[0], priv->background_color[1], priv->background_color[2], priv->background_color[3]);
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("background_color"), g_free);
