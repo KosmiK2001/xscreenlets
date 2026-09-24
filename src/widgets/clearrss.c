@@ -48,6 +48,10 @@ typedef struct {
     int scroll_px;
     int content_extent;
     int content_offset;
+    int window_width;
+    int window_height;
+    int news_count;
+    gboolean auto_news_count;
     int button_pressed;
     gboolean loading;
     gboolean show_feed_name;
@@ -57,6 +61,7 @@ typedef struct {
     RequestSet *requests;
     SoupSession *session;
     guint refresh_source;
+    guint feed_url_source;
     gint64 last_refresh_us;
     guint64 generation;
 } PrivData;
@@ -65,7 +70,6 @@ typedef struct _RequestSet {
     gint refcount;
     gint alive;
     GPtrArray *jobs;
-    GThreadPool *pool;
     GMutex lock;
     gboolean active;
 } RequestSet;
@@ -73,34 +77,42 @@ typedef struct _RequestSet {
 typedef struct {
     RequestSet *set;
     GBytes *bytes;
+    GInputStream *stream;
+    GByteArray *body;
     SoupMessage *message;
     SoupSession *session;
+    GCancellable *cancellable;
     char *url;
     char *instance_name;
     guint idle_source;
     guint64 generation;
+    gboolean reading;
     gboolean error;
 } FetchJob;
 
-static const RssEntry *rss_current_entry(PrivData *priv)
+static gboolean rss_display_entries(PrivData *priv)
 {
-    gint index;
-
-    if (!priv || !priv->entries || !priv->entries->len)
-        return NULL;
-    index = CLAMP(priv->feed_number, 0, (gint)priv->entries->len - 1);
-    return g_ptr_array_index(priv->entries, index);
+    return priv && priv->entries && priv->entries->len;
 }
 
 static void rss_open_current(XsPlugin *p)
 {
     PrivData *priv = p ? p->priv : NULL;
+    const RssEntry *entry;
+    const char *url;
     char *argv[2];
 
-    if (!priv || !priv->site_url || !priv->site_url[0])
+    if (!priv)
+        return;
+    entry = rss_display_entries(priv) ? g_ptr_array_index(priv->entries,
+                              CLAMP(priv->feed_number, 0,
+                                    (int)priv->entries->len - 1)) : NULL;
+    url = entry && entry->link && entry->link[0] ? entry->link :
+          (priv->site_url && priv->site_url[0] ? priv->site_url : NULL);
+    if (!url)
         return;
     argv[0] = (char *)"xdg-open";
-    argv[1] = priv->site_url;
+    argv[1] = (char *)url;
     g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH,
                   NULL, NULL, NULL, NULL);
 }
@@ -110,7 +122,9 @@ static void rss_request_set_stop(RequestSet *set);
 static gboolean rss_finish_fetch(gpointer data);
 static void rss_request_refresh(XsPlugin *p, gboolean force);
 static void rss_scroll_by(XsPlugin *p, int delta);
-static const RssEntry *rss_current_entry(PrivData *priv);
+static int rss_viewport_height(XsPlugin *p);
+static int rss_display_count(PrivData *priv, int width, int height);
+static gboolean rss_display_entries(PrivData *priv);
 static void rss_add_theme_dirs(const char *dir, GPtrArray *names);
 static void rss_open_current(XsPlugin *p);
 
@@ -201,6 +215,8 @@ static void rss_status(PrivData *priv, const char *format, ...)
 }
 
 /* ---------- XML helpers ---------- */
+static char *rss_plain_text(const char *html);
+
 static gboolean rss_local_name(const xmlNode *node, const char *name)
 {
     return node && node->type == XML_ELEMENT_NODE && node->name &&
@@ -235,7 +251,7 @@ static char *rss_child_text(const xmlNode *parent, const char *name)
 
     if (!parent)
         return NULL;
-    for (node = parent->children; node; node = node->next)
+    for (node = parent->children; node; node = node->next) {
         if (rss_local_name(node, name)) {
             xmlChar *raw = xmlNodeGetContent(node);
             char *value;
@@ -247,7 +263,17 @@ static char *rss_child_text(const xmlNode *parent, const char *name)
             g_strstrip(value);
             return value;
         }
+    }
     return NULL;
+}
+
+static char *rss_child_plain(const xmlNode *parent, const char *name)
+{
+    char *raw = rss_child_text(parent, name);
+    char *plain = rss_plain_text(raw);
+
+    g_free(raw);
+    return plain;
 }
 
 static char *rss_node_link(const xmlNode *parent)
@@ -436,10 +462,10 @@ static void rss_parse_feed(const char *data, gsize len, GPtrArray *entries,
                 continue;
             RssEntry *entry = g_new0(RssEntry, 1);
             entry->title = rss_child_text(node, "title");
-            entry->summary = rss_plain_text(rss_child_text(node, "summary"));
+            entry->summary = rss_child_plain(node, "summary");
             if (!entry->summary || !entry->summary[0]) {
                 g_free(entry->summary);
-                entry->summary = rss_plain_text(rss_child_text(node, "content"));
+                entry->summary = rss_child_plain(node, "content");
             }
             entry->link = rss_node_link(node);
             if (!entry->title && !entry->summary) {
@@ -467,7 +493,7 @@ static void rss_parse_feed(const char *data, gsize len, GPtrArray *entries,
                     continue;
                 RssEntry *entry = g_new0(RssEntry, 1);
                 entry->title = rss_child_text(node, "title");
-                entry->summary = rss_plain_text(rss_child_text(node, "description"));
+                entry->summary = rss_child_plain(node, "description");
                 entry->link = rss_node_link(node);
                 if (!entry->title && !entry->summary && !entry->link) {
                     rss_entry_free(entry);
@@ -497,10 +523,6 @@ static void rss_request_set_stop(RequestSet *set)
     g_mutex_lock(&set->lock);
     set->active = FALSE;
     g_mutex_unlock(&set->lock);
-    if (set->pool) {
-        g_thread_pool_set_max_threads(set->pool, 1, NULL);
-        g_thread_pool_free(g_steal_pointer(&set->pool), FALSE, TRUE);
-    }
 }
 
 static void rss_request_set_unref(RequestSet *set)
@@ -520,7 +542,11 @@ static void rss_job_free(FetchJob *job)
     if (!job)
         return;
     g_clear_pointer(&job->bytes, g_bytes_unref);
-    g_object_unref(job->message);
+    g_clear_object(&job->stream);
+    g_clear_pointer(&job->body, g_byte_array_unref);
+    g_clear_object(&job->message);
+    g_clear_object(&job->cancellable);
+    g_clear_object(&job->session);
     g_free(job->url);
     g_free(job->instance_name);
     if (job->idle_source)
@@ -611,53 +637,108 @@ static gboolean rss_finish_fetch(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-static void rss_fetch_threaded(gpointer data, gpointer user_data)
+static void rss_read_thread(GTask *task, gpointer source,
+                           gpointer data, GCancellable *cancellable)
+{
+    FetchJob *job = g_task_get_task_data(task);
+    GError *error = NULL;
+    GByteArray *body;
+    guchar buffer[8192];
+    gsize got;
+    gsize total = 0;
+
+    (void)data;
+    (void)source;
+    if (!job) {
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED,
+                                "Feed read job was destroyed");
+        return;
+    }
+    body = g_byte_array_new();
+    while ((got = g_input_stream_read(job->stream, buffer, sizeof(buffer),
+                                      cancellable, &error)) > 0) {
+        if (total + got > RSS_MAX_BYTES) {
+            g_set_error_literal(&error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                                "Feed response is too large");
+            break;
+        }
+        g_byte_array_append(body, buffer, got);
+        total += got;
+    }
+    g_input_stream_close(job->stream, NULL, NULL);
+    if (error) {
+        g_byte_array_unref(body);
+        g_task_return_error(task, error);
+        return;
+    }
+    g_task_return_pointer(task, g_byte_array_free_to_bytes(body),
+                          (GDestroyNotify)g_bytes_unref);
+}
+
+static void rss_read_done(GObject *source, GAsyncResult *result,
+                          gpointer user_data)
 {
     FetchJob *job = user_data;
     GError *error = NULL;
     GBytes *bytes;
 
-    (void)data;
-
-    bytes = soup_session_send_and_read(job->session, job->message, NULL,
-                                       &error);
-    g_clear_object(&job->session);
-    if (bytes && soup_message_get_status(job->message) >= 400) {
-        g_bytes_unref(bytes);
-        {
-        char *msg = g_strdup_printf("HTTP error %u\n",
-                                    soup_message_get_status(job->message));
-        job->bytes = g_bytes_new_take(msg, strlen(msg));
-        }
+    (void)source;
+    bytes = g_task_propagate_pointer(G_TASK(result), &error);
+    if (!bytes) {
+        char *text = g_strdup(error ? error->message : "network request failed");
+        gsize len = strlen(text);
+        job->bytes = g_bytes_new_take(text, len + 1);
         job->error = TRUE;
-    } else if (bytes) {
-        if (g_bytes_get_size(bytes) > RSS_MAX_BYTES) {
-            job->error = TRUE;
-            job->bytes = g_bytes_new_static("Feed response is too large\n",
-                                           sizeof("Feed response is too large\n") - 1);
-            g_bytes_unref(bytes);
-        } else {
-            job->bytes = g_bytes_ref(bytes);
-            g_bytes_unref(bytes);
-        }
-    } else {
-        GString *text = g_string_new(error ? error->message :
-                                     "network request failed");
-        gsize len = text->len + 1;
-        char *data = g_string_free(text, FALSE);
-
         g_clear_error(&error);
-        job->bytes = g_bytes_new_take(data, len);
-        job->error = TRUE;
+    } else {
+        job->bytes = bytes;
     }
+    job->reading = FALSE;
+    g_clear_object(&job->session);
     job->idle_source = g_idle_add(rss_finish_fetch, job);
+}
+
+static void rss_fetch_done(GObject *source, GAsyncResult *result,
+                          gpointer user_data)
+{
+    FetchJob *job = user_data;
+    GError *error = NULL;
+    GInputStream *stream;
+    GTask *task;
+
+    stream = soup_session_send_finish(SOUP_SESSION(source), result, &error);
+    if (!stream) {
+        char *text = g_strdup(error ? error->message : "network request failed");
+        gsize len = strlen(text);
+        job->bytes = g_bytes_new_take(text, len + 1);
+        job->error = TRUE;
+        g_clear_error(&error);
+        g_clear_object(&job->session);
+        job->idle_source = g_idle_add(rss_finish_fetch, job);
+        return;
+    }
+    job->stream = stream;
+    if (soup_message_get_status(job->message) >= 400) {
+        char *text = g_strdup_printf("HTTP error %u\n",
+                                     soup_message_get_status(job->message));
+        gsize len = strlen(text);
+        job->bytes = g_bytes_new_take(text, len + 1);
+        job->error = TRUE;
+        g_clear_object(&job->session);
+        job->idle_source = g_idle_add(rss_finish_fetch, job);
+        return;
+    }
+    job->reading = TRUE;
+    task = g_task_new(NULL, job->cancellable, rss_read_done, job);
+    g_task_set_task_data(task, job, NULL);
+    g_task_run_in_thread(task, rss_read_thread);
+    g_object_unref(task);
 }
 
 static void rss_request_refresh(XsPlugin *p, gboolean force)
 {
     PrivData *priv = p ? p->priv : NULL;
     FetchJob *job;
-    GError *error = NULL;
     SoupMessage *msg;
 
     if (!priv || !priv->session || !priv->requests || !priv->feed_url ||
@@ -670,13 +751,11 @@ static void rss_request_refresh(XsPlugin *p, gboolean force)
     msg = soup_message_new("GET", priv->feed_url);
     if (!msg)
         return;
-    soup_message_headers_append(soup_message_get_request_headers(msg),
-                                 "Accept",
-                                 "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1");
     job = g_new0(FetchJob, 1);
     job->set = rss_request_set_ref(priv->requests);
     job->message = msg;
     job->session = g_object_ref(priv->session);
+    job->cancellable = g_cancellable_new();
     job->url = g_strdup(priv->feed_url);
     job->instance_name = g_strdup(p->name);
     priv->generation++;
@@ -687,15 +766,9 @@ static void rss_request_refresh(XsPlugin *p, gboolean force)
     g_ptr_array_add(priv->requests->jobs, job);
     priv->requests->alive++;
     g_mutex_unlock(&priv->requests->lock);
-    if (!g_thread_pool_push(priv->requests->pool, job, &error)) {
-        g_clear_error(&error);
-        g_mutex_lock(&priv->requests->lock);
-        g_ptr_array_remove_fast(priv->requests->jobs, job);
-        priv->requests->alive--;
-        g_mutex_unlock(&priv->requests->lock);
-        priv->loading = FALSE;
-        rss_job_free(job);
-    }
+    soup_session_send_async(job->session, job->message,
+                            G_PRIORITY_DEFAULT, job->cancellable,
+                            rss_fetch_done, job);
 }
 
 static gboolean rss_refresh_timer(gpointer data)
@@ -709,6 +782,62 @@ static gboolean rss_refresh_timer(gpointer data)
 }
 
 /* ---------- drawing ---------- */
+static int rss_font_size(const PrivData *priv)
+{
+    PangoFontDescription *font;
+    int size;
+
+    font = pango_font_description_from_string(
+        priv && priv->text_font ? priv->text_font : "Sans 9");
+    size = font ? pango_font_description_get_size(font) / PANGO_SCALE : 9;
+    if (font)
+        pango_font_description_free(font);
+    return MAX(6, size);
+}
+
+static int rss_viewport_height(XsPlugin *p)
+{
+    PrivData *priv = p ? p->priv : NULL;
+    int h = priv ? priv->window_height : RSS_H;
+    int control_h = MAX(18, h / 10);
+
+    return MAX(24, h - control_h - 14);
+}
+
+static int rss_display_count(PrivData *priv, int width, int height)
+{
+    int requested;
+    int viewport;
+    int line_h;
+    int estimated_chars;
+    int title_len;
+    int summary_len;
+    int title_lines;
+    int summary_lines;
+    int item_lines;
+    int count;
+    const RssEntry *first;
+
+    if (!priv || !priv->entries || !priv->entries->len)
+        return 0;
+    requested = priv->auto_news_count ? RSS_MAX_ENTRIES : priv->news_count;
+    requested = CLAMP(requested, 1, (int)priv->entries->len);
+    viewport = MAX(24, height - MAX(18, height / 10) - 14);
+    line_h = rss_font_size(priv) + 3;
+    estimated_chars = MAX(12, width / MAX(6, rss_font_size(priv) / 2));
+    first = g_ptr_array_index(priv->entries, 0);
+    title_len = first->title ? (int)g_utf8_strlen(first->title, -1) : 0;
+    summary_len = first->summary ? (int)g_utf8_strlen(first->summary, -1) : 0;
+    title_lines = MAX(1, (title_len + estimated_chars - 1) / estimated_chars);
+    summary_lines = MAX(1, (summary_len + estimated_chars * 2 - 1) /
+                        (estimated_chars * 2));
+    item_lines = title_lines + summary_lines + 2;
+    count = requested;
+    if (priv->auto_news_count)
+        count = MIN(requested, MAX(1, viewport / MAX(1, item_lines * line_h)));
+    return CLAMP(count, 1, (int)priv->entries->len);
+}
+
 static void rss_draw_rounded(cairo_t *cr, double x, double y, double w,
                              double h, double radius)
 {
@@ -729,14 +858,13 @@ static void rss_draw_rounded(cairo_t *cr, double x, double y, double w,
 static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
     PrivData *priv = p ? p->priv : NULL;
-    const RssEntry *entry;
     PangoLayout *layout;
     PangoFontDescription *font;
     PangoRectangle logical;
-    double k;
-    double ox, oy;
-    int text_w, text_h;
+    int text_h;
     int entry_count;
+    int viewport_h;
+    int content_w;
 
     if (!priv || !p->win)
         return;
@@ -750,32 +878,32 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             cairo_restore(cr);
         }
     }
-    k = MIN(w / 200.0, h / 200.0);
-    ox = (w - 200.0 * k) / 2.0;
-    oy = (h - 200.0 * k) / 2.0;
+    viewport_h = rss_viewport_height(p);
+    content_w = MAX(20, w - 20);
     cairo_save(cr);
-    cairo_translate(cr, ox, oy);
-    cairo_scale(cr, k, k);
+    cairo_scale(cr, 1.0, 1.0);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
     if (g_strcmp0(priv->theme, "default") == 0) {
         cairo_set_source_rgba(cr, priv->background_color[0],
                               priv->background_color[1],
                               priv->background_color[2],
                               priv->background_color[3]);
-        rss_draw_rounded(cr, 0, 0, 200, 200, 17);
+        rss_draw_rounded(cr, 0, 0, w, h, MIN(MIN(17, w / 8), h / 8));
         cairo_fill(cr);
     }
     if (xs_core_theme_has(p, "background"))
-        xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, 200, 200);
+        xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, w, h);
 
     layout = pango_cairo_create_layout(cr);
     font = pango_font_description_from_string(
         priv->text_font ? priv->text_font : "Sans 9");
     pango_layout_set_font_description(layout, font);
     pango_font_description_free(font);
-    pango_layout_set_width(layout, (int)(190 * PANGO_SCALE));
+    pango_layout_set_width(layout, content_w * PANGO_SCALE);
     pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
     pango_layout_set_spacing(layout, 1 * PANGO_SCALE);
+    entry_count = rss_display_count(priv, w, h);
+    (void)viewport_h;
 
     if (!priv->loading && priv->status && priv->status->len &&
         (!priv->entries || !priv->entries->len)) {
@@ -784,6 +912,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
                               priv->text_color[2], priv->text_color[3]);
         cairo_move_to(cr, 10, 10);
         pango_cairo_show_layout(cr, layout);
+        g_object_unref(layout);
         goto controls;
     }
     if (!priv->entries || !priv->entries->len) {
@@ -792,48 +921,59 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
                               priv->text_color[2], priv->text_color[3]);
         cairo_move_to(cr, 10, 10);
         pango_cairo_show_layout(cr, layout);
+        g_object_unref(layout);
         goto controls;
     }
-    entry = rss_current_entry(priv);
-    if (!entry)
+    int first;
+    const RssEntry *entry;
+    int i;
+    char *feed;
+    char *heading;
+    GString *all;
+
+    if (!rss_display_entries(priv)) {
+        g_object_unref(layout);
         goto controls;
-    {
-        char *feed = priv->feed_name ? priv->feed_name : "RSS";
-        char *heading = priv->show_feed_name ?
-                        g_markup_escape_text(feed, -1) : g_strdup("");
+    }
+    first = CLAMP(priv->feed_number, 0,
+                  (int)priv->entries->len - rss_display_count(priv, w, h));
+    entry_count = rss_display_count(priv, w, h);
+    feed = priv->feed_name ? priv->feed_name : "RSS";
+    heading = priv->show_feed_name ? g_markup_escape_text(feed, -1) :
+                                      g_strdup("");
+    all = g_string_new(NULL);
+    for (i = 0; i < entry_count; i++) {
+        entry = g_ptr_array_index(priv->entries, first + i);
         char *title = g_markup_escape_text(entry->title ? entry->title : "", -1);
         char *summary = g_markup_escape_text(entry->summary ? entry->summary : "", -1);
-        char *body;
-
-        if (priv->show_feed_name)
-            body = g_strdup_printf("<b>%s</b>\n\n%s\n\n%s",
-                                    heading, title, summary);
-        else
-            body = g_strdup_printf("%s\n\n%s", title, summary);
-        pango_layout_set_markup(layout, body, -1);
-        g_free(body);
-        g_free(summary);
+        if (i == 0 && priv->show_feed_name)
+            g_string_append_printf(all, "<b>%s</b>\n\n", heading);
+        g_string_append_printf(all, "<b>%s</b>\n%s", title, summary);
+        if (i + 1 < entry_count)
+            g_string_append_c(all, '\n');
         g_free(title);
-        g_free(heading);
+        g_free(summary);
     }
+    pango_layout_set_markup(layout, all->str, -1);
+    g_string_free(all, TRUE);
+    g_free(heading);
     pango_layout_get_pixel_extents(layout, NULL, &logical);
-    text_w = logical.width;
     text_h = logical.height;
     priv->content_extent = text_h;
     cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
                           priv->text_color[2], priv->text_color[3]);
     cairo_save(cr);
-    cairo_rectangle(cr, 7, 7, 186, 174);
+    cairo_rectangle(cr, 7, 7, w - 14, viewport_h);
     cairo_clip(cr);
     cairo_move_to(cr, 10, 10 - priv->scroll_px);
     pango_cairo_show_layout(cr, layout);
     cairo_restore(cr);
     g_object_unref(layout);
 
-    if (text_h > 174) {
+    if (text_h > viewport_h) {
         PangoLayout *hint = pango_cairo_create_layout(cr);
         char *more = g_strdup_printf("...%s",
-                                     priv->scroll_px + 174 < text_h ? "(more)" : "");
+                                     priv->scroll_px + viewport_h < text_h ? "(more)" : "");
         font = pango_font_description_from_string(
             priv->text_font ? priv->text_font : "Sans 8");
         pango_layout_set_font_description(hint, font);
@@ -843,7 +983,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         cairo_set_source_rgba(cr, priv->text_color[0] * .7,
                               priv->text_color[1] * .7,
                               priv->text_color[2] * .7, priv->text_color[3]);
-        cairo_move_to(cr, 8, 184);
+        cairo_move_to(cr, 8, h - 16);
         pango_cairo_show_layout(cr, hint);
         g_object_unref(hint);
     }
@@ -851,23 +991,18 @@ controls:
     /* Кнопки как в оригинале: previous page / reset / next page. */
     cairo_set_line_width(cr, 1.2);
     cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
-    cairo_arc(cr, 142, 190, 6, 0, 2 * RSS_PI);
-    cairo_arc(cr, 162, 190, 6, 0, 2 * RSS_PI);
-    cairo_arc(cr, 182, 190, 6, 0, 2 * RSS_PI);
+    cairo_arc(cr, w - 58, h - 10, 6, 0, 2 * RSS_PI);
+    cairo_arc(cr, w - 38, h - 10, 6, 0, 2 * RSS_PI);
+    cairo_arc(cr, w - 18, h - 10, 6, 0, 2 * RSS_PI);
     cairo_fill(cr);
     cairo_set_source_rgba(cr, 1, 1, 1, .9);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
                            CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, 11);
-    cairo_move_to(cr, 138, 194); cairo_show_text(cr, "‹");
-    cairo_move_to(cr, 158, 194); cairo_show_text(cr, "·");
-    cairo_move_to(cr, 178, 194); cairo_show_text(cr, "›");
+    cairo_move_to(cr, w - 62, h - 6); cairo_show_text(cr, "‹");
+    cairo_move_to(cr, w - 42, h - 6); cairo_show_text(cr, "·");
+    cairo_move_to(cr, w - 22, h - 6); cairo_show_text(cr, "›");
     cairo_restore(cr);
-    (void)text_w;
-    (void)entry_count;
-    (void)RSS_W;
-    (void)RSS_H;
-    (void)RSS_PI;
 }
 
 /* ---------- mouse ---------- */
@@ -875,25 +1010,21 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
 {
     PrivData *priv = p ? p->priv : NULL;
     GtkAllocation allocation;
-    double x, y, k;
+    double x, y;
 
     if (!p || !p->priv || !p->win)
         return FALSE;
     gtk_widget_get_allocation(p->win, &allocation);
-    k = MIN((double)allocation.width / 200.0,
-            (double)allocation.height / 200.0);
-    if (k <= 0.0)
-        return FALSE;
-    x = (ev->x - (allocation.width - 200.0 * k) / 2.0) / k;
-    y = (ev->y - (allocation.height - 200.0 * k) / 2.0) / k;
+    x = ev->x;
+    y = ev->y;
     if (ev->type == GDK_BUTTON_PRESS) {
         priv->button_pressed = 0;
-        if (y >= 183.0 && y <= 196.7) {
-            if (x >= 135.0 && x <= 149.0)
+        if (y >= allocation.height - 20.0) {
+            if (x >= allocation.width - 70.0 && x <= allocation.width - 55.0)
                 priv->button_pressed = 1;
-            else if (x >= 155.0 && x <= 168.0)
+            else if (x >= allocation.width - 55.0 && x <= allocation.width - 40.0)
                 priv->button_pressed = 2;
-            else if (x >= 174.0 && x <= 187.0)
+            else if (x >= allocation.width - 40.0 && x <= allocation.width - 25.0)
                 priv->button_pressed = 3;
         }
         if (priv->button_pressed)
@@ -926,7 +1057,7 @@ static void rss_scroll_by(XsPlugin *p, int delta)
 
     if (!priv)
         return;
-    max = MAX(0, priv->content_extent - 174);
+    max = MAX(0, priv->content_extent - rss_viewport_height(p));
     priv->scroll_px = CLAMP(priv->scroll_px + delta, 0, max);
     if (p->win)
         gtk_widget_queue_draw(p->win);
@@ -1031,7 +1162,6 @@ static void rss_menu(XsPlugin *p, GtkMenu *menu)
     };
     int i;
 
-    rss_menu_item(GTK_WIDGET(menu), p, "View this News", "firefox");
     item = gtk_menu_item_new_with_label("Feeds");
     sub = gtk_menu_new();
     for (i = 0; feeds[i].name; i++) {
@@ -1044,6 +1174,7 @@ static void rss_menu(XsPlugin *p, GtkMenu *menu)
     }
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), sub);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+    rss_menu_item(GTK_WIDGET(menu), p, "View this News", "firefox");
     rss_menu_item(GTK_WIDGET(menu), p, "Refresh", "refresh");
     rss_menu_item(GTK_WIDGET(menu), p, "Previous item", "prev_item");
     rss_menu_item(GTK_WIDGET(menu), p, "Next item", "next_item");
@@ -1078,6 +1209,29 @@ static void rss_menu(XsPlugin *p, GtkMenu *menu)
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 }
 
+static gboolean rss_feed_url_timeout(gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+
+    if (!priv)
+        return G_SOURCE_REMOVE;
+    priv->feed_url_source = 0;
+    rss_request_refresh(p, TRUE);
+    return G_SOURCE_REMOVE;
+}
+
+static void rss_queue_feed_refresh(XsPlugin *p)
+{
+    PrivData *priv = p ? p->priv : NULL;
+
+    if (!priv)
+        return;
+    if (priv->feed_url_source)
+        g_source_remove(priv->feed_url_source);
+    priv->feed_url_source = g_timeout_add(700, rss_feed_url_timeout, p);
+}
+
 static void rss_entry_changed(GtkEditable *edit, gpointer data)
 {
     XsPlugin *p = data;
@@ -1097,7 +1251,7 @@ static void rss_entry_changed(GtkEditable *edit, gpointer data)
         priv->loading = FALSE;
         g_free(priv->site_url);
         priv->site_url = NULL;
-        rss_request_refresh(p, TRUE);
+        rss_queue_feed_refresh(p);
     }
     rss_flush(priv);
     if (p->win) gtk_widget_queue_draw(p->win);
@@ -1113,6 +1267,78 @@ static void rss_bool_toggled(GtkToggleButton *btn, gpointer data)
     g_key_file_set_boolean(priv->kf, p->name, key, active);
     if (strcmp(key, "show_feed_name") == 0) priv->show_feed_name = active;
     rss_flush(priv); if (p->win) gtk_widget_queue_draw(p->win);
+}
+
+static void rss_window_resize(XsPlugin *p, int width, int height)
+{
+    PrivData *priv = p ? p->priv : NULL;
+
+    if (!priv || !p->win)
+        return;
+    priv->window_width = CLAMP(width, 100, 1200);
+    priv->window_height = CLAMP(height, 80, 1200);
+    xs_host_api()->resize(p, priv->window_width, priv->window_height);
+    gtk_widget_queue_draw(p->win);
+}
+
+static void rss_size_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    const char *key = g_object_get_data(G_OBJECT(spin), "xs-key");
+    int width;
+    int height;
+
+    if (!priv || !key)
+        return;
+    width = priv->window_width;
+    height = priv->window_height;
+    if (strcmp(key, "window_width") == 0)
+        width = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(spin));
+    else if (strcmp(key, "window_height") == 0)
+        height = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(spin));
+    else
+        return;
+    rss_window_resize(p, width, height);
+    g_key_file_set_integer(priv->kf, p->name, "window_width",
+                           priv->window_width);
+    g_key_file_set_integer(priv->kf, p->name, "window_height",
+                           priv->window_height);
+    rss_flush(priv);
+    priv->scroll_px = 0;
+}
+
+static void rss_news_count_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    if (!priv)
+        return;
+    priv->news_count = CLAMP(gtk_spin_button_get_value_as_int(
+                                 GTK_SPIN_BUTTON(spin)), 1, RSS_MAX_ENTRIES);
+    g_key_file_set_integer(priv->kf, p->name, "news_count", priv->news_count);
+    rss_flush(priv);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
+}
+
+static void rss_auto_news_toggled(GtkToggleButton *btn, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    GtkWidget *spin;
+
+    if (!priv)
+        return;
+    priv->auto_news_count = gtk_toggle_button_get_active(btn);
+    g_key_file_set_boolean(priv->kf, p->name, "auto_news_count",
+                           priv->auto_news_count);
+    spin = g_object_get_data(G_OBJECT(btn), "xs-news-count-spin");
+    if (spin)
+        gtk_widget_set_sensitive(spin, !priv->auto_news_count);
+    rss_flush(priv);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
 }
 
 static void rss_int_changed(GtkSpinButton *spin, gpointer data)
@@ -1162,7 +1388,7 @@ static void rss_font_set(GtkFontButton *btn, gpointer data)
 static void rss_properties(XsPlugin *p, GtkNotebook *nb)
 {
     PrivData *priv = p ? p->priv : NULL;
-    GtkWidget *page, *w;
+    GtkWidget *page, *w, *auto_toggle;
     if (!priv) return;
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(page), 10);
@@ -1176,6 +1402,21 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_int(GTK_BOX(page), "Update interval", "Refresh interval in minutes", priv->update_minutes, 1, 60, 1);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("update_interval"), g_free);
     g_signal_connect(w, "value-changed", G_CALLBACK(rss_int_changed), p);
+    w = xs_prop_add_int(GTK_BOX(page), "Window width", "Width in pixels", priv->window_width, 100, 1200, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_width"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
+    w = xs_prop_add_int(GTK_BOX(page), "Window height", "Height in pixels", priv->window_height, 80, 1200, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
+    w = xs_prop_add_bool(GTK_BOX(page), "Auto news count", "Fit as many news as window and font allow", priv->auto_news_count);
+    auto_toggle = w;
+    g_signal_connect(w, "toggled", G_CALLBACK(rss_auto_news_toggled), p);
+    w = xs_prop_add_int(GTK_BOX(page), "News count", "Number of news when Auto is off", priv->news_count, 1, RSS_MAX_ENTRIES, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("news_count"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(rss_news_count_changed), p);
+    gtk_widget_set_sensitive(w, !priv->auto_news_count);
+    g_object_set_data(G_OBJECT(w), "xs-news-count-spin", w);
+    g_object_set_data(G_OBJECT(auto_toggle), "xs-news-count-spin", w);
     w = xs_prop_add_bool(GTK_BOX(page), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
     g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
@@ -1239,12 +1480,23 @@ static void rss_cancel_fetch(PrivData *priv)
         g_source_remove(priv->refresh_source);
         priv->refresh_source = 0;
     }
+    if (priv && priv->feed_url_source) {
+        g_source_remove(priv->feed_url_source);
+        priv->feed_url_source = 0;
+    }
     if (priv && priv->session)
         soup_session_abort(priv->session);
     if (priv && priv->requests) {
         requests = priv->requests;
         priv->requests = NULL;
         rss_request_set_stop(requests);
+        g_mutex_lock(&requests->lock);
+        for (gsize i = 0; i < requests->jobs->len; i++) {
+            FetchJob *job = g_ptr_array_index(requests->jobs, i);
+            if (job->cancellable)
+                g_cancellable_cancel(job->cancellable);
+        }
+        g_mutex_unlock(&requests->lock);
     }
     rss_request_set_unref(requests);
 }
@@ -1256,6 +1508,10 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     PrivData *priv = g_new0(PrivData, 1);
     double scale;
     int x, y;
+    int window_width;
+    int window_height;
+    gboolean auto_count;
+    int news_count;
 
     p->priv = priv; priv->plugin = p; priv->kf = kf;
     priv->entries = g_ptr_array_new_with_free_func(rss_entry_free);
@@ -1275,7 +1531,27 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
     x = xs_host_api()->conf_int(kf, p->name, "x", 80);
     y = xs_host_api()->conf_int(kf, p->name, "y", 80);
-    p->win = xs_host_api()->make_window(p, x, y, (int)(200 * priv->scale), (int)(200 * priv->scale));
+    window_width = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_width",
+                                                RSS_W), 100, 1200);
+    window_height = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_height",
+                                                 RSS_H), 80, 1200);
+    auto_count = rss_conf_bool(kf, p->name, "auto_news_count", FALSE);
+    news_count = CLAMP(xs_host_api()->conf_int(kf, p->name, "news_count", 5),
+                       1, RSS_MAX_ENTRIES);
+    if (!g_key_file_has_key(kf, p->name, "window_width", NULL))
+        g_key_file_set_integer(kf, p->name, "window_width", window_width);
+    if (!g_key_file_has_key(kf, p->name, "window_height", NULL))
+        g_key_file_set_integer(kf, p->name, "window_height", window_height);
+    if (!g_key_file_has_key(kf, p->name, "auto_news_count", NULL))
+        g_key_file_set_boolean(kf, p->name, "auto_news_count", auto_count);
+    if (!g_key_file_has_key(kf, p->name, "news_count", NULL))
+        g_key_file_set_integer(kf, p->name, "news_count", news_count);
+    priv->window_width = window_width;
+    priv->window_height = window_height;
+    priv->auto_news_count = auto_count;
+    priv->news_count = news_count;
+    xs_core_plugin_conf_flush(p->name);
+    p->win = xs_host_api()->make_window(p, x, y, window_width, window_height);
     if (!p->win) {
         p->host->log("clearrss: failed to create window");
         g_ptr_array_unref(priv->entries); g_string_free(priv->status, TRUE);
@@ -1289,8 +1565,6 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     priv->requests->jobs = g_ptr_array_new();
     g_mutex_init(&priv->requests->lock);
     priv->requests->active = TRUE;
-    priv->requests->pool = g_thread_pool_new(rss_fetch_threaded,
-                                              "xs-clearrss", 2, FALSE, NULL);
     priv->session = soup_session_new();
     soup_session_set_timeout(priv->session, RSS_TIMEOUT_SEC);
     soup_session_set_user_agent(priv->session, "Xscreenlets-ClearRSS/0.1");

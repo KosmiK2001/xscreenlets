@@ -18,6 +18,10 @@ Xscreenlets — замена устаревших screenlets (python2+PyGTK) д�
 
 ## Сборка
 
+Сборка производится с флагами `-O2 -g3 -Wall -Wextra`; при добавлении новых
+модулей сначала проверяйте их компиляцию отдельно. В текущем дереве старые
+предупреждения уже существующих модулей видны в полном `make clean && make`.
+
 ```bash
 make
 ```
@@ -30,6 +34,10 @@ make
 - `build/frame_launcher.so` — плагин рамки с гостями;
 - `build/clearrss.so` — C/GTK3-порт ClearRss;
 - `build/xclock` — standalone версия часов.
+
+`make clean && make` завершает сборку без ошибок. Предупреждения старых
+модулей не относятся к новому `clearrss.c`; его объект собирается без новых
+диагностик.
 
 Сборка без предупреждений:
 ```bash
@@ -81,11 +89,16 @@ DISPLAY=:0 ~/bin/xscreenletsd --plugdir ~/lib/xscreenlets/plugins --debug
 C/GTK3-порт оригинального `/usr/share/screenlets/ClearRss/ClearRssScreenlet.py`:
 
 - RSS и Atom через `libsoup-3.0` и `libxml-2.0`;
-- асинхронная сеть и worker-разбор XML без блокировки GTK;
-- Properties для `feed_name`, `feed_url`, `update_interval`, шрифта и цветов;
+- асинхронная сеть с ограниченным чтением ответа и worker-разбор XML без блокировки GTK;
+- Properties для `feed_name`, `feed_url`, `update_interval`, шрифта, цветов,
+  `window_width`, `window_height`, `news_count` и `auto_news_count`;
+- `auto_news_count=true` вычисляет число видимых новостей по высоте окна,
+  размеру шрифта, ширине и длине заголовка/описания;
+- `news_count` задаёт ручной максимум и сохраняется при переключении
+  обратно из автоматического режима;
 - Refresh, Previous item и Next item;
 - нижние кнопки прокрутки и прокрутка колесом;
-- `View this News` открывает канал через `xdg-open` без shell-инъекции;
+- `View this News` открывает выбранную запись через `xdg-open` без shell-инъекции;
 - темы `default` и `Simple` с локальными SVG-ассетами.
 
 Имя типа — `clearrss`. Конфиг инстанса создаётся демоном и хранится как
