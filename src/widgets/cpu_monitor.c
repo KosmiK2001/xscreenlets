@@ -33,6 +33,7 @@
 #define CM_TEXT_HEIGHT 24.0
 #define CM_DEFAULT_WINDOW_WIDTH 200
 #define CM_DEFAULT_WINDOW_HEIGHT 152
+#define CM_TEXT_PADDING 2.0
 #define CM_HISTORY_MIN_POINTS 1
 #define CM_HISTORY_MAX_POINTS 4096
 #define CM_LOAD_COMPONENTS 4
@@ -714,9 +715,7 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         double x = cell_left + 1.0;
         double y = cell_top + 1.0;
         double block_w = cell_right - cell_left - 2.0;
-        double block_h = MAX(1.0, (cell_bottom - cell_top - 2.0) * 0.30);
-        double middle_h = MAX(1.0, cell_bottom - cell_top -
-                                      2.0 - 2.0 * block_h);
+        double content_h = MAX(1.0, cell_bottom - cell_top - 2.0);
         double text_y;
         int text_height;
         char *text;
@@ -730,10 +729,17 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
                         cell_bottom - cell_top - 1.0);
         cairo_stroke(cr);
 
-        cm_draw_history(cr, x, y, block_w, block_h, core, 0,
-                        core->history_points, priv->history_head,
-                        priv->history_count, priv->load_colors);
-        text_y = y + block_h + 1.0;
+        pango_layout_set_text(layout, "0", -1);
+        pango_layout_get_pixel_size(layout, NULL, &text_height);
+        {
+            double middle_h = MIN(content_h * 0.50,
+                                  text_height + 2.0 * CM_TEXT_PADDING);
+            double block_h = MAX(1.0, (content_h - middle_h) / 2.0);
+
+            cm_draw_history(cr, x, y, block_w, block_h, core, 0,
+                            core->history_points, priv->history_head,
+                            priv->history_count, priv->load_colors);
+            text_y = y + block_h;
         text = isfinite(core->frequency_mhz) ?
                g_strdup_printf("%.2fG", core->frequency_mhz / 1000.0) : g_strdup("---");
         pango_layout_set_text(layout, text, -1);
@@ -744,7 +750,7 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         pango_layout_get_pixel_size(layout, NULL, &text_height);
         cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
                               priv->text_color[2], priv->text_color[3]);
-        cairo_move_to(cr, x, text_y + MAX(0.0, (middle_h - text_height) / 2.0));
+        cairo_move_to(cr, x, text_y + CM_TEXT_PADDING);
         pango_cairo_show_layout(cr, layout);
 
         text = isfinite(core->temperature) ?
@@ -755,14 +761,14 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         pango_layout_get_pixel_size(layout, NULL, &text_height);
         cairo_set_source_rgba(cr, priv->temp_color[0], priv->temp_color[1],
                               priv->temp_color[2], priv->temp_color[3]);
-        cairo_move_to(cr, x + block_w / 2.0,
-                      text_y + MAX(0.0, (middle_h - text_height) / 2.0));
+        cairo_move_to(cr, x + block_w / 2.0, text_y + CM_TEXT_PADDING);
         pango_cairo_show_layout(cr, layout);
         g_free(text);
 
         cm_draw_history(cr, x, text_y + middle_h, block_w, block_h,
                         core, 1, core->history_points, priv->history_head,
                         priv->history_count, priv->load_colors);
+        }
     }
     g_object_unref(layout);
     cairo_destroy(cr);
