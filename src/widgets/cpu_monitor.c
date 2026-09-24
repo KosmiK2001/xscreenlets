@@ -464,27 +464,40 @@ static void cm_free_core(gpointer data)
     g_free(core);
 }
 
-static void cm_reset_history(PrivData *priv)
-{
-    priv->history_head = 0;
-    priv->history_count = 0;
-}
-
 static gboolean cm_ensure_history(PrivData *priv, guint points)
 {
+    guint old_count = priv->history_count;
+    guint old_head = priv->history_head;
     guint c;
 
     points = CLAMP(points, CM_HISTORY_MIN_POINTS, CM_HISTORY_MAX_POINTS);
     priv->history_points = points;
     for (c = 0; c < priv->cores->len; c++) {
         CoreData *core = g_ptr_array_index(priv->cores, c);
-        if (core->history_points == points)
+        CpuHistorySlot *old_history = core->history;
+        guint old_core_points = core->history_points;
+        guint keep;
+
+        if (old_core_points == points) {
+            if (old_core_points == 0)
+                core->history = g_new0(CpuHistorySlot, points);
             continue;
-        g_free(core->history);
+        }
         core->history = g_new0(CpuHistorySlot, points);
         core->history_points = points;
+        keep = MIN(old_count, MIN(points, old_core_points));
+        if (old_history && keep) {
+            guint start = (old_head + old_core_points - keep) % old_core_points;
+            guint i;
+            for (i = 0; i < keep; i++)
+                memcpy(&core->history[i],
+                       &old_history[(start + i) % old_core_points],
+                       sizeof(CpuHistorySlot));
+        }
+        g_free(old_history);
     }
-    cm_reset_history(priv);
+    priv->history_head = MIN(old_count, points);
+    priv->history_count = MIN(old_count, points);
     return TRUE;
 }
 
@@ -701,8 +714,7 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         double x = cell_left + 1.0;
         double y = cell_top + 1.0;
         double block_w = cell_right - cell_left - 2.0;
-        double block_h = MIN(CM_BLOCK_HEIGHT,
-                             (cell_bottom - cell_top - 2.0) * 0.25);
+        double block_h = MAX(1.0, (cell_bottom - cell_top - 2.0) * 0.30);
         double middle_h = MAX(1.0, cell_bottom - cell_top -
                                       2.0 - 2.0 * block_h);
         double text_y;
@@ -711,6 +723,13 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 
         if (row >= priv->rows)
             break;
+        cairo_set_source_rgba(cr, 0.72, 0.76, 0.84, 0.90);
+        cairo_set_line_width(cr, 1.0);
+        cairo_rectangle(cr, cell_left + 0.5, cell_top + 0.5,
+                        cell_right - cell_left - 1.0,
+                        cell_bottom - cell_top - 1.0);
+        cairo_stroke(cr);
+
         cm_draw_history(cr, x, y, block_w, block_h, core, 0,
                         core->history_points, priv->history_head,
                         priv->history_count, priv->load_colors);
