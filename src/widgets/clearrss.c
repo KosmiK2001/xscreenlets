@@ -45,7 +45,6 @@ typedef struct {
     gdouble background_color[4];
     char *text_font;
     char *time_font;
-    int time_font_size;
     char *theme;
     char *feed_name;
     char *feed_url;
@@ -964,11 +963,12 @@ static char *rss_entry_title_markup(const PrivData *priv,
     }
     clock = g_date_time_format(local, "%H:%M:%S");
     time_desc = pango_font_description_from_string(
-        priv->time_font ? priv->time_font : "Sans Bold");
+        priv->time_font ? priv->time_font : "Sans Bold 9");
+    if (!time_desc)
+        time_desc = pango_font_description_from_string("Sans Bold 9");
     if (time_desc) {
-        pango_font_description_set_size(time_desc,
-                                       CLAMP(priv->time_font_size, 6, 48) *
-                                       PANGO_SCALE);
+        if (pango_font_description_get_size(time_desc) <= 0)
+            pango_font_description_set_size(time_desc, 9 * PANGO_SCALE);
         time_desc_string = pango_font_description_to_string(time_desc);
         pango_font_description_free(time_desc);
     } else {
@@ -1676,11 +1676,6 @@ static void rss_int_changed(GtkSpinButton *spin, gpointer data)
         priv->update_minutes = CLAMP(value, 1, 60);
         g_key_file_set_integer(priv->kf, p->name, key, priv->update_minutes);
         rss_request_refresh(p, FALSE);
-    } else if (strcmp(key, "time_font_size") == 0) {
-        priv->time_font_size = CLAMP(value, 6, 48);
-        g_key_file_set_integer(priv->kf, p->name, key, priv->time_font_size);
-        if (p->win)
-            gtk_widget_queue_draw(p->win);
     }
     rss_flush(priv);
 }
@@ -1717,8 +1712,10 @@ static void rss_font_set(GtkFontButton *btn, gpointer data)
     const char *key = g_object_get_data(G_OBJECT(btn), "xs-key");
     if (!priv || !font || !key) return;
     if (strcmp(key, "time_font") == 0) {
-        g_free(priv->time_font); priv->time_font = g_strdup(font);
-        g_key_file_set_string(priv->kf, p->name, key, font);
+        g_free(priv->time_font);
+        priv->time_font = g_strdup(font);
+        g_key_file_set_string(priv->kf, p->name, "time_font", font);
+        g_key_file_remove_key(priv->kf, p->name, "time_font_size", NULL);
     } else {
         g_free(priv->text_font); priv->text_font = g_strdup(font);
         g_key_file_set_string(priv->kf, p->name, "font", font);
@@ -1749,9 +1746,6 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_int(GTK_BOX(page), "Window height", "Height in pixels", priv->window_height, 80, 1200, 1);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"), g_free);
     g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
-    w = xs_prop_add_int(GTK_BOX(page), "Time font size", "Published-time font size in points", priv->time_font_size, 6, 48, 1);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_font_size"), g_free);
-    g_signal_connect(w, "value-changed", G_CALLBACK(rss_int_changed), p);
     w = xs_prop_add_bool(GTK_BOX(page), "Auto news count", "Fit as many news as window and font allow", priv->auto_news_count);
     auto_toggle = w;
     g_signal_connect(w, "toggled", G_CALLBACK(rss_auto_news_toggled), p);
@@ -1887,12 +1881,12 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     xs_host_api()->log("clearrss: config '%s' text=%g,%g,%g,%g", p->name,
                        priv->text_color[0], priv->text_color[1],
                        priv->text_color[2], priv->text_color[3]);
-    priv->time_font = xs_host_api()->conf_str(kf, p->name, "time_font", "Sans Bold");
-    priv->time_font_size = CLAMP(xs_host_api()->conf_int(kf, p->name, "time_font_size", 9), 6, 48);
+    priv->time_font = xs_host_api()->conf_str(kf, p->name, "time_font", "Sans Bold 9");
     if (!g_key_file_has_key(kf, p->name, "time_font", NULL))
         g_key_file_set_string(kf, p->name, "time_font", priv->time_font);
-    if (!g_key_file_has_key(kf, p->name, "time_font_size", NULL))
-        g_key_file_set_integer(kf, p->name, "time_font_size", priv->time_font_size);
+    if (g_key_file_has_key(kf, p->name, "time_font_size", NULL)) {
+        g_key_file_remove_key(kf, p->name, "time_font_size", NULL);
+    }
     scale = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
     priv->scale = CLAMP(scale, .2, 10.0);
     priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
