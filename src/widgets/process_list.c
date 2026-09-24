@@ -147,8 +147,13 @@ static gboolean pl_parse_color(const char *text, gdouble out[4])
 
 static char *pl_color_string(const gdouble color[4])
 {
-    return g_strdup_printf("%.9g,%.9g,%.9g,%.9g",
-                           color[0], color[1], color[2], color[3]);
+    gchar values[4][32];
+    static const char *format[] = {"%.9g", "%.9g", "%.9g", "%.9g"};
+
+    for (guint i = 0; i < 4; i++)
+        g_ascii_formatd(values[i], sizeof(values[i]), format[i], color[i]);
+    return g_strdup_printf("%s,%s,%s,%s", values[0], values[1],
+                           values[2], values[3]);
 }
 
 static void pl_read_color(PrivData *priv, const char *key,
@@ -743,8 +748,6 @@ static void pl_save_default_color(PrivData *priv, const char *key,
 {
     g_autofree char *value = NULL;
 
-    if (g_key_file_has_key(priv->kf, priv->plugin->name, key, NULL))
-        return;
     value = pl_color_string(color);
     g_key_file_set_string(priv->kf, priv->plugin->name, key, value);
 }
