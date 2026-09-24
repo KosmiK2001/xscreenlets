@@ -409,13 +409,14 @@ static void pl_sample(PrivData *priv)
         if (old && old->start_time == proc->start_time) {
             if (proc->cpu_ticks >= old->cpu_ticks) {
                 guint64 delta = proc->cpu_ticks - old->cpu_ticks;
-                gdouble percent = 100.0 * (gdouble)delta *
-                                  (gdouble)ticks_per_second /
-                                  (gdouble)elapsed_us;
+                /* cpu_milli: 1000 = 100.0% of one logical thread.
+                 * elapsed_us is microseconds; CPU ticks are CLK_TCK units. */
+                gdouble milli = 100.0 * (gdouble)delta * 1000000.0 /
+                                ((gdouble)ticks_per_second *
+                                 (gdouble)elapsed_us);
                 if (priv->cpu_basis == 1)
-                    percent /= (gdouble)pl_online_cpu_count();
-                gdouble rounded = percent * 1000.0;
-                proc->cpu_milli = (gint)CLAMP((gint64)(rounded + 0.5),
+                    milli /= (gdouble)pl_online_cpu_count();
+                proc->cpu_milli = (gint)CLAMP((gint64)(milli + 0.5),
                                                (gint64)0, (gint64)G_MAXINT);
             }
             if (proc->disk_read_bytes != G_MAXUINT64 &&
