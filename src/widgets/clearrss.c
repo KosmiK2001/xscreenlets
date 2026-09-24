@@ -123,7 +123,7 @@ static gboolean rss_finish_fetch(gpointer data);
 static void rss_request_refresh(XsPlugin *p, gboolean force);
 static void rss_scroll_by(XsPlugin *p, int delta);
 static int rss_viewport_height(XsPlugin *p);
-static int rss_display_count(PrivData *priv, int width, int height);
+static int rss_display_count(PrivData *priv, PangoLayout *layout, int height);
 static gboolean rss_display_entries(PrivData *priv);
 static void rss_add_theme_dirs(const char *dir, GPtrArray *names);
 static void rss_open_current(XsPlugin *p);
@@ -795,47 +795,76 @@ static int rss_font_size(const PrivData *priv)
     return MAX(6, size);
 }
 
+static int rss_header_height(PrivData *priv)
+{
+    (void)priv;
+    /* Верхняя полоса background.svg имеет натуральную высоту 40px. */
+    return 40;
+}
+
+static int rss_control_height(const PrivData *priv)
+{
+    (void)priv;
+    /* Раньше кнопки имели радиус 6px и попадали в полосу 20px.
+     * Теперь рисуем/hit-test полосу 32px, а сами круги — 24px. */
+    return 32;
+}
+
+static int rss_button_radius(const PrivData *priv)
+{
+    (void)priv;
+    return 12;
+}
+
 static int rss_viewport_height(XsPlugin *p)
 {
     PrivData *priv = p ? p->priv : NULL;
     int h = priv ? priv->window_height : RSS_H;
-    int control_h = MAX(18, h / 10);
 
-    return MAX(24, h - control_h - 14);
+    /* Заголовок и нижние кнопки имеют фиксированную высоту. Увеличение
+     * окна должно расширять только область списка, а не header/footer. */
+    return MAX(24, h - rss_header_height(priv) - rss_control_height(priv) - 14);
 }
 
-static int rss_display_count(PrivData *priv, int width, int height)
+static int rss_display_count(PrivData *priv, PangoLayout *layout, int height)
 {
     int requested;
     int viewport;
     int line_h;
-    int estimated_chars;
-    int title_len;
-    int summary_len;
-    int title_lines;
-    int summary_lines;
-    int item_lines;
-    int count;
-    const RssEntry *first;
+    int count = 0;
+    PangoRectangle logical;
+    GString *all;
 
-    if (!priv || !priv->entries || !priv->entries->len)
+    if (!priv || !priv->entries || !priv->entries->len || !layout)
         return 0;
     requested = priv->auto_news_count ? RSS_MAX_ENTRIES : priv->news_count;
     requested = CLAMP(requested, 1, (int)priv->entries->len);
-    viewport = MAX(24, height - MAX(18, height / 10) - 14);
+    viewport = MAX(24, height - rss_header_height(priv) -
+                   rss_control_height(priv) - 14);
     line_h = rss_font_size(priv) + 3;
-    estimated_chars = MAX(12, width / MAX(6, rss_font_size(priv) / 2));
-    first = g_ptr_array_index(priv->entries, 0);
-    title_len = first->title ? (int)g_utf8_strlen(first->title, -1) : 0;
-    summary_len = first->summary ? (int)g_utf8_strlen(first->summary, -1) : 0;
-    title_lines = MAX(1, (title_len + estimated_chars - 1) / estimated_chars);
-    summary_lines = MAX(1, (summary_len + estimated_chars * 2 - 1) /
-                        (estimated_chars * 2));
-    item_lines = title_lines + summary_lines + 2;
-    count = requested;
-    if (priv->auto_news_count)
-        count = MIN(requested, MAX(1, viewport / MAX(1, item_lines * line_h)));
-    return CLAMP(count, 1, (int)priv->entries->len);
+    all = g_string_new(NULL);
+
+    /* Считаем реальные строки каждой записи через Pango, пока их
+     * суммарная высота помещается в viewport. Это устраняет пустую
+     * нижнюю четверть и не зависит от эвристики длины текста. */
+    for (gsize i = 0; i < (gsize)requested; i++) {
+        const RssEntry *entry = g_ptr_array_index(priv->entries, i);
+        char *title = g_markup_escape_text(entry->title ? entry->title : "", -1);
+        char *summary = g_markup_escape_text(entry->summary ? entry->summary : "", -1);
+
+        if (count)
+            g_string_append_c(all, '\n');
+        g_string_append_printf(all, "<b>%s</b>\n%s", title, summary);
+        g_free(title);
+        g_free(summary);
+        pango_layout_set_markup(layout, all->str, -1);
+        pango_layout_get_pixel_extents(layout, NULL, &logical);
+        if (count > 0 && logical.height + line_h / 2 > viewport)
+            break;
+        count++;
+    }
+    g_string_free(all, TRUE);
+    return CLAMP(MAX(1, count), 1, (int)priv->entries->len);
 }
 
 static void rss_draw_rounded(cairo_t *cr, double x, double y, double w,
@@ -864,7 +893,12 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     int text_h;
     int entry_count;
     int viewport_h;
+    int header_h;
     int content_w;
+    int first;
+    const RssEntry *entry;
+    int i;
+    GString *all;
 
     if (!priv || !p->win)
         return;
@@ -879,6 +913,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         }
     }
     viewport_h = rss_viewport_height(p);
+    header_h = rss_header_height(priv);
     content_w = MAX(20, w - 20);
     cairo_save(cr);
     cairo_scale(cr, 1.0, 1.0);
@@ -891,8 +926,17 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         rss_draw_rounded(cr, 0, 0, w, h, MIN(MIN(17, w / 8), h / 8));
         cairo_fill(cr);
     }
-    if (xs_core_theme_has(p, "background"))
+    if (xs_core_theme_has(p, "background")) {
+        /* Сначала обычный фон/рамка на весь размер окна. */
         xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, w, h);
+        /* Верхний заголовок рисуем отдельно в натуральном масштабе.
+         * Список начинается ниже фиксированной полосы header_h. */
+        cairo_save(cr);
+        cairo_rectangle(cr, 0, 0, w, rss_header_height(priv));
+        cairo_clip(cr);
+        xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, w, RSS_H);
+        cairo_restore(cr);
+    }
 
     layout = pango_cairo_create_layout(cr);
     font = pango_font_description_from_string(
@@ -902,8 +946,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     pango_layout_set_width(layout, content_w * PANGO_SCALE);
     pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
     pango_layout_set_spacing(layout, 1 * PANGO_SCALE);
-    entry_count = rss_display_count(priv, w, h);
-    (void)viewport_h;
+    entry_count = rss_display_count(priv, layout, h);
 
     if (!priv->loading && priv->status && priv->status->len &&
         (!priv->entries || !priv->entries->len)) {
@@ -924,30 +967,24 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         g_object_unref(layout);
         goto controls;
     }
-    int first;
-    const RssEntry *entry;
-    int i;
-    char *feed;
-    char *heading;
-    GString *all;
-
     if (!rss_display_entries(priv)) {
         g_object_unref(layout);
         goto controls;
     }
     first = CLAMP(priv->feed_number, 0,
-                  (int)priv->entries->len - rss_display_count(priv, w, h));
-    entry_count = rss_display_count(priv, w, h);
-    feed = priv->feed_name ? priv->feed_name : "RSS";
-    heading = priv->show_feed_name ? g_markup_escape_text(feed, -1) :
-                                      g_strdup("");
+                  (int)priv->entries->len - rss_display_count(priv, layout, h));
+    entry_count = rss_display_count(priv, layout, h);
     all = g_string_new(NULL);
+    if (priv->show_feed_name) {
+        char *feed = priv->feed_name ? priv->feed_name : "RSS";
+        char *heading = g_markup_escape_text(feed, -1);
+        g_string_append_printf(all, "<b>%s</b>\n\n", heading);
+        g_free(heading);
+    }
     for (i = 0; i < entry_count; i++) {
         entry = g_ptr_array_index(priv->entries, first + i);
         char *title = g_markup_escape_text(entry->title ? entry->title : "", -1);
         char *summary = g_markup_escape_text(entry->summary ? entry->summary : "", -1);
-        if (i == 0 && priv->show_feed_name)
-            g_string_append_printf(all, "<b>%s</b>\n\n", heading);
         g_string_append_printf(all, "<b>%s</b>\n%s", title, summary);
         if (i + 1 < entry_count)
             g_string_append_c(all, '\n');
@@ -956,16 +993,15 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     }
     pango_layout_set_markup(layout, all->str, -1);
     g_string_free(all, TRUE);
-    g_free(heading);
     pango_layout_get_pixel_extents(layout, NULL, &logical);
     text_h = logical.height;
     priv->content_extent = text_h;
     cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
                           priv->text_color[2], priv->text_color[3]);
     cairo_save(cr);
-    cairo_rectangle(cr, 7, 7, w - 14, viewport_h);
+    cairo_rectangle(cr, 7, 7 + header_h, w - 14, viewport_h);
     cairo_clip(cr);
-    cairo_move_to(cr, 10, 10 - priv->scroll_px);
+    cairo_move_to(cr, 10, 10 + header_h - priv->scroll_px);
     pango_cairo_show_layout(cr, layout);
     cairo_restore(cr);
     g_object_unref(layout);
@@ -983,25 +1019,35 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         cairo_set_source_rgba(cr, priv->text_color[0] * .7,
                               priv->text_color[1] * .7,
                               priv->text_color[2] * .7, priv->text_color[3]);
-        cairo_move_to(cr, 8, h - 16);
+        cairo_move_to(cr, 8, h - rss_control_height(priv) + 2);
         pango_cairo_show_layout(cr, hint);
         g_object_unref(hint);
     }
 controls:
     /* Кнопки как в оригинале: previous page / reset / next page. */
-    cairo_set_line_width(cr, 1.2);
-    cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
-    cairo_arc(cr, w - 58, h - 10, 6, 0, 2 * RSS_PI);
-    cairo_arc(cr, w - 38, h - 10, 6, 0, 2 * RSS_PI);
-    cairo_arc(cr, w - 18, h - 10, 6, 0, 2 * RSS_PI);
-    cairo_fill(cr);
-    cairo_set_source_rgba(cr, 1, 1, 1, .9);
-    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
-                           CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 11);
-    cairo_move_to(cr, w - 62, h - 6); cairo_show_text(cr, "‹");
-    cairo_move_to(cr, w - 42, h - 6); cairo_show_text(cr, "·");
-    cairo_move_to(cr, w - 22, h - 6); cairo_show_text(cr, "›");
+    {
+        int radius = rss_button_radius(priv);
+        int cy = h - 10 - radius;
+        int x1 = w - 58;
+        int x2 = w - 38;
+        int x3 = w - 18;
+        cairo_set_line_width(cr, 1.2);
+        cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
+        cairo_arc(cr, x1, cy, radius, 0, 2 * RSS_PI);
+        cairo_arc(cr, x2, cy, radius, 0, 2 * RSS_PI);
+        cairo_arc(cr, x3, cy, radius, 0, 2 * RSS_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 1, 1, 1, .9);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
+                               CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 11 + radius);
+        cairo_move_to(cr, x1 - radius, cy + radius / 2);
+        cairo_show_text(cr, "‹");
+        cairo_move_to(cr, x2 - radius / 2, cy + radius / 2);
+        cairo_show_text(cr, "·");
+        cairo_move_to(cr, x3 - radius / 2, cy + radius / 2);
+        cairo_show_text(cr, "›");
+    }
     cairo_restore(cr);
 }
 
@@ -1018,13 +1064,19 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
     x = ev->x;
     y = ev->y;
     if (ev->type == GDK_BUTTON_PRESS) {
+        int radius = rss_button_radius(priv);
+        int cy = allocation.height - 10 - radius;
+
         priv->button_pressed = 0;
-        if (y >= allocation.height - 20.0) {
-            if (x >= allocation.width - 70.0 && x <= allocation.width - 55.0)
+        if (y >= cy - radius && y <= cy + radius) {
+            if (x >= allocation.width - 58 - radius &&
+                x <= allocation.width - 58 + radius)
                 priv->button_pressed = 1;
-            else if (x >= allocation.width - 55.0 && x <= allocation.width - 40.0)
+            else if (x >= allocation.width - 38 - radius &&
+                     x <= allocation.width - 38 + radius)
                 priv->button_pressed = 2;
-            else if (x >= allocation.width - 40.0 && x <= allocation.width - 25.0)
+            else if (x >= allocation.width - 18 - radius &&
+                     x <= allocation.width - 18 + radius)
                 priv->button_pressed = 3;
         }
         if (priv->button_pressed)
