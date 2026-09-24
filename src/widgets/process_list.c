@@ -693,12 +693,18 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pl_show_column(layout, cr, pl_column_names[i], columns.right[i],
                        PL_HEADER_Y, columns.width[i], left);
         if (active) {
+            double text_width = pl_text_width(layout);
+            double text_x = left ?
+                columns.right[i] - columns.width[i] + PL_TEXT_PADDING :
+                columns.right[i] - PL_TEXT_PADDING - text_width;
+            double text_h = pl_text_height(layout);
+
             cairo_save(cr);
             cairo_set_source_rgba(cr, 0.20, 0.85, 0.35, 1.0);
             cairo_set_line_width(cr, 1.0);
-            cairo_rectangle(cr, columns.right[i] - columns.width[i] + 0.5,
-                            floor(PL_HEADER_Y) - 3.5,
-                            columns.width[i] - 1.0, 18.0);
+            cairo_rectangle(cr, text_x - 2.0 + 0.5,
+                            floor(PL_HEADER_Y) - 2.0 + 0.5,
+                            text_width + 4.0, text_h + 4.0);
             cairo_stroke(cr);
             cairo_restore(cr);
         }
