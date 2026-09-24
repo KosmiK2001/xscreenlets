@@ -524,6 +524,13 @@ static void cm_free_core(gpointer data)
     g_free(core);
 }
 
+static guint cm_history_points_for_width(PrivData *priv, int width)
+{
+    int cell_width = width / MAX(priv->columns, 1);
+
+    return (guint)MAX(cell_width - 2.0 - 2.0 * CM_CORE_MARGIN, 1.0);
+}
+
 static gboolean cm_ensure_history(PrivData *priv, guint points)
 {
     guint c;
@@ -908,7 +915,7 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
 
     width = priv->window_width;
     height = priv->window_height;
-    cm_ensure_history(priv, MAX(width / MAX(priv->columns, 1) - 2, 1));
+    cm_ensure_history(priv, cm_history_points_for_width(priv, width));
     p->win = xs_host_api()->make_window(p, x, y, width, height);
     if (!p->win) {
         p->host->log("cpu_monitor: failed to create window");
@@ -958,7 +965,7 @@ static void cm_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     if (!priv || !priv->cache)
         return;
     if (priv->cache_width != w || priv->cache_height != h) {
-        cm_ensure_history(priv, MAX((int)(w / MAX(priv->columns, 1)) - 2, 1));
+        cm_ensure_history(priv, cm_history_points_for_width(priv, w));
         cairo_surface_destroy(priv->cache);
         priv->cache = cm_render(priv, w, h);
         priv->cache_width = w;
@@ -1024,7 +1031,8 @@ static void cm_int_changed(GtkSpinButton *spin, gpointer data)
         value = priv->socket_id;
         cm_discover_topology(priv);
         cm_discover_temperatures(priv);
-        cm_ensure_history(priv, MAX(priv->window_width / priv->columns - 2, 1));
+        cm_ensure_history(priv, cm_history_points_for_width(priv,
+                                                              priv->window_width));
         memset(priv->previous, 0, sizeof(priv->previous));
         memset(priv->stat_valid, 0, sizeof(priv->stat_valid));
     } else if (strcmp(key, "update_ms") == 0) {
@@ -1048,7 +1056,8 @@ static void cm_int_changed(GtkSpinButton *spin, gpointer data)
     g_key_file_set_integer(priv->kf, p->name, key, value);
     if (priv->plugin->win) {
         xs_host_api()->resize(p, priv->window_width, priv->window_height);
-        cm_ensure_history(priv, MAX(priv->window_width / priv->columns - 2, 1));
+        cm_ensure_history(priv, cm_history_points_for_width(priv,
+                                                              priv->window_width));
     }
     cm_flush(priv);
     if (priv->cache) {
