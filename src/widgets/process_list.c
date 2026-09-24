@@ -553,11 +553,11 @@ static PangoFontDescription *pl_font(const char *name)
 
 static double pl_text_width(PangoLayout *layout)
 {
-    gint width;
-    gint height;
+    PangoRectangle logical;
+    PangoRectangle ink;
 
-    pango_layout_get_pixel_size(layout, &width, &height);
-    return width;
+    pango_layout_get_pixel_extents(layout, &ink, &logical);
+    return ink.width;
 }
 
 static double pl_text_height(PangoLayout *layout)
@@ -693,16 +693,19 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pl_show_column(layout, cr, pl_column_names[i], columns.right[i],
                        PL_HEADER_Y, columns.width[i], left);
         if (active) {
-            double x = columns.right[i] - columns.width[i];
             double text_width = pl_text_width(layout);
+            double text_x = left ?
+                columns.right[i] - columns.width[i] + PL_TEXT_PADDING :
+                columns.right[i] - PL_TEXT_PADDING - text_width;
+            double text_y = PL_HEADER_Y;
+            double text_h = pl_text_height(layout);
 
-            if (!left)
-                x += columns.width[i] - text_width;
             cairo_save(cr);
             cairo_set_source_rgba(cr, 0.20, 0.85, 0.35, 1.0);
             cairo_set_line_width(cr, 1.0);
-            cairo_rectangle(cr, x - 1.5, floor(PL_HEADER_Y) - 2.5,
-                            text_width + 6.0, pl_text_height(layout) + 4.0);
+            cairo_rectangle(cr, text_x - 2.0 + 0.5,
+                            floor(text_y) - 2.0 + 0.5,
+                            text_width + 4.0, text_h + 4.0);
             cairo_stroke(cr);
             cairo_restore(cr);
         }
