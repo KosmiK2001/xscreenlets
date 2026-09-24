@@ -528,7 +528,7 @@ static guint cm_history_points_for_width(PrivData *priv, int width)
 {
     int cell_width = width / MAX(priv->columns, 1);
 
-    return (guint)MAX(cell_width - 2.0 - 2.0 * CM_CORE_MARGIN, 1.0);
+    return (guint)MAX(cell_width - 4.0 - 2.0 * CM_CORE_MARGIN, 1.0);
 }
 
 static gboolean cm_ensure_history(PrivData *priv, guint points)
@@ -697,7 +697,12 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
                             const gdouble colors[4][4],
                             const gdouble background[4])
 {
-    guint slot_width = MAX(width / MAX(points, 1), 1.0);
+    const double inset = 1.0;
+    double plot_x = x + inset;
+    double plot_y = y + inset;
+    double plot_width = MAX(1.0, width - 2.0 * inset);
+    double plot_height = MAX(1.0, height - 2.0 * inset);
+    guint slot_width = MAX((guint)floor(plot_width / MAX(points, 1)), 1U);
     guint used = MIN(count, points);
     guint start = (head + points - used) % points;
     guint sample;
@@ -706,6 +711,9 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
     cairo_set_source_rgba(cr, background[0], background[1],
                           background[2], background[3] * 0.82);
     cairo_fill(cr);
+    cairo_save(cr);
+    cairo_rectangle(cr, plot_x, plot_y, plot_width, plot_height);
+    cairo_clip(cr);
     for (sample = 0; sample < used; sample++) {
         const gdouble *load;
         double base_y;
@@ -714,23 +722,23 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
         if (points == 0)
             break;
         load = core->history[(start + sample) % points].thread_load[thread];
-        base_y = y + height;
+        base_y = plot_y + plot_height;
         for (component = 0; component < CM_LOAD_COMPONENTS; component++) {
-            double bar_height = height * CLAMP(load[component], 0.0, 1.0);
+            double bar_height = plot_height * CLAMP(load[component], 0.0, 1.0);
             if (bar_height <= 0.0)
                 continue;
             base_y -= bar_height;
             cairo_rectangle(cr,
-                            floor(x + (width - used * slot_width) +
-                                  sample * slot_width + 0.5),
-                            floor(base_y),
-                            slot_width, ceil(bar_height) + 1.0);
+                            plot_x + (plot_width - used * slot_width) +
+                                sample * slot_width,
+                            base_y, slot_width, bar_height);
             cairo_set_source_rgba(cr, colors[component][0],
                                   colors[component][1], colors[component][2],
                                   colors[component][3]);
             cairo_fill(cr);
         }
     }
+    cairo_restore(cr);
     cairo_set_source_rgba(cr, 0.75, 0.75, 0.80, 0.65);
     cairo_set_line_width(cr, 0.5);
     cairo_rectangle(cr, x + 0.25, y + 0.25, width - 0.5, height - 0.5);
