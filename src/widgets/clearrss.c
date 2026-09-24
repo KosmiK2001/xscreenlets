@@ -230,6 +230,18 @@ static char *rss_color_string(const GdkRGBA *color)
     return out;
 }
 
+static void rss_ensure_color(GKeyFile *kf, const char *sec, const char *key,
+                            const gdouble def[4])
+{
+    char *value;
+
+    if (g_key_file_has_key(kf, sec, key, NULL))
+        return;
+    value = rss_color_string(&(GdkRGBA){def[0], def[1], def[2], def[3]});
+    g_key_file_set_string(kf, sec, key, value);
+    g_free(value);
+}
+
 static void rss_read_color(GKeyFile *kf, const char *sec, const char *key,
                            const gdouble def[4], gdouble out[4])
 {
@@ -1859,6 +1871,9 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     rss_read_color(kf, p->name, "rgba_color", tc, priv->text_color);
     rss_read_color(kf, p->name, "time_color", tc, priv->time_color);
     rss_read_color(kf, p->name, "background_color", bc, priv->background_color);
+    rss_ensure_color(kf, p->name, "rgba_color", tc);
+    rss_ensure_color(kf, p->name, "time_color", tc);
+    rss_ensure_color(kf, p->name, "background_color", bc);
     xs_host_api()->log("clearrss: config '%s' text=%g,%g,%g,%g", p->name,
                        priv->text_color[0], priv->text_color[1],
                        priv->text_color[2], priv->text_color[3]);
