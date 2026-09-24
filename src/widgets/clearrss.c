@@ -13,6 +13,7 @@
 #include <libxml/tree.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <sys/stat.h>
 #include "xs_api.h"
 #include "common.h"
@@ -28,6 +29,8 @@ typedef struct {
     char *title;
     char *summary;
     char *link;
+    char *published;
+    GDateTime *published_time;
 } RssEntry;
 
 typedef struct _RequestSet RequestSet;
@@ -53,6 +56,7 @@ typedef struct {
     int news_count;
     int visible_count;
     gboolean auto_news_count;
+    gboolean show_published_time;
     int button_pressed;
     gboolean loading;
     gboolean show_feed_name;
@@ -217,6 +221,7 @@ static void rss_status(PrivData *priv, const char *format, ...)
 
 /* ---------- XML helpers ---------- */
 static char *rss_plain_text(const char *html);
+static GDateTime *rss_parse_published(const char *raw);
 
 static gboolean rss_local_name(const xmlNode *node, const char *name)
 {
@@ -430,6 +435,8 @@ static void rss_entry_free(gpointer data)
     g_free(entry->title);
     g_free(entry->summary);
     g_free(entry->link);
+    g_free(entry->published);
+    g_clear_pointer(&entry->published_time, g_date_time_unref);
     g_free(entry);
 }
 
@@ -469,6 +476,10 @@ static void rss_parse_feed(const char *data, gsize len, GPtrArray *entries,
                 entry->summary = rss_child_plain(node, "content");
             }
             entry->link = rss_node_link(node);
+            entry->published = rss_child_text(node, "published");
+            if (!entry->published)
+                entry->published = rss_child_text(node, "updated");
+            entry->published_time = rss_parse_published(entry->published);
             if (!entry->title && !entry->summary) {
                 rss_entry_free(entry);
                 continue;
@@ -496,6 +507,10 @@ static void rss_parse_feed(const char *data, gsize len, GPtrArray *entries,
                 entry->title = rss_child_text(node, "title");
                 entry->summary = rss_child_plain(node, "description");
                 entry->link = rss_node_link(node);
+                entry->published = rss_child_text(node, "pubDate");
+                if (!entry->published)
+                    entry->published = rss_child_text(node, "date");
+                entry->published_time = rss_parse_published(entry->published);
                 if (!entry->title && !entry->summary && !entry->link) {
                     rss_entry_free(entry);
                     continue;
@@ -783,6 +798,107 @@ static gboolean rss_refresh_timer(gpointer data)
 }
 
 /* ---------- drawing ---------- */
+static GDateTime *rss_parse_published(const char *raw)
+{
+    static const char *months[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    const char *date;
+    const char *zone;
+    char month[16];
+    gint day, year, hour, minute, second;
+    gint month_num = 0;
+    gint offset = 0;
+    GDateTime *utc;
+    gsize i;
+
+    if (!raw || !raw[0])
+        return NULL;
+    {
+        GDateTime *iso = g_date_time_new_from_iso8601(raw, NULL);
+
+        if (iso)
+            return iso;
+    }
+
+    date = strchr(raw, ',');
+    date = date ? date + 1 : raw;
+    if (sscanf(date, " %d %15s %d %d:%d:%d",
+               &day, month, &year, &hour, &minute, &second) != 6)
+        return NULL;
+    for (i = 0; i < G_N_ELEMENTS(months); i++) {
+        if (g_ascii_strcasecmp(month, months[i]) == 0) {
+            month_num = (gint)i + 1;
+            break;
+        }
+    }
+    if (!month_num)
+        return NULL;
+
+    zone = strrchr(raw, ' ');
+    if (zone && zone[1] == '+' && strlen(zone + 1) >= 5) {
+        offset = (zone[2] - '0') * 10 + (zone[3] - '0');
+        offset = offset * 60 + (zone[4] - '0') * 10 + (zone[5] - '0');
+        if (offset > 12 * 60 || (offset % 60) != 0)
+            offset = 0;
+    } else if (zone && zone[1] == '-' && strlen(zone + 1) >= 5) {
+        offset = -((zone[2] - '0') * 10 + (zone[3] - '0'));
+        offset = offset * 60 - (zone[4] - '0') * 10 - (zone[5] - '0');
+        if (offset < -12 * 60 || (offset % 60) != 0)
+            offset = 0;
+    }
+
+    utc = g_date_time_new_utc(year, month_num, day, hour, minute, second);
+    if (!utc)
+        return NULL;
+    {
+        gint64 epoch = g_date_time_to_unix(utc) - offset * 60LL;
+
+        g_date_time_unref(utc);
+        return g_date_time_new_from_unix_utc(epoch);
+    }
+}
+
+static char *rss_entry_title_markup(const PrivData *priv,
+                                    const RssEntry *entry)
+{
+    char *title;
+    char *escaped;
+    char *clock;
+    GDateTime *local;
+    char *result;
+
+    if (!entry)
+        return g_strdup("");
+    title = entry->title ? entry->title : "";
+    if (!priv || !priv->show_published_time || !entry->published_time) {
+        escaped = g_markup_escape_text(title, -1);
+        result = g_strdup_printf("<b>%s</b>", escaped);
+        g_free(escaped);
+        return result;
+    }
+
+    local = g_date_time_new_from_unix_local(
+        g_date_time_to_unix(entry->published_time));
+    if (!local) {
+        escaped = g_markup_escape_text(title, -1);
+        result = g_strdup_printf("<b>%s</b>", escaped);
+        g_free(escaped);
+        return result;
+    }
+    clock = g_date_time_format(local, "%H:%M:%S");
+    escaped = g_markup_escape_text(title, -1);
+    if (escaped[0])
+        result = g_strdup_printf("<b>%s: %s</b>", clock, escaped);
+    else
+        result = g_strdup_printf("<b>%s</b>", clock);
+    g_free(clock);
+    g_free(escaped);
+    g_date_time_unref(local);
+    return result;
+}
+
 static int rss_font_size(const PrivData *priv)
 {
     PangoFontDescription *font;
@@ -851,12 +967,12 @@ static int rss_display_count(PrivData *priv, PangoLayout *layout, int height)
      * нижнюю четверть и не зависит от эвристики длины текста. */
     for (gsize i = 0; i < (gsize)requested; i++) {
         const RssEntry *entry = g_ptr_array_index(priv->entries, i);
-        char *title = g_markup_escape_text(entry->title ? entry->title : "", -1);
+        char *title = rss_entry_title_markup(priv, entry);
         char *summary = g_markup_escape_text(entry->summary ? entry->summary : "", -1);
 
         if (count)
             g_string_append_c(all, '\n');
-        g_string_append_printf(all, "<b>%s</b>\n%s", title, summary);
+        g_string_append_printf(all, "%s\n%s", title, summary);
         g_free(title);
         g_free(summary);
         pango_layout_set_markup(layout, all->str, -1);
@@ -1000,9 +1116,9 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     all = g_string_new(NULL);
     for (i = 0; i < entry_count; i++) {
         entry = g_ptr_array_index(priv->entries, first + i);
-        char *title = g_markup_escape_text(entry->title ? entry->title : "", -1);
+        char *title = rss_entry_title_markup(priv, entry);
         char *summary = g_markup_escape_text(entry->summary ? entry->summary : "", -1);
-        g_string_append_printf(all, "<b>%s</b>\n%s", title, summary);
+        g_string_append_printf(all, "%s\n%s", title, summary);
         if (i + 1 < entry_count)
             g_string_append_c(all, '\n');
         g_free(title);
@@ -1377,7 +1493,10 @@ static void rss_bool_toggled(GtkToggleButton *btn, gpointer data)
     if (!priv || !key) return;
     active = gtk_toggle_button_get_active(btn);
     g_key_file_set_boolean(priv->kf, p->name, key, active);
-    if (strcmp(key, "show_feed_name") == 0) priv->show_feed_name = active;
+    if (strcmp(key, "show_feed_name") == 0)
+        priv->show_feed_name = active;
+    else if (strcmp(key, "show_published_time") == 0)
+        priv->show_published_time = active;
     rss_flush(priv); if (p->win) gtk_widget_queue_draw(p->win);
 }
 
@@ -1532,6 +1651,9 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_bool(GTK_BOX(page), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
     g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
+    w = xs_prop_add_bool(GTK_BOX(page), "Show published time", "Show HH:MM:SS before each news title", priv->show_published_time);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_published_time"), g_free);
+    g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
     w = xs_prop_add_color(GTK_BOX(page), "Text color", "Default text color", priv->text_color[0], priv->text_color[1], priv->text_color[2], priv->text_color[3]);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("rgba_color"), g_free);
     g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
@@ -1658,6 +1780,11 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
         g_key_file_set_boolean(kf, p->name, "auto_news_count", auto_count);
     if (!g_key_file_has_key(kf, p->name, "news_count", NULL))
         g_key_file_set_integer(kf, p->name, "news_count", news_count);
+    priv->show_published_time = rss_conf_bool(kf, p->name,
+                                                "show_published_time", TRUE);
+    if (!g_key_file_has_key(kf, p->name, "show_published_time", NULL))
+        g_key_file_set_boolean(kf, p->name, "show_published_time",
+                               priv->show_published_time);
     priv->window_width = window_width;
     priv->window_height = window_height;
     priv->auto_news_count = auto_count;
