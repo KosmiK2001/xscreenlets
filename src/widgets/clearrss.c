@@ -797,9 +797,12 @@ static int rss_font_size(const PrivData *priv)
 
 static int rss_header_height(PrivData *priv)
 {
-    (void)priv;
-    /* Верхняя полоса background.svg имеет натуральную высоту 40px. */
-    return 40;
+    int h = priv ? priv->window_height : RSS_H;
+
+    /* Градиент исходной темы заканчивается около y=100. При обычной
+     * высоте 200/500px резервируем этот участок полностью; на очень
+     * маленьком окне оставляем не больше половины высоты. */
+    return CLAMP(h / 2, 40, 100);
 }
 
 static int rss_control_height(const PrivData *priv)
@@ -930,14 +933,22 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         /* Полный SVG рисуем только ниже фиксированной header-полосы.
          * Наложение натуральной полосы поверх растянутого SVG оставляло
          * серый градиент видимым сквозь прозрачные участки. */
+        /* Нижняя часть должна брать только низ исходного SVG
+         * (y=100..200), а не его начало. Иначе серый градиент из
+         * y=0..100 повторно попадает под header и выглядит как
+         * растянутый дубликат. Размер viewport увеличен вдвое, а
+         * начало сдвинуто вверх, чтобы source y=100 приходился на
+         * destination y=header, source y=200 — на destination y=h. */
         cairo_save(cr);
         cairo_rectangle(cr, 0, rss_header_height(priv), w,
                         h - rss_header_height(priv));
         cairo_clip(cr);
-        xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, w, h);
+        xs_host_api()->theme_draw_full(
+            p, cr, "background", 0, 2 * rss_header_height(priv) - h, w,
+            2 * (h - rss_header_height(priv)));
         cairo_restore(cr);
 
-        /* Header рисуем один раз в натуральном масштабе 200px по высоте. */
+        /* Верхнюю часть темы рисуем один раз в натуральном масштабе. */
         cairo_save(cr);
         cairo_rectangle(cr, 0, 0, w, rss_header_height(priv));
         cairo_clip(cr);
