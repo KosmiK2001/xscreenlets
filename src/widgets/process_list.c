@@ -574,15 +574,22 @@ static void pl_show_column(PangoLayout *layout, cairo_t *cr,
                            double column_width, gboolean align_left)
 {
     double text_width = MAX(column_width - 2.0 * PL_TEXT_PADDING, 1.0);
+    double cairo_x;
 
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_width(layout, (int)(text_width * PANGO_SCALE));
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_alignment(layout, align_left ? PANGO_ALIGN_LEFT :
                                             PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, align_left ?
-                  right - column_width + PL_TEXT_PADDING :
-                  right - PL_TEXT_PADDING, y);
+    if (align_left) {
+        cairo_x = right - column_width + PL_TEXT_PADDING;
+    } else {
+        PangoRectangle ink;
+        PangoRectangle logical;
+        pango_layout_get_pixel_extents(layout, &ink, &logical);
+        cairo_x = right - PL_TEXT_PADDING - ink.x - ink.width;
+    }
+    cairo_move_to(cr, cairo_x, y);
     pango_cairo_show_layout(cr, layout);
 }
 
@@ -695,17 +702,14 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         if (active) {
             PangoRectangle logical;
             PangoRectangle ink;
-            double layout_x = left ?
-                columns.right[i] - columns.width[i] + PL_TEXT_PADDING :
-                columns.right[i] - PL_TEXT_PADDING;
             double text_x;
             double text_width;
             double text_h;
 
-            /* PANGO_ALIGN_RIGHT paints ink at (layout_x + layout_width - ink.width),
-             * not at layout_x. Use Pango's actual ink origin after pl_show_column. */
             pango_layout_get_pixel_extents(layout, &ink, &logical);
-            text_x = layout_x + ink.x;
+            text_x = left ?
+                columns.right[i] - columns.width[i] + PL_TEXT_PADDING + ink.x :
+                columns.right[i] - PL_TEXT_PADDING - ink.width;
             text_width = ink.width;
             text_h = pl_text_height(layout);
             cairo_save(cr);
