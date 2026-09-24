@@ -1937,41 +1937,21 @@ void xs_core_dispatch_cmd(XsPlugin *p, const char *cmd)
 
 void xs_core_shutdown_all(void)
 {
-    gsize i;
-
     if (g_conf && g_conf_path && g_conf_path[0] != '\0')
         xs_core_conf_flush();
     if (g_plugins) {
-        /* снимок указателей: fl_shutdown рамки удаляет гостей из
-         * g_plugins (через stop_guest) — итерация по живому массиву
-         * съезжала по индексам → пропуски/двойной shutdown →
-         * BadWindow при destroy окон. Порядок: сначала не-рамки
-         * (гости), затем рамки. */
-        GPtrArray *snap = g_ptr_array_sized_new(g_plugins->len);
+        /* Рамка во время shutdown сама удаляет и освобождает гостей.
+         * Поэтому не обходим старый snapshot: повторный проход по нему
+         * читал бы p->type у уже освобождённого гостя. Берём всегда
+         * первый текущий элемент массива и удаляем его после полного
+         * lifecycle; удалённые гости исчезают из массива сами. */
+        while (g_plugins->len) {
+            XsPlugin *p = g_ptr_array_index(g_plugins, 0);
 
-        for (i = 0; i < g_plugins->len; i++)
-            if (g_ptr_array_index(g_plugins, i))
-                g_ptr_array_add(snap,
-                                g_ptr_array_index(g_plugins, i));
-        for (i = 0; i < snap->len; i++) {
-            XsPlugin *p = g_ptr_array_index(snap, i);
-
-            if (p && !(p->type && strcmp(p->type, "frame_launcher") == 0))
-                xs_core_shutdown_plugin(p);
+            xs_core_shutdown_plugin(p);
+            xs_core_unregister_plugin(p);
+            xs_core_free_plugin(p);
         }
-        for (i = 0; i < snap->len; i++) {
-            XsPlugin *p = g_ptr_array_index(snap, i);
-
-            if (p && p->type && strcmp(p->type, "frame_launcher") == 0)
-                xs_core_shutdown_plugin(p);
-        }
-        for (i = 0; i < snap->len; i++) {
-            XsPlugin *p = g_ptr_array_index(snap, i);
-
-            if (p)
-                g_free((char *)p->name);
-        }
-        g_ptr_array_free(snap, TRUE);
         g_ptr_array_free(g_plugins, TRUE);
         g_plugins = NULL;
     }
