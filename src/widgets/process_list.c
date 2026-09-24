@@ -17,13 +17,18 @@
 
 #define PL_TITLE_FONT_DEFAULT "Ubuntu 8"
 #define PL_ROW_FONT_DEFAULT   "Verdana 7"
-#define PL_WIDTH_DEFAULT      264
+#define PL_WIDTH_DEFAULT      320
 #define PL_HEIGHT_DEFAULT     164
 #define PL_UPDATE_DEFAULT     1000
 #define PL_ROWS_DEFAULT       8
 #define PL_MAX_PROCESSES      16384
 #define PL_NAME_MAX           96
 #define PL_PADDING             4.0
+#define PL_COL_GAP             4.0
+#define PL_PID_WIDTH           58.0
+#define PL_CPU_WIDTH           48.0  /* fits 3200.0% on this 32-thread host */
+#define PL_MEM_WIDTH           48.0
+#define PL_IO_WIDTH            42.0
 #define PL_TITLE_Y             3.0
 #define PL_HEADER_Y           21.0
 #define PL_ROWS_Y             36.0
@@ -34,9 +39,8 @@ typedef struct {
     guint64 start_time;
     guint64 disk_read_bytes;
     guint64 disk_write_bytes;
-    gint64 rss_kb;
-    gint mem_permille;               /* 1000 = 100.0 percent */
-    gint cpu_tenths;                 /* 100 = one CPU core at 100 percent */
+    gint64 rss_bytes;
+    gint cpu_tenths;                 /* 1000 = 100.0 percent */
     gint64 io_bytes_per_sec;
     gboolean running;
     char name[PL_NAME_MAX];
@@ -231,33 +235,7 @@ static gboolean pl_read_io(const gint pid, guint64 *read_bytes,
     return *read_bytes != G_MAXUINT64 && *write_bytes != G_MAXUINT64;
 }
 
-static guint64 pl_read_mem_total_kb(void)
-{
-    g_autofree char *text = NULL;
-    gchar **lines;
-    guint64 total = 0;
-
-    if (!g_file_get_contents("/proc/meminfo", &text, NULL, NULL))
-        return 0;
-    lines = g_strsplit(text, "\n", -1);
-    for (guint i = 0; lines[i]; i++) {
-        if (g_str_has_prefix(lines[i], "MemTotal:")) {
-            gchar *end = NULL;
-
-            errno = 0;
-            total = g_ascii_strtoull(lines[i] + 9, &end, 10);
-            if (end != lines[i] + 9 && errno != ERANGE &&
-                (*end == '\0' || g_ascii_isspace(*end) || *end == 'k' || *end == 'K')) {
-                break;
-            }
-        }
-    }
-    g_strfreev(lines);
-    return total;
-}
-
-static PlProcess *pl_read_pid(const char *pid_text, gboolean *running,
-                              guint64 mem_total_kb)
+static PlProcess *pl_read_pid(const char *pid_text, gboolean *running)
 {
     g_autofree char *stat_path = NULL;
     g_autofree char *status_path = NULL;
@@ -310,11 +288,9 @@ static PlProcess *pl_read_pid(const char *pid_text, gboolean *running,
     proc->disk_write_bytes = G_MAXUINT64;
     (void)pl_read_io(proc->pid, &proc->disk_read_bytes,
                      &proc->disk_write_bytes);
-    proc->rss_kb = rss_kb;
-    if (mem_total_kb)
-        proc->mem_permille = (gint)MIN((rss_kb * 1000 +
-                                        mem_total_kb / 2) / mem_total_kb,
-                                        G_MAXINT);
+    proc->rss_bytes = rss_kb > 0 &&
+                      rss_kb <= G_MAXINT64 / 1024 ?
+                      rss_kb * 1024 : 0;
     proc->running = is_running;
     g_strlcpy(proc->name, name, sizeof(proc->name));
     *running = is_running;
@@ -369,7 +345,6 @@ static void pl_sample(PrivData *priv)
     GPtrArray *top;
     guint i;
     gint64 now = pl_now_us();
-    guint64 mem_total_kb = pl_read_mem_total_kb();
     gint64 elapsed_us = now - priv->last_sample_us;
     long ticks_per_second = sysconf(_SC_CLK_TCK);
 
@@ -390,7 +365,7 @@ static void pl_sample(PrivData *priv)
 
             if (!g_ascii_isdigit(entry[0]))
                 continue;
-            proc = pl_read_pid(entry, &running, mem_total_kb);
+            proc = pl_read_pid(entry, &running);
             if (!proc)
                 continue;
             priv->process_count++;
@@ -505,6 +480,24 @@ static void pl_dotted_line(cairo_t *cr, const gdouble color[4],
     cairo_restore(cr);
 }
 
+static void pl_format_bytes(gchar *buffer, gsize size, gint64 bytes)
+{
+    static const char *const units[] = { "B", "K", "M", "G", "T", "P", "E" };
+    guint64 value = bytes > 0 ? (guint64)bytes : 0;
+    gdouble scaled = (gdouble)value;
+    guint unit = 0;
+
+    while (scaled >= 1024.0 && unit + 1 < G_N_ELEMENTS(units)) {
+        scaled /= 1024.0;
+        unit++;
+    }
+    if (unit == 0)
+        g_snprintf(buffer, size, "%" G_GUINT64_FORMAT "%s",
+                   value, units[unit]);
+    else
+        g_snprintf(buffer, size, "%.1f%s", scaled, units[unit]);
+}
+
 static void pl_format_io(gchar *buffer, gsize size, gint64 bytes_per_sec)
 {
     guint64 value = bytes_per_sec > 0 ? (guint64)bytes_per_sec : 0;
@@ -526,10 +519,10 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     PangoFontDescription *row_font = pl_font(priv->row_font);
     double right = width - PL_PADDING;
     double io_right = right;
-    double mem_right = io_right - 42.0;
-    double cpu_right = mem_right - 46.0;
-    double pid_right = cpu_right - 58.0;
-    double name_right = pid_right - 46.0;
+    double mem_right = io_right - (PL_IO_WIDTH + PL_COL_GAP);
+    double cpu_right = mem_right - (PL_MEM_WIDTH + PL_COL_GAP);
+    double pid_right = cpu_right - (PL_CPU_WIDTH + PL_COL_GAP);
+    double name_right = pid_right - (PL_PID_WIDTH + PL_COL_GAP);
     double name_width = MAX(name_right - PL_PADDING, 1.0);
     double available_rows_height = MAX(height - PL_ROWS_Y - PL_PADDING, 1.0);
     double row_height = MIN(16.0, available_rows_height /
@@ -575,10 +568,10 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     cairo_set_source_rgba(cr, priv->header[0], priv->header[1],
                           priv->header[2], priv->header[3]);
     pl_show_column(layout, cr, "NAME", name_right, PL_HEADER_Y, name_width, TRUE);
-    pl_show_column(layout, cr, "PID", pid_right, PL_HEADER_Y, 58.0, FALSE);
-    pl_show_column(layout, cr, "CPU", cpu_right, PL_HEADER_Y, 46.0, FALSE);
-    pl_show_column(layout, cr, "MEM", mem_right, PL_HEADER_Y, 42.0, FALSE);
-    pl_show_column(layout, cr, "I/O", io_right, PL_HEADER_Y, 42.0, FALSE);
+    pl_show_column(layout, cr, "PID", pid_right, PL_HEADER_Y, PL_PID_WIDTH, FALSE);
+    pl_show_column(layout, cr, "CPU", cpu_right, PL_HEADER_Y, PL_CPU_WIDTH, FALSE);
+    pl_show_column(layout, cr, "MEM", mem_right, PL_HEADER_Y, PL_MEM_WIDTH, FALSE);
+    pl_show_column(layout, cr, "I/O", io_right, PL_HEADER_Y, PL_IO_WIDTH, FALSE);
 
     cairo_set_source_rgba(cr, priv->text[0], priv->text[1],
                           priv->text[2], priv->text[3]);
@@ -596,15 +589,14 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
 
         pl_show_column(layout, cr, clean_name, name_right, y, name_width, TRUE);
         g_snprintf(pid_text, sizeof(pid_text), "%d", proc->pid);
-        pl_show_column(layout, cr, pid_text, pid_right, y, 58.0, FALSE);
+        pl_show_column(layout, cr, pid_text, pid_right, y, PL_PID_WIDTH, FALSE);
         g_snprintf(cpu_text, sizeof(cpu_text), "%.1f%%",
                    proc->cpu_tenths / 10.0);
-        pl_show_column(layout, cr, cpu_text, cpu_right, y, 46.0, FALSE);
-        g_snprintf(mem_text, sizeof(mem_text), "%.1f",
-                   proc->mem_permille / 100.0);
-        pl_show_column(layout, cr, mem_text, mem_right, y, 42.0, FALSE);
+        pl_show_column(layout, cr, cpu_text, cpu_right, y, PL_CPU_WIDTH, FALSE);
+        pl_format_bytes(mem_text, sizeof(mem_text), proc->rss_bytes);
+        pl_show_column(layout, cr, mem_text, mem_right, y, PL_MEM_WIDTH, FALSE);
         pl_format_io(io_text, sizeof(io_text), proc->io_bytes_per_sec);
-        pl_show_column(layout, cr, io_text, io_right, y, 42.0, FALSE);
+        pl_show_column(layout, cr, io_text, io_right, y, PL_IO_WIDTH, FALSE);
         g_free(clean_name);
         if (regex)
             g_regex_unref(regex);
@@ -697,7 +689,7 @@ static void pl_int_changed(GtkSpinButton *spin, gpointer data)
         priv->row_count = CLAMP(value, 1, 32);
         value = priv->row_count;
     } else if (strcmp(key, "window_width") == 0) {
-        priv->window_width = CLAMP(value, 264, 1200);
+        priv->window_width = CLAMP(value, 320, 1200);
         value = priv->window_width;
     } else {
         priv->window_height = CLAMP(value, 100, 1000);
@@ -822,7 +814,7 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
                          G_CALLBACK(pl_cpu_basis_changed), plugin);
     }
     pl_add_int(plugin, page, "Window width", "window_width",
-               priv->window_width, 264, 1200);
+               priv->window_width, 320, 1200);
     pl_add_int(plugin, page, "Window height", "window_height",
                priv->window_height, 100, 1000);
     pl_add_font(plugin, page, "Title font", "title_font", priv->title_font);
@@ -901,7 +893,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
                                         "per-core");
     priv->cpu_basis = g_strcmp0(cpu_basis, "all-cores") == 0;
     priv->window_width = CLAMP(xs_host_api()->conf_int(
-        kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 264, 1200);
+        kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 320, 1200);
     priv->window_height = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "window_height", PL_HEIGHT_DEFAULT), 100, 1000);
     title_font = xs_host_api()->conf_str(kf, plugin->name, "title_font",
