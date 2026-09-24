@@ -24,6 +24,9 @@
 #define RSS_MAX_BYTES (8U * 1024U * 1024U)
 #define RSS_TIMEOUT_SEC 20
 #define RSS_PI 3.14159265358979323846
+#define RSS_HEADER_ALIGN_LEFT 0
+#define RSS_HEADER_ALIGN_CENTER 1
+#define RSS_HEADER_ALIGN_RIGHT 2
 
 typedef struct {
     char *title;
@@ -64,6 +67,7 @@ typedef struct {
     int button_pressed;
     gboolean loading;
     gboolean show_feed_name;
+    int header_align;
     GPtrArray *entries;
     GString *status;
     char *site_url;
@@ -1182,12 +1186,27 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         pango_layout_set_font_description(layout, header_font);
         pango_layout_set_markup(layout, heading, -1);
         pango_font_description_free(header_font);
-        cairo_set_source_rgba(cr, priv->header_color[0], priv->header_color[1],
-                              priv->header_color[2], priv->header_color[3]);
-        cairo_move_to(cr, 10, 10);
+        pango_layout_set_width(layout, (w - 20) * PANGO_SCALE);
+        pango_layout_set_wrap(layout, PANGO_WRAP_NONE);
+        pango_layout_get_pixel_extents(layout, NULL, &logical);
+        {
+            double header_x = 10;
+            int header_text_w = MAX(1, logical.width);
+            int header_area_w = MAX(1, w - 20);
+
+            if (priv->header_align == RSS_HEADER_ALIGN_CENTER)
+                header_x = 10 + (header_area_w - header_text_w) / 2.0;
+            else if (priv->header_align == RSS_HEADER_ALIGN_RIGHT)
+                header_x = w - 10 - header_text_w;
+            cairo_set_source_rgba(cr, priv->header_color[0], priv->header_color[1],
+                                  priv->header_color[2], priv->header_color[3]);
+            cairo_move_to(cr, header_x, 10);
+        }
         pango_cairo_show_layout(cr, layout);
         cairo_restore(cr);
         g_free(heading);
+        pango_layout_set_width(layout, content_w * PANGO_SCALE);
+        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         font = pango_font_description_from_string(
             priv->text_font ? priv->text_font : "Sans 9");
         if (!font)
@@ -1744,6 +1763,63 @@ static void rss_font_set(GtkFontButton *btn, gpointer data)
     rss_flush(priv); if (p->win) gtk_widget_queue_draw(p->win);
 }
 
+static void rss_header_align_changed(GtkToggleButton *btn, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    int align;
+    gboolean active;
+
+    if (!priv)
+        return;
+    align = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "xs-align"));
+    active = gtk_toggle_button_get_active(btn);
+    if (active) {
+        priv->header_align = align;
+        g_key_file_set_integer(priv->kf, p->name, "header_align", align);
+        rss_flush(priv);
+        if (p->win)
+            gtk_widget_queue_draw(p->win);
+    }
+}
+
+static GtkWidget *rss_header_align_buttons(XsPlugin *p, PrivData *priv)
+{
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    const char *icons[3] = {
+        "format-text-align-left",
+        "format-text-align-center",
+        "format-text-align-right"
+    };
+    const int aligns[3] = {RSS_HEADER_ALIGN_LEFT, RSS_HEADER_ALIGN_CENTER,
+                           RSS_HEADER_ALIGN_RIGHT};
+    GtkWidget *first = NULL;
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        GtkWidget *button = first
+            ? gtk_radio_button_new_from_widget(GTK_RADIO_BUTTON(first))
+            : gtk_radio_button_new(NULL);
+        GtkWidget *image = gtk_image_new_from_icon_name(icons[i],
+                                                         GTK_ICON_SIZE_MENU);
+
+        if (!first)
+            first = button;
+        gtk_button_set_image(GTK_BUTTON(button), image);
+        gtk_button_set_always_show_image(GTK_BUTTON(button), TRUE);
+        gtk_button_set_relief(GTK_BUTTON(button), GTK_RELIEF_NONE);
+        gtk_widget_set_tooltip_text(button, "Align header left/center/right");
+        gtk_widget_set_size_request(button, 30, 26);
+        gtk_toggle_button_set_mode(GTK_TOGGLE_BUTTON(button), FALSE);
+        gtk_toggle_button_set_active(
+            GTK_TOGGLE_BUTTON(button), priv->header_align == aligns[i]);
+        g_object_set_data(G_OBJECT(button), "xs-align", GINT_TO_POINTER(aligns[i]));
+        g_signal_connect(button, "toggled", G_CALLBACK(rss_header_align_changed), p);
+        gtk_box_pack_start(GTK_BOX(box), button, FALSE, FALSE, 0);
+    }
+    return box;
+}
+
 static void rss_properties(XsPlugin *p, GtkNotebook *nb)
 {
     PrivData *priv = p ? p->priv : NULL;
@@ -1779,6 +1855,8 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_bool(GTK_BOX(page), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
     g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
+    w = rss_header_align_buttons(p, priv);
+    w = xs_prop_add_row(GTK_BOX(page), "Header align", "Header alignment", w);
     w = xs_prop_add_bool(GTK_BOX(page), "Show published time", "Show HH:MM:SS before each news title", priv->show_published_time);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_published_time"), g_free);
     g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
@@ -1942,6 +2020,11 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
         g_key_file_set_integer(kf, p->name, "news_count", news_count);
     priv->show_published_time = rss_conf_bool(kf, p->name,
                                                 "show_published_time", TRUE);
+    priv->header_align = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                                       "header_align", RSS_HEADER_ALIGN_LEFT),
+                               RSS_HEADER_ALIGN_LEFT, RSS_HEADER_ALIGN_RIGHT);
+    if (!g_key_file_has_key(kf, p->name, "header_align", NULL))
+        g_key_file_set_integer(kf, p->name, "header_align", priv->header_align);
     if (!g_key_file_has_key(kf, p->name, "show_published_time", NULL))
         g_key_file_set_boolean(kf, p->name, "show_published_time",
                                priv->show_published_time);
