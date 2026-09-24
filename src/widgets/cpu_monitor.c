@@ -55,8 +55,9 @@ typedef struct {
 typedef struct {
     gint core_id;
     GArray *siblings;       /* logical CPU numbers, ascending */
-    CpuHistorySlot *history; /* circular per-thread samples */
-    guint history_points;
+    CpuHistorySlot *history; /* fixed circular capacity */
+    guint history_points;    /* currently visible slot count */
+    guint history_capacity;
     gdouble load[4];        /* combined physical-core load, normalized 0..1 */
     gdouble thread_load[2][4]; /* first sibling top, second sibling bottom */
     gdouble frequency_mhz;  /* maximum current frequency across siblings */
@@ -525,38 +526,22 @@ static void cm_free_core(gpointer data)
 
 static gboolean cm_ensure_history(PrivData *priv, guint points)
 {
-    guint old_count = priv->history_count;
-    guint old_head = priv->history_head;
     guint c;
 
     points = CLAMP(points, CM_HISTORY_MIN_POINTS, CM_HISTORY_MAX_POINTS);
     priv->history_points = points;
     for (c = 0; c < priv->cores->len; c++) {
         CoreData *core = g_ptr_array_index(priv->cores, c);
-        CpuHistorySlot *old_history = core->history;
-        guint old_core_points = core->history_points;
-        guint keep;
 
-        if (old_core_points == points) {
-            if (old_core_points == 0)
-                core->history = g_new0(CpuHistorySlot, points);
-            continue;
+        if (!core->history) {
+            core->history_capacity = CM_HISTORY_MAX_POINTS;
+            core->history = g_new0(CpuHistorySlot,
+                                   core->history_capacity);
         }
-        core->history = g_new0(CpuHistorySlot, points);
         core->history_points = points;
-        keep = MIN(old_count, MIN(points, old_core_points));
-        if (old_history && keep) {
-            guint start = (old_head + old_core_points - keep) % old_core_points;
-            guint i;
-            for (i = 0; i < keep; i++)
-                memcpy(&core->history[i],
-                       &old_history[(start + i) % old_core_points],
-                       sizeof(CpuHistorySlot));
-        }
-        g_free(old_history);
     }
-    priv->history_head = MIN(old_count, points);
-    priv->history_count = MIN(old_count, points);
+    priv->history_head = 0;
+    priv->history_count = 0;
     return TRUE;
 }
 
