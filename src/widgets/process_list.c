@@ -693,12 +693,21 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pl_show_column(layout, cr, pl_column_names[i], columns.right[i],
                        PL_HEADER_Y, columns.width[i], left);
         if (active) {
-            double text_width = pl_text_width(layout);
-            double text_x = left ?
+            PangoRectangle logical;
+            PangoRectangle ink;
+            double layout_x = left ?
                 columns.right[i] - columns.width[i] + PL_TEXT_PADDING :
-                columns.right[i] - PL_TEXT_PADDING - text_width;
-            double text_h = pl_text_height(layout);
+                columns.right[i] - PL_TEXT_PADDING;
+            double text_x;
+            double text_width;
+            double text_h;
 
+            /* PANGO_ALIGN_RIGHT paints ink at (layout_x + layout_width - ink.width),
+             * not at layout_x. Use Pango's actual ink origin after pl_show_column. */
+            pango_layout_get_pixel_extents(layout, &ink, &logical);
+            text_x = layout_x + ink.x;
+            text_width = ink.width;
+            text_h = pl_text_height(layout);
             cairo_save(cr);
             cairo_set_source_rgba(cr, 0.20, 0.85, 0.35, 1.0);
             cairo_set_line_width(cr, 1.0);
