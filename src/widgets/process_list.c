@@ -24,6 +24,7 @@
 #define PL_MAX_PROCESSES      16384
 #define PL_NAME_MAX           96
 #define PL_PADDING             4.0
+#define PL_TEXT_PADDING        2.0
 #define PL_COL_GAP             4.0
 #define PL_PID_WIDTH           58.0
 #define PL_CPU_WIDTH           48.0  /* fits 3200.0% on this 32-thread host */
@@ -59,7 +60,6 @@ typedef struct {
     gboolean default_descending;
     guint sort;
     gboolean descending;
-    gboolean hovered;
     int pressed_column;
     int last_click_column;
     guint repeat_clicks;
@@ -573,12 +573,16 @@ static void pl_show_column(PangoLayout *layout, cairo_t *cr,
                            const char *text, double right, double y,
                            double column_width, gboolean align_left)
 {
+    double text_width = MAX(column_width - 2.0 * PL_TEXT_PADDING, 1.0);
+
     pango_layout_set_text(layout, text, -1);
-    pango_layout_set_width(layout, (int)(column_width * PANGO_SCALE));
+    pango_layout_set_width(layout, (int)(text_width * PANGO_SCALE));
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_alignment(layout, align_left ? PANGO_ALIGN_LEFT :
                                             PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, right - column_width, y);
+    cairo_move_to(cr, align_left ?
+                  right - column_width + PL_TEXT_PADDING :
+                  right - PL_TEXT_PADDING, y);
     pango_cairo_show_layout(cr, layout);
 }
 
@@ -667,16 +671,6 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pango_cairo_show_layout(cr, layout);
         g_free(count);
     }
-    if (sorting->hovered) {
-        cairo_save(cr);
-        cairo_set_source_rgba(cr, priv->title[0], priv->title[1],
-                              priv->title[2], priv->title[3]);
-        cairo_set_line_width(cr, 1.0);
-        cairo_rectangle(cr, PL_PADDING - 0.5, 0.5,
-                        right - PL_PADDING + 1.0, 15.0);
-        cairo_stroke(cr);
-        cairo_restore(cr);
-    }
     {
         char *running = g_strdup_printf("     Running: %u",
                                         priv->running_count);
@@ -704,10 +698,10 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
 
             if (!left)
                 x += columns.width[i] - text_width;
+            cairo_set_source_rgba(cr, 0.20, 0.85, 0.35, 1.0);
             cairo_set_line_width(cr, 1.0);
-            cairo_rectangle(cr, x - 2.0 + 0.5,
-                            floor(PL_HEADER_Y) - 3.0 + 0.5,
-                            text_width + 4.0, pl_text_height(layout) + 5.0);
+            cairo_rectangle(cr, x - 1.5, floor(PL_HEADER_Y) - 2.5,
+                            text_width + 6.0, pl_text_height(layout) + 4.0);
             cairo_stroke(cr);
         }
     }
@@ -1257,27 +1251,6 @@ static gboolean pl_button_release(XsPlugin *plugin, GdkEventButton *event)
     return TRUE;
 }
 
-static void pl_enter(XsPlugin *plugin)
-{
-    PrivData *priv = plugin ? plugin->priv : NULL;
-
-    if (!priv || priv->sorting.hovered)
-        return;
-    priv->sorting.hovered = TRUE;
-    pl_rerender(priv);
-}
-
-static void pl_leave(XsPlugin *plugin)
-{
-    PrivData *priv = plugin ? plugin->priv : NULL;
-
-    if (!priv || !priv->sorting.hovered)
-        return;
-    priv->sorting.hovered = FALSE;
-    priv->sorting.pressed_column = -1;
-    pl_rerender(priv);
-}
-
 static gboolean pl_button(XsPlugin *plugin, GdkEventButton *event)
 {
     return event->type == GDK_BUTTON_PRESS ? pl_button_press(plugin, event) :
@@ -1296,8 +1269,8 @@ static const XsPluginOps pl_ops = {
     .properties = pl_properties,
     .fill_themes = NULL,
     .scroll = NULL,
-    .enter = pl_enter,
-    .leave = pl_leave,
+    .enter = NULL,
+    .leave = NULL,
     .guest_list_changed = NULL,
 };
 
