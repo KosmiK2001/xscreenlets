@@ -129,7 +129,18 @@ C/GTK3-порт оригинального `/usr/share/screenlets/ClearRss/Clear
 - `socket_id` в Properties выбирает сокет (`0`, `1`, ...);
 - два живых инстанса не могут одновременно занять один сокет.
 
-## Standalone часы
+## Process list
+
+Тип плагина — `process_list`. Он читает числовые данные напрямую из
+`/proc/<pid>/stat`, `/proc/<pid>/status` и `/proc/meminfo`, сортирует
+процессы по убыванию CPU и рисует до 8 строк `NAME PID CPU MEM`. CPU —
+процент одного логического ядра по дельте `utime + stime`, MEM — процент от
+общего `MemTotal`. Заголовок, шрифты и обновление раз в секунду следуют
+эталону `.conkyrc_proc`; окно по умолчанию 200×164 px.
+Background — полноценный GtkColorButton RGBA (`use_alpha=TRUE`); в конфиг
+сохраняется нормализованная строка `r,g,b,a`, а выбранная alpha применяется
+к `cairo_set_source_rgba` при каждом перерисовывании. `draw()` не читает `/proc`.
+
 ```bash
 ~/bin/xclock
 ```
