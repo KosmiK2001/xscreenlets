@@ -234,9 +234,19 @@ static void rss_ensure_color(GKeyFile *kf, const char *sec, const char *key,
                             const gdouble def[4])
 {
     char *value;
+    gdouble parsed[4];
+    gboolean valid = FALSE;
 
-    if (g_key_file_has_key(kf, sec, key, NULL))
-        return;
+    if (g_key_file_has_key(kf, sec, key, NULL)) {
+        char *existing = g_key_file_get_string(kf, sec, key, NULL);
+
+        if (existing) {
+            valid = rss_parse_color(existing, parsed);
+            g_free(existing);
+        }
+        if (valid)
+            return;
+    }
     value = rss_color_string(&(GdkRGBA){def[0], def[1], def[2], def[3]});
     g_key_file_set_string(kf, sec, key, value);
     g_free(value);
