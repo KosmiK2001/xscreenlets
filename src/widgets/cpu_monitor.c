@@ -687,7 +687,8 @@ static gboolean cm_sample_cpu(PrivData *priv)
 static void cm_draw_history(cairo_t *cr, double x, double y, double width,
                             double height, CoreData *core, guint thread,
                             guint points, guint head, guint count,
-                            const gdouble colors[4][4])
+                            const gdouble colors[4][4],
+                            const gdouble background[4])
 {
     guint slot_width = MAX(width / MAX(points, 1), 1.0);
     guint used = MIN(count, points);
@@ -695,7 +696,8 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
     guint sample;
 
     cairo_rectangle(cr, x, y, width, height);
-    cairo_set_source_rgba(cr, 0.12, 0.12, 0.14, 0.75);
+    cairo_set_source_rgba(cr, background[0], background[1],
+                          background[2], background[3] * 0.82);
     cairo_fill(cr);
     for (sample = 0; sample < used; sample++) {
         const gdouble *load;
@@ -768,7 +770,9 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 
         if (row >= priv->rows)
             break;
-        cairo_set_source_rgba(cr, 0.72, 0.76, 0.84, 0.90);
+        cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
+                              priv->text_color[2],
+                              priv->text_color[3] * priv->background_color[3]);
         cairo_set_line_width(cr, 1.0);
         cairo_rectangle(cr, cell_left + 0.5, cell_top + 0.5,
                         cell_right - cell_left - 1.0,
@@ -784,7 +788,8 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 
             cm_draw_history(cr, x, y, block_w, block_h, core, 0,
                             core->history_points, priv->history_head,
-                            priv->history_count, priv->load_colors);
+                            priv->history_count, priv->load_colors,
+                            priv->background_color);
             text_y = y + block_h;
         text = isfinite(core->frequency_mhz) ?
                g_strdup_printf("%.2fG", core->frequency_mhz / 1000.0) : g_strdup("---");
@@ -813,7 +818,8 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 
         cm_draw_history(cr, x, text_y + middle_h, block_w, block_h,
                         core, 1, core->history_points, priv->history_head,
-                        priv->history_count, priv->load_colors);
+                        priv->history_count, priv->load_colors,
+                        priv->background_color);
         }
     }
     g_object_unref(layout);
