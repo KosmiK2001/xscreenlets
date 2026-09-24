@@ -17,7 +17,7 @@
 
 #define PL_TITLE_FONT_DEFAULT "Ubuntu 8"
 #define PL_ROW_FONT_DEFAULT   "Verdana 7"
-#define PL_WIDTH_DEFAULT      240
+#define PL_WIDTH_DEFAULT      264
 #define PL_HEIGHT_DEFAULT     164
 #define PL_UPDATE_DEFAULT     1000
 #define PL_ROWS_DEFAULT       8
@@ -47,6 +47,8 @@ typedef struct {
     GKeyFile *kf;
     guint update_ms;
     guint row_count;
+    guint cpu_basis;                  /* 0 = per core, 1 = all cores */
+    gdouble cpu_coefficient;
     int window_width;
     int window_height;
     gdouble background[4];
@@ -332,6 +334,35 @@ static gint pl_compare(gconstpointer a, gconstpointer b)
     return 0;
 }
 
+static gint64 pl_online_cpu_count(void)
+{
+    g_autofree char *online = NULL;
+
+    if (g_file_get_contents("/sys/devices/system/cpu/online", &online,
+                            NULL, NULL)) {
+        g_auto(GStrv) parts = g_strsplit(online, ",", -1);
+        guint64 count = 0;
+
+        for (guint i = 0; parts[i]; i++) {
+            guint64 first;
+            guint64 last;
+
+            if (sscanf(parts[i], "%" G_GUINT64_FORMAT "-%" G_GUINT64_FORMAT,
+                       &first, &last) == 2) {
+                if (last >= first && last < 100000)
+                    count += last - first + 1;
+            } else if (pl_number(g_strstrip(parts[i]), &first) &&
+                       first < 100000) {
+                count++;
+            }
+        }
+        g_strfreev(parts);
+        if (count)
+            return (gint64)count;
+    }
+    return (gint64)MAX((long)sysconf(_SC_NPROCESSORS_ONLN), 1L);
+}
+
 static void pl_sample(PrivData *priv)
 {
     GDir *directory;
@@ -380,11 +411,15 @@ static void pl_sample(PrivData *priv)
         if (old && old->start_time == proc->start_time) {
             if (proc->cpu_ticks >= old->cpu_ticks) {
                 guint64 delta = proc->cpu_ticks - old->cpu_ticks;
-                guint64 scaled = delta * (guint64)ticks_per_second *
-                                 G_GUINT64_CONSTANT(1000000000);
-                guint64 milli = scaled / (guint64)elapsed_us;
-                proc->cpu_milli = (gint)MIN(milli,
-                                            G_GUINT64_CONSTANT(100000));
+                gdouble percent = 100.0 * (gdouble)delta *
+                                  (gdouble)ticks_per_second /
+                                  (gdouble)elapsed_us;
+                if (priv->cpu_basis == 1)
+                    percent /= (gdouble)pl_online_cpu_count();
+                percent *= priv->cpu_coefficient;
+                gdouble rounded = percent * 1000.0;
+                proc->cpu_milli = (gint)CLAMP((gint64)(rounded + 0.5),
+                                               (gint64)0, (gint64)G_MAXINT);
             }
             if (proc->disk_read_bytes != G_MAXUINT64 &&
                 proc->disk_write_bytes != G_MAXUINT64 &&
@@ -446,12 +481,13 @@ static double pl_text_height(PangoLayout *layout)
 
 static void pl_show_column(PangoLayout *layout, cairo_t *cr,
                            const char *text, double right, double y,
-                           double column_width)
+                           double column_width, gboolean align_left)
 {
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_width(layout, (int)(column_width * PANGO_SCALE));
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
-    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    pango_layout_set_alignment(layout, align_left ? PANGO_ALIGN_LEFT :
+                                            PANGO_ALIGN_RIGHT);
     cairo_move_to(cr, right - column_width, y);
     pango_cairo_show_layout(cr, layout);
 }
@@ -493,9 +529,9 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     double right = width - PL_PADDING;
     double io_right = right;
     double mem_right = io_right - 42.0;
-    double cpu_right = mem_right - 40.0;
-    double pid_right = cpu_right - 40.0;
-    double name_right = pid_right - 40.0;
+    double cpu_right = mem_right - 46.0;
+    double pid_right = cpu_right - 58.0;
+    double name_right = pid_right - 46.0;
     double name_width = MAX(name_right - PL_PADDING, 1.0);
     double available_rows_height = MAX(height - PL_ROWS_Y - PL_PADDING, 1.0);
     double row_height = MIN(16.0, available_rows_height /
@@ -540,11 +576,11 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     pango_layout_set_font_description(layout, row_font);
     cairo_set_source_rgba(cr, priv->header[0], priv->header[1],
                           priv->header[2], priv->header[3]);
-    pl_show_column(layout, cr, "NAME", name_right, PL_HEADER_Y, name_width);
-    pl_show_column(layout, cr, "PID", pid_right, PL_HEADER_Y, 40.0);
-    pl_show_column(layout, cr, "CPU", cpu_right, PL_HEADER_Y, 40.0);
-    pl_show_column(layout, cr, "MEM", mem_right, PL_HEADER_Y, 42.0);
-    pl_show_column(layout, cr, "I/O", io_right, PL_HEADER_Y, 42.0);
+    pl_show_column(layout, cr, "NAME", name_right, PL_HEADER_Y, name_width, TRUE);
+    pl_show_column(layout, cr, "PID", pid_right, PL_HEADER_Y, 58.0, FALSE);
+    pl_show_column(layout, cr, "CPU", cpu_right, PL_HEADER_Y, 46.0, FALSE);
+    pl_show_column(layout, cr, "MEM", mem_right, PL_HEADER_Y, 42.0, FALSE);
+    pl_show_column(layout, cr, "I/O", io_right, PL_HEADER_Y, 42.0, FALSE);
 
     cairo_set_source_rgba(cr, priv->text[0], priv->text[1],
                           priv->text[2], priv->text[3]);
@@ -560,16 +596,16 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
             g_regex_replace(regex, proc->name, -1, 0, "_", 0, NULL) :
             g_strdup(proc->name);
 
-        pl_show_column(layout, cr, clean_name, name_right, y, name_width);
+        pl_show_column(layout, cr, clean_name, name_right, y, name_width, TRUE);
         g_snprintf(pid_text, sizeof(pid_text), "%d", proc->pid);
-        pl_show_column(layout, cr, pid_text, pid_right, y, 40.0);
+        pl_show_column(layout, cr, pid_text, pid_right, y, 58.0, FALSE);
         g_snprintf(cpu_text, sizeof(cpu_text), "%.1f", proc->cpu_milli / 100.0);
-        pl_show_column(layout, cr, cpu_text, cpu_right, y, 40.0);
+        pl_show_column(layout, cr, cpu_text, cpu_right, y, 46.0, FALSE);
         g_snprintf(mem_text, sizeof(mem_text), "%.1f",
                    proc->mem_permille / 100.0);
-        pl_show_column(layout, cr, mem_text, mem_right, y, 42.0);
+        pl_show_column(layout, cr, mem_text, mem_right, y, 42.0, FALSE);
         pl_format_io(io_text, sizeof(io_text), proc->io_bytes_per_sec);
-        pl_show_column(layout, cr, io_text, io_right, y, 42.0);
+        pl_show_column(layout, cr, io_text, io_right, y, 42.0, FALSE);
         g_free(clean_name);
         if (regex)
             g_regex_unref(regex);
@@ -662,7 +698,7 @@ static void pl_int_changed(GtkSpinButton *spin, gpointer data)
         priv->row_count = CLAMP(value, 1, 32);
         value = priv->row_count;
     } else if (strcmp(key, "window_width") == 0) {
-        priv->window_width = CLAMP(value, 240, 1200);
+        priv->window_width = CLAMP(value, 264, 1200);
         value = priv->window_width;
     } else {
         priv->window_height = CLAMP(value, 100, 1000);
@@ -728,6 +764,49 @@ static void pl_add_font(XsPlugin *plugin, GtkWidget *page, const char *label,
     g_signal_connect(widget, "font-set", G_CALLBACK(pl_font_set), plugin);
 }
 
+static void pl_cpu_basis_changed(GtkComboBox *combo, gpointer data)
+{
+    XsPlugin *plugin = data;
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    const char *basis = "per-core";
+
+    if (!priv)
+        return;
+    priv->cpu_basis = gtk_combo_box_get_active(combo) == 1;
+    if (priv->cpu_basis)
+        basis = "all-cores";
+    g_key_file_set_string(priv->kf, plugin->name, "cpu_basis", basis);
+    pl_flush(priv);
+}
+
+static void pl_cpu_coefficient_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *plugin = data;
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    gchar value[32];
+
+    if (!priv)
+        return;
+    priv->cpu_coefficient = CLAMP(gtk_spin_button_get_value(spin), 0.01, 100.0);
+    gtk_spin_button_set_value(spin, priv->cpu_coefficient);
+    g_ascii_dtostr(value, sizeof(value), priv->cpu_coefficient);
+    g_key_file_set_string(priv->kf, plugin->name, "cpu_coefficient", value);
+    pl_flush(priv);
+}
+
+static void pl_add_float(XsPlugin *plugin, GtkWidget *page, const char *label,
+                         const char *key, gdouble value, gdouble min,
+                         gdouble max, gdouble step, guint digits)
+{
+    GtkWidget *widget = xs_prop_add_float(GTK_BOX(page), label,
+                                          "Multiplier applied after CPU basis",
+                                          value, min, max, step, digits);
+
+    g_signal_connect(widget, "value-changed",
+                     G_CALLBACK(pl_cpu_coefficient_changed), plugin);
+    (void)key;
+}
+
 static void pl_add_int(XsPlugin *plugin, GtkWidget *page, const char *label,
                        const char *key, gint value, gint min, gint max)
 {
@@ -754,8 +833,27 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
     pl_add_int(plugin, page, "Update (ms)", "update_ms", priv->update_ms,
                100, 60000);
     pl_add_int(plugin, page, "Rows", "row_count", priv->row_count, 1, 32);
+    {
+        GtkWidget *combo = gtk_combo_box_text_new();
+        GtkWidget *row = xs_prop_add_row(
+            GTK_BOX(page), "CPU basis",
+            "100% per core or 100% across all online logical CPUs",
+            combo);
+
+        (void)row;
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
+                                      "Per core (100% = one thread)");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
+                                      "All cores (100% = all online threads)");
+        gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
+                                 priv->cpu_basis ? 1 : 0);
+        g_signal_connect(combo, "changed",
+                         G_CALLBACK(pl_cpu_basis_changed), plugin);
+    }
+    pl_add_float(plugin, page, "CPU coefficient", "cpu_coefficient",
+                 priv->cpu_coefficient, 0.01, 100.0, 0.01, 2);
     pl_add_int(plugin, page, "Window width", "window_width",
-               priv->window_width, 240, 1200);
+               priv->window_width, 264, 1200);
     pl_add_int(plugin, page, "Window height", "window_height",
                priv->window_height, 100, 1000);
     pl_add_font(plugin, page, "Title font", "title_font", priv->title_font);
@@ -820,6 +918,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     PrivData *priv = g_new0(PrivData, 1);
     g_autofree char *title_font = NULL;
     g_autofree char *row_font = NULL;
+    g_autofree char *cpu_basis = NULL;
     gint x;
     gint y;
 
@@ -829,8 +928,13 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
         kf, plugin->name, "update_ms", PL_UPDATE_DEFAULT), 100, 60000);
     priv->row_count = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "row_count", PL_ROWS_DEFAULT), 1, 32);
+    cpu_basis = xs_host_api()->conf_str(kf, plugin->name, "cpu_basis",
+                                        "per-core");
+    priv->cpu_basis = g_strcmp0(cpu_basis, "all-cores") == 0;
+    priv->cpu_coefficient = CLAMP(xs_host_api()->conf_dbl(
+        kf, plugin->name, "cpu_coefficient", 1.0), 0.01, 100.0);
     priv->window_width = CLAMP(xs_host_api()->conf_int(
-        kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 240, 1200);
+        kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 264, 1200);
     priv->window_height = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "window_height", PL_HEIGHT_DEFAULT), 100, 1000);
     title_font = xs_host_api()->conf_str(kf, plugin->name, "title_font",
@@ -854,6 +958,15 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
 
     g_key_file_set_integer(kf, plugin->name, "update_ms", priv->update_ms);
     g_key_file_set_integer(kf, plugin->name, "row_count", priv->row_count);
+    g_key_file_set_string(kf, plugin->name, "cpu_basis",
+                          priv->cpu_basis ? "all-cores" : "per-core");
+    {
+        gchar coefficient[32];
+        g_ascii_dtostr(coefficient, sizeof(coefficient),
+                       priv->cpu_coefficient);
+        g_key_file_set_string(kf, plugin->name, "cpu_coefficient",
+                              coefficient);
+    }
     g_key_file_set_integer(kf, plugin->name, "window_width",
                            priv->window_width);
     g_key_file_set_integer(kf, plugin->name, "window_height",
