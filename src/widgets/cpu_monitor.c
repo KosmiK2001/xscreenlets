@@ -727,9 +727,10 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
                 continue;
             base_y -= bar_height;
             cairo_rectangle(cr,
-                            x + (width - used * slot_width) +
-                                sample * slot_width,
-                            base_y, slot_width, bar_height + 0.5);
+                            floor(x + (width - used * slot_width) +
+                                  sample * slot_width + 0.5),
+                            floor(base_y),
+                            slot_width, ceil(bar_height) + 1.0);
             cairo_set_source_rgba(cr, colors[component][0],
                                   colors[component][1], colors[component][2],
                                   colors[component][3]);
