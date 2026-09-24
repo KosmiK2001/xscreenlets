@@ -1976,30 +1976,45 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(page), 10);
     xs_prop_add_group_header(GTK_BOX(page), "Rss-specific settings.");
-    w = xs_prop_add_string(GTK_BOX(page), "Feed name", "Feed name", priv->feed_name);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("feed_name"), g_free);
-    g_signal_connect(w, "changed", G_CALLBACK(rss_entry_changed), p);
-    w = xs_prop_add_string(GTK_BOX(page), "Feed URL", "RSS or Atom feed URL", priv->feed_url);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("feed_url"), g_free);
-    g_signal_connect(w, "changed", G_CALLBACK(rss_entry_changed), p);
-    w = xs_prop_add_int(GTK_BOX(page), "Update interval", "Refresh interval in minutes", priv->update_minutes, 1, 60, 1);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("update_interval"), g_free);
-    g_signal_connect(w, "value-changed", G_CALLBACK(rss_int_changed), p);
-    w = xs_prop_add_int(GTK_BOX(page), "Window width", "Width in pixels", priv->window_width, 100, 1200, 1);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_width"), g_free);
-    g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
-    w = xs_prop_add_int(GTK_BOX(page), "Window height", "Height in pixels", priv->window_height, 80, 1200, 1);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"), g_free);
-    g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
-    w = xs_prop_add_bool(GTK_BOX(page), "Auto news count", "Fit as many news as window and font allow", priv->auto_news_count);
-    auto_toggle = w;
-    g_signal_connect(w, "toggled", G_CALLBACK(rss_auto_news_toggled), p);
-    w = xs_prop_add_int(GTK_BOX(page), "News count", "Number of news when Auto is off", priv->news_count, 1, RSS_MAX_ENTRIES, 1);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("news_count"), g_free);
-    g_signal_connect(w, "value-changed", G_CALLBACK(rss_news_count_changed), p);
-    gtk_widget_set_sensitive(w, !priv->auto_news_count);
-    g_object_set_data(G_OBJECT(w), "xs-news-count-spin", w);
-    g_object_set_data(G_OBJECT(auto_toggle), "xs-news-count-spin", w);
+    {
+        GtkWidget *feed_frame = gtk_frame_new("Feed");
+        GtkWidget *feed_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+
+        gtk_frame_set_shadow_type(GTK_FRAME(feed_frame), GTK_SHADOW_IN);
+        gtk_container_set_border_width(GTK_CONTAINER(feed_frame), 7);
+        gtk_container_add(GTK_CONTAINER(feed_frame), feed_box);
+        w = xs_prop_add_string(GTK_BOX(feed_box), "Feed name", "Feed name", priv->feed_name);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("feed_name"), g_free);
+        g_signal_connect(w, "changed", G_CALLBACK(rss_entry_changed), p);
+        w = xs_prop_add_string(GTK_BOX(feed_box), "Feed URL", "RSS or Atom feed URL", priv->feed_url);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("feed_url"), g_free);
+        g_signal_connect(w, "changed", G_CALLBACK(rss_entry_changed), p);
+        gtk_box_pack_start(GTK_BOX(feed_box),
+                           gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
+                           FALSE, FALSE, 3);
+        w = xs_prop_add_int(GTK_BOX(feed_box), "Update interval", "Refresh interval in minutes", priv->update_minutes, 1, 60, 1);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("update_interval"), g_free);
+        g_signal_connect(w, "value-changed", G_CALLBACK(rss_int_changed), p);
+        w = xs_prop_add_bool(GTK_BOX(feed_box), "Auto news count", "Fit as many news as window and font allow", priv->auto_news_count);
+        auto_toggle = w;
+        g_signal_connect(w, "toggled", G_CALLBACK(rss_auto_news_toggled), p);
+        w = xs_prop_add_int(GTK_BOX(feed_box), "News count", "Number of news when Auto is off", priv->news_count, 1, RSS_MAX_ENTRIES, 1);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("news_count"), g_free);
+        g_signal_connect(w, "value-changed", G_CALLBACK(rss_news_count_changed), p);
+        gtk_widget_set_sensitive(w, !priv->auto_news_count);
+        g_object_set_data(G_OBJECT(w), "xs-news-count-spin", w);
+        g_object_set_data(G_OBJECT(auto_toggle), "xs-news-count-spin", w);
+        gtk_box_pack_start(GTK_BOX(feed_box),
+                           gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
+                           FALSE, FALSE, 3);
+        w = xs_prop_add_int(GTK_BOX(feed_box), "Window width", "Width in pixels", priv->window_width, 100, 1200, 1);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_width"), g_free);
+        g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
+        w = xs_prop_add_int(GTK_BOX(feed_box), "Window height", "Height in pixels", priv->window_height, 80, 1200, 1);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"), g_free);
+        g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
+        gtk_box_pack_start(GTK_BOX(page), feed_frame, FALSE, FALSE, 0);
+    }
     {
         GtkWidget *header_frame = gtk_frame_new("Header");
         GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
