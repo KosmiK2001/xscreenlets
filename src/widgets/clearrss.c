@@ -41,8 +41,11 @@ typedef struct {
     gdouble scale;
     gdouble opacity;
     gdouble text_color[4];
+    gdouble time_color[4];
     gdouble background_color[4];
     char *text_font;
+    char *time_font;
+    int time_font_size;
     char *theme;
     char *feed_name;
     char *feed_url;
@@ -186,15 +189,62 @@ static gboolean rss_conf_bool(GKeyFile *kf, const char *sec, const char *key,
     return value;
 }
 
+static gboolean rss_parse_color(const char *text, gdouble out[4])
+{
+    const char *p = text;
+    int i;
+
+    if (!text || !text[0])
+        return FALSE;
+    for (i = 0; i < 4; i++) {
+        char *end = NULL;
+        gdouble value = g_ascii_strtod(p, &end);
+
+        if (end == p || !isfinite(value))
+            return FALSE;
+        out[i] = CLAMP(value, 0.0, 1.0);
+        p = end;
+        while (g_ascii_isspace(*p))
+            p++;
+        if (i < 3) {
+            if (*p != ',')
+                return FALSE;
+            p++;
+        } else if (*p != '\0') {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static char *rss_color_string(const GdkRGBA *color)
+{
+    char r[32], g[32], b[32], a[32];
+    char *out;
+
+    g_ascii_formatd(r, sizeof(r), "%.9g", color->red);
+    g_ascii_formatd(g, sizeof(g), "%.9g", color->green);
+    g_ascii_formatd(b, sizeof(b), "%.9g", color->blue);
+    g_ascii_formatd(a, sizeof(a), "%.9g", color->alpha);
+    out = g_strdup_printf("%s,%s,%s,%s", r, g, b, a);
+    return out;
+}
+
 static void rss_read_color(GKeyFile *kf, const char *sec, const char *key,
                            const gdouble def[4], gdouble out[4])
 {
     char *s = xs_host_api()->conf_str(kf, sec, key, NULL);
 
-    out[0] = def[0]; out[1] = def[1]; out[2] = def[2]; out[3] = def[3];
-    if (!s || sscanf(s, "%lf,%lf,%lf,%lf", &out[0], &out[1], &out[2],
-                     &out[3]) != 4) {
-        out[0] = def[0]; out[1] = def[1]; out[2] = def[2]; out[3] = def[3];
+    memcpy(out, def, sizeof(gdouble) * 4);
+    if (!rss_parse_color(s, out)) {
+        memcpy(out, def, sizeof(gdouble) * 4);
+        {
+            char *fallback = rss_color_string(
+                &(GdkRGBA){def[0], def[1], def[2], def[3]});
+
+            g_key_file_set_string(kf, sec, key, fallback);
+            g_free(fallback);
+        }
     }
     g_free(s);
 }
@@ -868,6 +918,9 @@ static char *rss_entry_title_markup(const PrivData *priv,
     char *clock;
     GDateTime *local;
     char *result;
+    char *clock_markup;
+    PangoFontDescription *time_desc;
+    char *time_desc_string;
 
     if (!entry)
         return g_strdup("");
@@ -888,11 +941,30 @@ static char *rss_entry_title_markup(const PrivData *priv,
         return result;
     }
     clock = g_date_time_format(local, "%H:%M:%S");
+    time_desc = pango_font_description_from_string(
+        priv->time_font ? priv->time_font : "Sans Bold");
+    if (time_desc) {
+        pango_font_description_set_size(time_desc,
+                                       CLAMP(priv->time_font_size, 6, 48) *
+                                       PANGO_SCALE);
+        time_desc_string = pango_font_description_to_string(time_desc);
+        pango_font_description_free(time_desc);
+    } else {
+        time_desc_string = g_strdup("Sans Bold 9");
+    }
+    clock_markup = g_strdup_printf(
+        "<span font_desc=\"%s\" foreground=\"#%02X%02X%02X\">%s</span>",
+        time_desc_string,
+        (unsigned)lround(CLAMP(priv->time_color[0], 0.0, 1.0) * 255.0),
+        (unsigned)lround(CLAMP(priv->time_color[1], 0.0, 1.0) * 255.0),
+        (unsigned)lround(CLAMP(priv->time_color[2], 0.0, 1.0) * 255.0), clock);
     escaped = g_markup_escape_text(title, -1);
     if (escaped[0])
-        result = g_strdup_printf("<b>%s: %s</b>", clock, escaped);
+        result = g_strdup_printf("%s: <b>%s</b>", clock_markup, escaped);
     else
-        result = g_strdup_printf("<b>%s</b>", clock);
+        result = g_strdup(clock_markup);
+    g_free(clock_markup);
+    g_free(time_desc_string);
     g_free(clock);
     g_free(escaped);
     g_date_time_unref(local);
@@ -1582,6 +1654,11 @@ static void rss_int_changed(GtkSpinButton *spin, gpointer data)
         priv->update_minutes = CLAMP(value, 1, 60);
         g_key_file_set_integer(priv->kf, p->name, key, priv->update_minutes);
         rss_request_refresh(p, FALSE);
+    } else if (strcmp(key, "time_font_size") == 0) {
+        priv->time_font_size = CLAMP(value, 6, 48);
+        g_key_file_set_integer(priv->kf, p->name, key, priv->time_font_size);
+        if (p->win)
+            gtk_widget_queue_draw(p->win);
     }
     rss_flush(priv);
 }
@@ -1597,12 +1674,17 @@ static void rss_color_set(GtkColorButton *btn, gpointer data)
     if (strcmp(key, "rgba_color") == 0) {
         priv->text_color[0] = c.red; priv->text_color[1] = c.green;
         priv->text_color[2] = c.blue; priv->text_color[3] = c.alpha;
+    } else if (strcmp(key, "time_color") == 0) {
+        priv->time_color[0] = c.red; priv->time_color[1] = c.green;
+        priv->time_color[2] = c.blue; priv->time_color[3] = c.alpha;
     } else {
         priv->background_color[0] = c.red; priv->background_color[1] = c.green;
         priv->background_color[2] = c.blue; priv->background_color[3] = c.alpha;
     }
-    s = g_strdup_printf("%g,%g,%g,%g", c.red, c.green, c.blue, c.alpha);
-    g_key_file_set_string(priv->kf, p->name, key, s); g_free(s);
+    s = rss_color_string(&c);
+    xs_host_api()->log("clearrss: color saved '%s'=%s (saved)", key, s);
+    g_key_file_set_string(priv->kf, p->name, key, s);
+    g_free(s);
     rss_flush(priv); if (p->win) gtk_widget_queue_draw(p->win);
 }
 
@@ -1610,9 +1692,15 @@ static void rss_font_set(GtkFontButton *btn, gpointer data)
 {
     XsPlugin *p = data; PrivData *priv = p ? p->priv : NULL;
     const char *font = gtk_font_chooser_get_font(GTK_FONT_CHOOSER(btn));
-    if (!priv || !font) return;
-    g_free(priv->text_font); priv->text_font = g_strdup(font);
-    g_key_file_set_string(priv->kf, p->name, "font", font);
+    const char *key = g_object_get_data(G_OBJECT(btn), "xs-key");
+    if (!priv || !font || !key) return;
+    if (strcmp(key, "time_font") == 0) {
+        g_free(priv->time_font); priv->time_font = g_strdup(font);
+        g_key_file_set_string(priv->kf, p->name, key, font);
+    } else {
+        g_free(priv->text_font); priv->text_font = g_strdup(font);
+        g_key_file_set_string(priv->kf, p->name, "font", font);
+    }
     rss_flush(priv); if (p->win) gtk_widget_queue_draw(p->win);
 }
 
@@ -1639,6 +1727,9 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_int(GTK_BOX(page), "Window height", "Height in pixels", priv->window_height, 80, 1200, 1);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"), g_free);
     g_signal_connect(w, "value-changed", G_CALLBACK(rss_size_changed), p);
+    w = xs_prop_add_int(GTK_BOX(page), "Time font size", "Published-time font size in points", priv->time_font_size, 6, 48, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_font_size"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(rss_int_changed), p);
     w = xs_prop_add_bool(GTK_BOX(page), "Auto news count", "Fit as many news as window and font allow", priv->auto_news_count);
     auto_toggle = w;
     g_signal_connect(w, "toggled", G_CALLBACK(rss_auto_news_toggled), p);
@@ -1657,10 +1748,17 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_color(GTK_BOX(page), "Text color", "Default text color", priv->text_color[0], priv->text_color[1], priv->text_color[2], priv->text_color[3]);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("rgba_color"), g_free);
     g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
+    w = xs_prop_add_color(GTK_BOX(page), "Time color", "Published-time color", priv->time_color[0], priv->time_color[1], priv->time_color[2], priv->time_color[3]);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_color"), g_free);
+    g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
     w = xs_prop_add_color(GTK_BOX(page), "Back color", "Only with the default theme", priv->background_color[0], priv->background_color[1], priv->background_color[2], priv->background_color[3]);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("background_color"), g_free);
     g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
     w = xs_prop_add_font(GTK_BOX(page), "Text Font", "Text font", priv->text_font);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("font"), g_free);
+    g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
+    w = xs_prop_add_font(GTK_BOX(page), "Time Font", "Published-time font", priv->time_font);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_font"), g_free);
     g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
     gtk_widget_show_all(page);
     gtk_notebook_append_page(nb, page, gtk_label_new("Rss"));
@@ -1759,7 +1857,17 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     priv->update_minutes = CLAMP(xs_host_api()->conf_int(kf, p->name, "update_interval", 5), 1, 60);
     priv->show_feed_name = rss_conf_bool(kf, p->name, "show_feed_name", TRUE);
     rss_read_color(kf, p->name, "rgba_color", tc, priv->text_color);
+    rss_read_color(kf, p->name, "time_color", tc, priv->time_color);
     rss_read_color(kf, p->name, "background_color", bc, priv->background_color);
+    xs_host_api()->log("clearrss: config '%s' text=%g,%g,%g,%g", p->name,
+                       priv->text_color[0], priv->text_color[1],
+                       priv->text_color[2], priv->text_color[3]);
+    priv->time_font = xs_host_api()->conf_str(kf, p->name, "time_font", "Sans Bold");
+    priv->time_font_size = CLAMP(xs_host_api()->conf_int(kf, p->name, "time_font_size", 9), 6, 48);
+    if (!g_key_file_has_key(kf, p->name, "time_font", NULL))
+        g_key_file_set_string(kf, p->name, "time_font", priv->time_font);
+    if (!g_key_file_has_key(kf, p->name, "time_font_size", NULL))
+        g_key_file_set_integer(kf, p->name, "time_font_size", priv->time_font_size);
     scale = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
     priv->scale = CLAMP(scale, .2, 10.0);
     priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
@@ -1794,7 +1902,8 @@ static int rss_init(XsPlugin *p, GKeyFile *kf)
     if (!p->win) {
         p->host->log("clearrss: failed to create window");
         g_ptr_array_unref(priv->entries); g_string_free(priv->status, TRUE);
-        g_free(priv->feed_name); g_free(priv->feed_url); g_free(priv->theme); g_free(priv->text_font);
+        g_free(priv->feed_name); g_free(priv->feed_url); g_free(priv->theme);
+        g_free(priv->text_font); g_free(priv->time_font);
         g_free(priv); p->priv = NULL; return -1;
     }
     xs_host_api()->set_opacity(p, CLAMP(priv->opacity, .1, 1.0));
@@ -1832,6 +1941,7 @@ static void rss_shutdown(XsPlugin *p)
     g_free(priv->feed_url);
     g_free(priv->theme);
     g_free(priv->text_font);
+    g_free(priv->time_font);
     g_free(priv->site_url);
     g_free(priv);
     p->priv = NULL;
