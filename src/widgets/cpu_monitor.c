@@ -31,6 +31,9 @@
 #define CM_CELL_HEIGHT 76
 #define CM_BLOCK_HEIGHT 9.0
 #define CM_TEXT_HEIGHT 24.0
+#define CM_HISTORY_MIN_POINTS 1
+#define CM_HISTORY_MAX_POINTS 256
+#define CM_LOAD_COMPONENTS 4
 
 typedef struct {
     guint64 user;
@@ -42,8 +45,14 @@ typedef struct {
 } CpuTimes;
 
 typedef struct {
+    gdouble thread_load[2][4];
+} CpuHistorySlot;
+
+typedef struct {
     gint core_id;
     GArray *siblings;       /* logical CPU numbers, ascending */
+    CpuHistorySlot *history; /* circular per-thread samples */
+    guint history_points;
     gdouble load[4];        /* combined physical-core load, normalized 0..1 */
     gdouble thread_load[2][4]; /* first sibling top, second sibling bottom */
     gdouble frequency_mhz;  /* maximum current frequency across siblings */
@@ -67,6 +76,9 @@ typedef struct {
     gboolean stat_valid[CM_MAX_CPUS];
     GPtrArray *cores;
     GPtrArray *hwmon_temps; /* char * paths, one per core; may contain NULL */
+    guint history_points;
+    guint history_head;
+    guint history_count;
     cairo_surface_t *cache;
     int cache_width;
     int cache_height;
@@ -444,7 +456,54 @@ static void cm_free_core(gpointer data)
     if (!core)
         return;
     g_array_unref(core->siblings);
+    g_free(core->history);
     g_free(core);
+}
+
+static void cm_reset_history(PrivData *priv)
+{
+    priv->history_head = 0;
+    priv->history_count = 0;
+}
+
+static gboolean cm_ensure_history(PrivData *priv, guint points)
+{
+    guint c;
+
+    points = CLAMP(points, CM_HISTORY_MIN_POINTS, CM_HISTORY_MAX_POINTS);
+    priv->history_points = points;
+    for (c = 0; c < priv->cores->len; c++) {
+        CoreData *core = g_ptr_array_index(priv->cores, c);
+        if (core->history_points == points)
+            continue;
+        g_free(core->history);
+        core->history = g_new0(CpuHistorySlot, points);
+        core->history_points = points;
+    }
+    cm_reset_history(priv);
+    return TRUE;
+}
+
+static void cm_push_history(PrivData *priv)
+{
+    guint c;
+
+    if (!priv->history_points)
+        return;
+    for (c = 0; c < priv->cores->len; c++) {
+        CoreData *core = g_ptr_array_index(priv->cores, c);
+        CpuHistorySlot *slot;
+
+        if (!core->history || core->history_points == 0)
+            continue;
+        slot = &core->history[priv->history_head];
+        memcpy(slot->thread_load, core->thread_load, sizeof(slot->thread_load));
+    }
+    if (priv->history_points == 0)
+        return;
+    priv->history_head = (priv->history_head + 1) % priv->history_points;
+    if (priv->history_count < priv->history_points)
+        priv->history_count++;
 }
 
 static void cm_free_temp(gpointer data)
@@ -494,14 +553,14 @@ static gboolean cm_read_proc_stat(CpuTimes *current)
     return TRUE;
 }
 
-static void cm_sample_cpu(PrivData *priv)
+static gboolean cm_sample_cpu(PrivData *priv)
 {
     CpuTimes current[CM_MAX_CPUS];
     guint c;
 
     memset(current, 0, sizeof(current));
     if (!cm_read_proc_stat(current))
-        return;
+        return FALSE;
     if (priv->has_sample) {
         for (c = 0; c < priv->cores->len; c++) {
         CoreData *core = g_ptr_array_index(priv->cores, c);
@@ -561,26 +620,44 @@ static void cm_sample_cpu(PrivData *priv)
         priv->stat_valid[c] = current[c].valid;
     }
     priv->has_sample = TRUE;
+    return TRUE;
 }
 
-static void cm_draw_load(cairo_t *cr, double x, double y, double width,
-                         double height, const gdouble load[4],
-                         const gdouble colors[4][4])
+static void cm_draw_history(cairo_t *cr, double x, double y, double width,
+                            double height, CoreData *core, guint thread,
+                            guint points, guint head, guint count,
+                            const gdouble colors[4][4])
 {
-    double offset = 0;
-    guint i;
+    guint slot_width = MAX(width / MAX(points, 1), 1.0);
+    guint used = MIN(count, points);
+    guint start = (head + points - used) % points;
+    guint sample;
 
     cairo_rectangle(cr, x, y, width, height);
     cairo_set_source_rgba(cr, 0.12, 0.12, 0.14, 0.75);
     cairo_fill(cr);
-    for (i = 0; i < 4; i++) {
-        double part = width * CLAMP(load[i], 0.0, 1.0);
-        if (part > 0) {
-            cairo_rectangle(cr, x + offset, y, part, height);
-            cairo_set_source_rgba(cr, colors[i][0], colors[i][1],
-                                  colors[i][2], colors[i][3]);
+    for (sample = 0; sample < used; sample++) {
+        const gdouble *load;
+        double base_y;
+        guint component;
+
+        if (points == 0)
+            break;
+        load = core->history[(start + sample) % points].thread_load[thread];
+        base_y = y + height;
+        for (component = 0; component < CM_LOAD_COMPONENTS; component++) {
+            double bar_height = height * CLAMP(load[component], 0.0, 1.0);
+            if (bar_height <= 0.0)
+                continue;
+            base_y -= bar_height;
+            cairo_rectangle(cr,
+                            x + (width - used * slot_width) +
+                                sample * slot_width,
+                            base_y, slot_width, bar_height + 0.5);
+            cairo_set_source_rgba(cr, colors[component][0],
+                                  colors[component][1], colors[component][2],
+                                  colors[component][3]);
             cairo_fill(cr);
-            offset += part;
         }
     }
     cairo_set_source_rgba(cr, 0.75, 0.75, 0.80, 0.65);
@@ -623,8 +700,9 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 
         if (row >= priv->rows)
             break;
-        cm_draw_load(cr, x, y, block_w, CM_BLOCK_HEIGHT, core->thread_load[0],
-                     priv->load_colors);
+        cm_draw_history(cr, x, y, block_w, CM_BLOCK_HEIGHT, core, 0,
+                        core->history_points, priv->history_head,
+                        priv->history_count, priv->load_colors);
         text_y = y + CM_BLOCK_HEIGHT + 4.0;
         text = isfinite(core->frequency_mhz) ?
                g_strdup_printf("%.2fG", core->frequency_mhz / 1000.0) : g_strdup("---");
@@ -649,8 +727,10 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         pango_cairo_show_layout(cr, layout);
         g_free(text);
 
-        cm_draw_load(cr, x, text_y + CM_TEXT_HEIGHT, block_w, CM_BLOCK_HEIGHT,
-                     core->thread_load[1], priv->load_colors);
+        cm_draw_history(cr, x, text_y + CM_TEXT_HEIGHT, block_w,
+                        CM_BLOCK_HEIGHT, core, 1, core->history_points,
+                        priv->history_head, priv->history_count,
+                        priv->load_colors);
     }
     g_object_unref(layout);
     cairo_destroy(cr);
@@ -713,6 +793,7 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
                         GINT_TO_POINTER(priv->socket_id), p);
     cm_discover_topology(priv);
     cm_discover_temperatures(priv);
+    cm_ensure_history(priv, CM_CELL_WIDTH - 6);
     if (priv->cores->len == 0) {
         p->host->log("cpu_monitor: physical package %d has no discoverable cores",
                      priv->socket_id);
@@ -743,7 +824,8 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
 
 static void cm_tick_samples(PrivData *priv)
 {
-    cm_sample_cpu(priv);
+    if (cm_sample_cpu(priv))
+        cm_push_history(priv);
     if (priv->cache) {
         cairo_surface_destroy(priv->cache);
         priv->cache = cm_render(priv, priv->cache_width, priv->cache_height);
@@ -771,6 +853,7 @@ static void cm_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     if (!priv || !priv->cache)
         return;
     if (priv->cache_width != w || priv->cache_height != h) {
+        cm_ensure_history(priv, MAX((int)(w / MAX(priv->columns, 1)) - 6, 1));
         cairo_surface_destroy(priv->cache);
         priv->cache = cm_render(priv, w, h);
         priv->cache_width = w;
@@ -836,6 +919,7 @@ static void cm_int_changed(GtkSpinButton *spin, gpointer data)
         value = priv->socket_id;
         cm_discover_topology(priv);
         cm_discover_temperatures(priv);
+        cm_ensure_history(priv, CM_CELL_WIDTH - 6);
         memset(priv->previous, 0, sizeof(priv->previous));
         memset(priv->stat_valid, 0, sizeof(priv->stat_valid));
     } else if (strcmp(key, "update_ms") == 0) {
