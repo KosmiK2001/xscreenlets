@@ -989,12 +989,6 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
                   (int)priv->entries->len - rss_display_count(priv, layout, h));
     entry_count = rss_display_count(priv, layout, h);
     all = g_string_new(NULL);
-    if (priv->show_feed_name) {
-        char *feed = priv->feed_name ? priv->feed_name : "RSS";
-        char *heading = g_markup_escape_text(feed, -1);
-        g_string_append_printf(all, "<b>%s</b>\n\n", heading);
-        g_free(heading);
-    }
     for (i = 0; i < entry_count; i++) {
         entry = g_ptr_array_index(priv->entries, first + i);
         char *title = g_markup_escape_text(entry->title ? entry->title : "", -1);
@@ -1083,14 +1077,14 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
 
         priv->button_pressed = 0;
         if (y >= cy - radius && y <= cy + radius) {
-            if (x >= allocation.width - 58 - radius &&
-                x <= allocation.width - 58 + radius)
+            if (x >= allocation.width - 90 - radius &&
+                x <= allocation.width - 90 + radius)
                 priv->button_pressed = 1;
-            else if (x >= allocation.width - 38 - radius &&
-                     x <= allocation.width - 38 + radius)
+            else if (x >= allocation.width - 58 - radius &&
+                     x <= allocation.width - 58 + radius)
                 priv->button_pressed = 2;
-            else if (x >= allocation.width - 18 - radius &&
-                     x <= allocation.width - 18 + radius)
+            else if (x >= allocation.width - 26 - radius &&
+                     x <= allocation.width - 26 + radius)
                 priv->button_pressed = 3;
         }
         if (priv->button_pressed)
