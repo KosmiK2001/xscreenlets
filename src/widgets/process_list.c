@@ -356,7 +356,6 @@ static gint64 pl_online_cpu_count(void)
                 count++;
             }
         }
-        g_strfreev(parts);
         if (count)
             return (gint64)count;
     }
