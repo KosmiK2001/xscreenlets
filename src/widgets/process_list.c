@@ -1302,6 +1302,8 @@ static gboolean pl_button_release(XsPlugin *plugin, GdkEventButton *event)
     else {
         priv->sorting.sort = priv->sorting.default_sort;
         priv->sorting.descending = priv->sorting.default_descending;
+        priv->sorting.last_click_column = -1;
+        priv->sorting.repeat_clicks = 0;
     }
     priv->sorting.pressed_column = -1;
     pl_rebuild_rows(priv);
