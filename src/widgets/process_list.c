@@ -46,8 +46,28 @@ typedef struct {
     char name[PL_NAME_MAX];
 } PlProcess;
 
+typedef enum {
+    PL_SORT_NAME,
+    PL_SORT_PID,
+    PL_SORT_CPU,
+    PL_SORT_MEM,
+    PL_SORT_IO
+} PlSort;
+
+typedef struct {
+    guint default_sort;
+    gboolean default_descending;
+    guint sort;
+    gboolean descending;
+    gboolean hovered;
+    int pressed_column;
+    int last_click_column;
+    guint repeat_clicks;
+} PlSortState;
+
 typedef struct {
     XsPlugin *plugin;
+    PlSortState sorting;
     GKeyFile *kf;
     guint update_ms;
     guint row_count;
@@ -62,7 +82,8 @@ typedef struct {
     char *title_font;
     char *row_font;
     GHashTable *previous;            /* pid -> PlProcess baseline */
-    GPtrArray *rows;                 /* sorted top PlProcess objects */
+    GPtrArray *snapshot;             /* all sampled processes, current sort */
+    GPtrArray *rows;                 /* first row_count entries of snapshot */
     cairo_surface_t *cache;
     int cache_width;
     int cache_height;
@@ -297,16 +318,57 @@ static PlProcess *pl_read_pid(const char *pid_text, gboolean *running)
     return proc;
 }
 
-static gint pl_compare(gconstpointer a, gconstpointer b)
+static const char *pl_sort_name(guint sort)
+{
+    static const char *const names[] = { "name", "pid", "cpu", "mem", "io" };
+
+    return sort < G_N_ELEMENTS(names) ? names[sort] : "cpu";
+}
+
+static guint pl_sort_value(const char *name)
+{
+    if (g_strcmp0(name, "name") == 0)
+        return PL_SORT_NAME;
+    if (g_strcmp0(name, "pid") == 0)
+        return PL_SORT_PID;
+    if (g_strcmp0(name, "mem") == 0)
+        return PL_SORT_MEM;
+    if (g_strcmp0(name, "io") == 0)
+        return PL_SORT_IO;
+    return PL_SORT_CPU;
+}
+
+static gint pl_compare(gconstpointer a, gconstpointer b, gpointer data)
 {
     const PlProcess *pa = *(PlProcess * const *)a;
     const PlProcess *pb = *(PlProcess * const *)b;
+    const PlSortState *sorting = data;
+    gint result = 0;
 
-    if (pa->cpu_tenths != pb->cpu_tenths)
-        return pa->cpu_tenths < pb->cpu_tenths ? 1 : -1;
-    if (pa->pid != pb->pid)
-        return pa->pid < pb->pid ? -1 : 1;
-    return 0;
+    switch ((PlSort)sorting->sort) {
+    case PL_SORT_NAME:
+        result = g_strcmp0(pa->name, pb->name);
+        break;
+    case PL_SORT_PID:
+        result = pa->pid < pb->pid ? -1 : pa->pid > pb->pid ? 1 : 0;
+        break;
+    case PL_SORT_MEM:
+        result = pa->rss_bytes < pb->rss_bytes ? -1 :
+                 pa->rss_bytes > pb->rss_bytes ? 1 : 0;
+        break;
+    case PL_SORT_IO:
+        result = pa->io_bytes_per_sec < pb->io_bytes_per_sec ? -1 :
+                 pa->io_bytes_per_sec > pb->io_bytes_per_sec ? 1 : 0;
+        break;
+    case PL_SORT_CPU:
+    default:
+        result = pa->cpu_tenths < pb->cpu_tenths ? -1 :
+                 pa->cpu_tenths > pb->cpu_tenths ? 1 : 0;
+        break;
+    }
+    if (result)
+        return sorting->descending ? -result : result;
+    return pa->pid < pb->pid ? -1 : pa->pid > pb->pid ? 1 : 0;
 }
 
 static gint64 pl_online_cpu_count(void)
@@ -337,12 +399,29 @@ static gint64 pl_online_cpu_count(void)
     return (gint64)MAX((long)sysconf(_SC_NPROCESSORS_ONLN), 1L);
 }
 
+static void pl_rebuild_rows(PrivData *priv)
+{
+    GPtrArray *rows = g_ptr_array_new_with_free_func(pl_process_free);
+    guint i;
+
+    if (!priv->snapshot) {
+        priv->rows = rows;
+        return;
+    }
+    g_ptr_array_sort_with_data(priv->snapshot, pl_compare, &priv->sorting);
+    for (i = 0; i < MIN(priv->snapshot->len, priv->row_count); i++) {
+        const PlProcess *proc = g_ptr_array_index(priv->snapshot, i);
+        g_ptr_array_add(rows, g_memdup2(proc, sizeof(*proc)));
+    }
+    g_ptr_array_unref(priv->rows);
+    priv->rows = rows;
+}
+
 static void pl_sample(PrivData *priv)
 {
     GDir *directory;
     const gchar *entry;
     GPtrArray *current = g_ptr_array_new_with_free_func(pl_process_free);
-    GPtrArray *top;
     guint i;
     gint64 now = pl_now_us();
     gint64 elapsed_us = now - priv->last_sample_us;
@@ -418,15 +497,53 @@ static void pl_sample(PrivData *priv)
         g_hash_table_insert(priv->previous, GINT_TO_POINTER(proc->pid),
                             baseline);
     }
-    g_ptr_array_sort(current, pl_compare);
-    top = g_ptr_array_new_with_free_func(pl_process_free);
-    for (i = 0; i < MIN(current->len, priv->row_count); i++) {
-        const PlProcess *proc = g_ptr_array_index(current, i);
-        g_ptr_array_add(top, g_memdup2(proc, sizeof(*proc)));
-    }
+    g_ptr_array_sort_with_data(current, pl_compare, &priv->sorting);
+    g_ptr_array_unref(priv->snapshot);
+    priv->snapshot = g_ptr_array_ref(current);
+    pl_rebuild_rows(priv);
     g_ptr_array_unref(current);
-    g_ptr_array_unref(priv->rows);
-    priv->rows = top;
+}
+
+typedef struct {
+    double right[5];
+    double width[5];
+} PlColumns;
+
+static PlColumns pl_columns(int width)
+{
+    PlColumns columns = { { 0 }, { 0 } };
+    double right = width - PL_PADDING;
+
+    columns.right[4] = right;
+    columns.width[4] = PL_IO_WIDTH;
+    columns.right[3] = columns.right[4] - (PL_IO_WIDTH + PL_COL_GAP);
+    columns.width[3] = PL_MEM_WIDTH;
+    columns.right[2] = columns.right[3] - (PL_MEM_WIDTH + PL_COL_GAP);
+    columns.width[2] = PL_CPU_WIDTH;
+    columns.right[1] = columns.right[2] - (PL_CPU_WIDTH + PL_COL_GAP);
+    columns.width[1] = PL_PID_WIDTH;
+    columns.right[0] = columns.right[1] - (PL_PID_WIDTH + PL_COL_GAP);
+    columns.width[0] = MAX(columns.right[0] - PL_PADDING, 1.0);
+    return columns;
+}
+
+static const char *const pl_column_names[] = { "NAME", "PID", "CPU", "MEM", "I/O" };
+static const PlSort pl_column_sorts[] = {
+    PL_SORT_NAME, PL_SORT_PID, PL_SORT_CPU, PL_SORT_MEM, PL_SORT_IO
+};
+
+static int pl_column_at(const PlColumns *columns, double x, double y)
+{
+    guint i;
+
+    if (y < PL_HEADER_Y - 5.0 || y > PL_HEADER_Y + 16.0)
+        return -1;
+    for (i = 0; i < G_N_ELEMENTS(pl_column_names); i++) {
+        if (x >= columns->right[i] - columns->width[i] &&
+            x <= columns->right[i])
+            return (int)i;
+    }
+    return -1;
 }
 
 static PangoFontDescription *pl_font(const char *name)
@@ -517,13 +634,11 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     PangoLayout *layout = pango_cairo_create_layout(cr);
     PangoFontDescription *title_font = pl_font(priv->title_font);
     PangoFontDescription *row_font = pl_font(priv->row_font);
-    double right = width - PL_PADDING;
-    double io_right = right;
-    double mem_right = io_right - (PL_IO_WIDTH + PL_COL_GAP);
-    double cpu_right = mem_right - (PL_MEM_WIDTH + PL_COL_GAP);
-    double pid_right = cpu_right - (PL_CPU_WIDTH + PL_COL_GAP);
-    double name_right = pid_right - (PL_PID_WIDTH + PL_COL_GAP);
-    double name_width = MAX(name_right - PL_PADDING, 1.0);
+    PlColumns columns = pl_columns(width);
+    PlSortState *sorting = &priv->sorting;
+    double right = columns.right[4];
+    double name_right = columns.right[0];
+    double name_width = columns.width[0];
     double available_rows_height = MAX(height - PL_ROWS_Y - PL_PADDING, 1.0);
     double row_height = MIN(16.0, available_rows_height /
                             MAX(priv->row_count, 1U));
@@ -552,6 +667,16 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pango_cairo_show_layout(cr, layout);
         g_free(count);
     }
+    if (sorting->hovered) {
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, priv->title[0], priv->title[1],
+                              priv->title[2], priv->title[3]);
+        cairo_set_line_width(cr, 1.0);
+        cairo_rectangle(cr, PL_PADDING - 0.5, 0.5,
+                        right - PL_PADDING + 1.0, 15.0);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
     {
         char *running = g_strdup_printf("     Running: %u",
                                         priv->running_count);
@@ -567,11 +692,25 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     pango_layout_set_font_description(layout, row_font);
     cairo_set_source_rgba(cr, priv->header[0], priv->header[1],
                           priv->header[2], priv->header[3]);
-    pl_show_column(layout, cr, "NAME", name_right, PL_HEADER_Y, name_width, TRUE);
-    pl_show_column(layout, cr, "PID", pid_right, PL_HEADER_Y, PL_PID_WIDTH, FALSE);
-    pl_show_column(layout, cr, "CPU", cpu_right, PL_HEADER_Y, PL_CPU_WIDTH, FALSE);
-    pl_show_column(layout, cr, "MEM", mem_right, PL_HEADER_Y, PL_MEM_WIDTH, FALSE);
-    pl_show_column(layout, cr, "I/O", io_right, PL_HEADER_Y, PL_IO_WIDTH, FALSE);
+    for (i = 0; i < G_N_ELEMENTS(pl_column_names); i++) {
+        gboolean active = sorting->sort == pl_column_sorts[i];
+        gboolean left = i == PL_SORT_NAME;
+
+        pl_show_column(layout, cr, pl_column_names[i], columns.right[i],
+                       PL_HEADER_Y, columns.width[i], left);
+        if (active) {
+            double x = columns.right[i] - columns.width[i];
+            double text_width = pl_text_width(layout);
+
+            if (!left)
+                x += columns.width[i] - text_width;
+            cairo_set_line_width(cr, 1.0);
+            cairo_rectangle(cr, x - 2.0 + 0.5,
+                            floor(PL_HEADER_Y) - 3.0 + 0.5,
+                            text_width + 4.0, pl_text_height(layout) + 5.0);
+            cairo_stroke(cr);
+        }
+    }
 
     cairo_set_source_rgba(cr, priv->text[0], priv->text[1],
                           priv->text[2], priv->text[3]);
@@ -589,14 +728,18 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
 
         pl_show_column(layout, cr, clean_name, name_right, y, name_width, TRUE);
         g_snprintf(pid_text, sizeof(pid_text), "%d", proc->pid);
-        pl_show_column(layout, cr, pid_text, pid_right, y, PL_PID_WIDTH, FALSE);
+        pl_show_column(layout, cr, pid_text, columns.right[1], y,
+                       PL_PID_WIDTH, FALSE);
         g_snprintf(cpu_text, sizeof(cpu_text), "%.1f%%",
                    proc->cpu_tenths / 10.0);
-        pl_show_column(layout, cr, cpu_text, cpu_right, y, PL_CPU_WIDTH, FALSE);
+        pl_show_column(layout, cr, cpu_text, columns.right[2], y,
+                       PL_CPU_WIDTH, FALSE);
         pl_format_bytes(mem_text, sizeof(mem_text), proc->rss_bytes);
-        pl_show_column(layout, cr, mem_text, mem_right, y, PL_MEM_WIDTH, FALSE);
+        pl_show_column(layout, cr, mem_text, columns.right[3], y,
+                       PL_MEM_WIDTH, FALSE);
         pl_format_io(io_text, sizeof(io_text), proc->io_bytes_per_sec);
-        pl_show_column(layout, cr, io_text, io_right, y, PL_IO_WIDTH, FALSE);
+        pl_show_column(layout, cr, io_text, columns.right[4], y,
+                       PL_IO_WIDTH, FALSE);
         g_free(clean_name);
         if (regex)
             g_regex_unref(regex);
@@ -688,6 +831,7 @@ static void pl_int_changed(GtkSpinButton *spin, gpointer data)
     } else if (strcmp(key, "row_count") == 0) {
         priv->row_count = CLAMP(value, 1, 32);
         value = priv->row_count;
+        pl_rebuild_rows(priv);
     } else if (strcmp(key, "window_width") == 0) {
         priv->window_width = CLAMP(value, 320, 1200);
         value = priv->window_width;
@@ -755,6 +899,41 @@ static void pl_add_font(XsPlugin *plugin, GtkWidget *page, const char *label,
     g_signal_connect(widget, "font-set", G_CALLBACK(pl_font_set), plugin);
 }
 
+static void pl_default_sort_changed(GtkComboBox *combo, gpointer data)
+{
+    XsPlugin *plugin = data;
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    int active = gtk_combo_box_get_active(combo);
+
+    if (!priv || active < 0)
+        return;
+    priv->sorting.default_sort = (guint)active;
+    priv->sorting.sort = active;
+    priv->sorting.last_click_column = -1;
+    priv->sorting.repeat_clicks = 0;
+    priv->sorting.descending = priv->sorting.default_descending;
+    g_key_file_set_string(priv->kf, plugin->name, "default_sort",
+                          pl_sort_name(active));
+    pl_rebuild_rows(priv);
+    pl_flush(priv);
+}
+
+static void pl_default_direction_changed(GtkComboBox *combo, gpointer data)
+{
+    XsPlugin *plugin = data;
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    gboolean descending = gtk_combo_box_get_active(combo) == 0;
+
+    if (!priv)
+        return;
+    priv->sorting.default_descending = descending;
+    priv->sorting.descending = descending;
+    g_key_file_set_string(priv->kf, plugin->name, "default_direction",
+                          descending ? "descending" : "ascending");
+    pl_rebuild_rows(priv);
+    pl_flush(priv);
+}
+
 static void pl_cpu_basis_changed(GtkComboBox *combo, gpointer data)
 {
     XsPlugin *plugin = data;
@@ -796,6 +975,39 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
     pl_add_int(plugin, page, "Update (ms)", "update_ms", priv->update_ms,
                100, 60000);
     pl_add_int(plugin, page, "Rows", "row_count", priv->row_count, 1, 32);
+    {
+        GtkWidget *combo = gtk_combo_box_text_new();
+        GtkWidget *row = xs_prop_add_row(
+            GTK_BOX(page), "Default sort",
+            "Column used when the applet starts; header clicks can override it for this session",
+            combo);
+
+        (void)row;
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "NAME");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "PID");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "CPU");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "MEM");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "I/O");
+        gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
+                                 priv->sorting.default_sort);
+        g_signal_connect(combo, "changed",
+                         G_CALLBACK(pl_default_sort_changed), plugin);
+    }
+    {
+        GtkWidget *combo = gtk_combo_box_text_new();
+        GtkWidget *row = xs_prop_add_row(
+            GTK_BOX(page), "Default direction",
+            "Initial direction for the selected default sort",
+            combo);
+
+        (void)row;
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "Descending");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "Ascending");
+        gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
+                                 priv->sorting.default_descending ? 0 : 1);
+        g_signal_connect(combo, "changed",
+                         G_CALLBACK(pl_default_direction_changed), plugin);
+    }
     {
         GtkWidget *combo = gtk_combo_box_text_new();
         GtkWidget *row = xs_prop_add_row(
@@ -880,6 +1092,8 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     g_autofree char *title_font = NULL;
     g_autofree char *row_font = NULL;
     g_autofree char *cpu_basis = NULL;
+    g_autofree char *default_sort = NULL;
+    g_autofree char *default_direction = NULL;
     gint x;
     gint y;
 
@@ -892,6 +1106,16 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     cpu_basis = xs_host_api()->conf_str(kf, plugin->name, "cpu_basis",
                                         "per-core");
     priv->cpu_basis = g_strcmp0(cpu_basis, "all-cores") == 0;
+    default_sort = xs_host_api()->conf_str(kf, plugin->name,
+                                            "default_sort", "cpu");
+    default_direction = xs_host_api()->conf_str(kf, plugin->name,
+                                                 "default_direction",
+                                                 "descending");
+    priv->sorting.default_sort = pl_sort_value(default_sort);
+    priv->sorting.default_descending =
+        g_strcmp0(default_direction, "ascending") != 0;
+    priv->sorting.sort = priv->sorting.default_sort;
+    priv->sorting.descending = priv->sorting.default_descending;
     priv->window_width = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 320, 1200);
     priv->window_height = CLAMP(xs_host_api()->conf_int(
@@ -910,6 +1134,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     pl_read_color(priv, "text_color", pl_text_default, priv->text);
     priv->previous = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                             NULL, pl_process_free);
+    priv->snapshot = g_ptr_array_new_with_free_func(pl_process_free);
     priv->rows = g_ptr_array_new_with_free_func(pl_process_free);
     x = xs_host_api()->conf_int(kf, plugin->name, "x", 300);
     y = xs_host_api()->conf_int(kf, plugin->name, "y", 80);
@@ -919,6 +1144,11 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     g_key_file_set_integer(kf, plugin->name, "row_count", priv->row_count);
     g_key_file_set_string(kf, plugin->name, "cpu_basis",
                           priv->cpu_basis ? "all-cores" : "per-core");
+    g_key_file_set_string(kf, plugin->name, "default_sort",
+                          pl_sort_name(priv->sorting.default_sort));
+    g_key_file_set_string(kf, plugin->name, "default_direction",
+                          priv->sorting.default_descending ? "descending" :
+                          "ascending");
     g_key_file_remove_key(kf, plugin->name, "cpu_coefficient", NULL);
     g_key_file_set_integer(kf, plugin->name, "window_width",
                            priv->window_width);
@@ -939,6 +1169,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
                                              priv->window_height);
     if (!plugin->win) {
         g_hash_table_destroy(priv->previous);
+        g_ptr_array_unref(priv->snapshot);
         g_ptr_array_unref(priv->rows);
         g_free(priv->title_font);
         g_free(priv->row_font);
@@ -962,6 +1193,7 @@ static void pl_shutdown(XsPlugin *plugin)
     if (priv->cache)
         cairo_surface_destroy(priv->cache);
     g_hash_table_destroy(priv->previous);
+    g_ptr_array_unref(priv->snapshot);
     g_ptr_array_unref(priv->rows);
     g_free(priv->title_font);
     g_free(priv->row_font);
@@ -969,20 +1201,103 @@ static void pl_shutdown(XsPlugin *plugin)
     plugin->priv = NULL;
 }
 
+static gboolean pl_button_press(XsPlugin *plugin, GdkEventButton *event)
+{
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    PlColumns columns;
+    int column;
+
+    if (!priv || event->type != GDK_BUTTON_PRESS || event->button != 1)
+        return FALSE;
+    columns = pl_columns(priv->cache_width > 0 ? priv->cache_width :
+                         priv->window_width);
+    column = pl_column_at(&columns, event->x, event->y);
+    if (column < 0)
+        return FALSE;
+    priv->sorting.pressed_column = column;
+    pl_rerender(priv);
+    return TRUE;
+}
+
+static gboolean pl_button_release(XsPlugin *plugin, GdkEventButton *event)
+{
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    PlColumns columns;
+    int column;
+
+    if (!priv || event->type != GDK_BUTTON_RELEASE || event->button != 1)
+        return FALSE;
+    columns = pl_columns(priv->cache_width > 0 ? priv->cache_width :
+                         priv->window_width);
+    column = pl_column_at(&columns, event->x, event->y);
+    if (column < 0 || column != priv->sorting.pressed_column) {
+        priv->sorting.pressed_column = -1;
+        return FALSE;
+    }
+    if (priv->sorting.last_click_column != column) {
+        priv->sorting.last_click_column = column;
+        priv->sorting.repeat_clicks = 1;
+    } else if (priv->sorting.repeat_clicks < 3) {
+        priv->sorting.repeat_clicks++;
+    }
+    priv->sorting.sort = pl_column_sorts[column];
+    if (priv->sorting.repeat_clicks == 1)
+        priv->sorting.descending = column == PL_SORT_NAME ||
+                                   column == PL_SORT_PID;
+    else if (priv->sorting.repeat_clicks == 2)
+        priv->sorting.descending = !(column == PL_SORT_NAME ||
+                                     column == PL_SORT_PID);
+    else {
+        priv->sorting.sort = priv->sorting.default_sort;
+        priv->sorting.descending = priv->sorting.default_descending;
+    }
+    priv->sorting.pressed_column = -1;
+    pl_rebuild_rows(priv);
+    pl_rerender(priv);
+    return TRUE;
+}
+
+static void pl_enter(XsPlugin *plugin)
+{
+    PrivData *priv = plugin ? plugin->priv : NULL;
+
+    if (!priv || priv->sorting.hovered)
+        return;
+    priv->sorting.hovered = TRUE;
+    pl_rerender(priv);
+}
+
+static void pl_leave(XsPlugin *plugin)
+{
+    PrivData *priv = plugin ? plugin->priv : NULL;
+
+    if (!priv || !priv->sorting.hovered)
+        return;
+    priv->sorting.hovered = FALSE;
+    priv->sorting.pressed_column = -1;
+    pl_rerender(priv);
+}
+
+static gboolean pl_button(XsPlugin *plugin, GdkEventButton *event)
+{
+    return event->type == GDK_BUTTON_PRESS ? pl_button_press(plugin, event) :
+                                             pl_button_release(plugin, event);
+}
+
 static const XsPluginOps pl_ops = {
     .init = pl_init,
     .draw = pl_draw,
     .tick = pl_tick,
     .shutdown = pl_shutdown,
-    .button = NULL,
+    .button = pl_button,
     .motion = NULL,
     .menu = NULL,
     .menu_cmd = NULL,
     .properties = pl_properties,
     .fill_themes = NULL,
     .scroll = NULL,
-    .enter = NULL,
-    .leave = NULL,
+    .enter = pl_enter,
+    .leave = pl_leave,
     .guest_list_changed = NULL,
 };
 
