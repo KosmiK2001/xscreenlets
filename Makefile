@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0)
+CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0)
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
 LDFLAGS_RSS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 libxml-2.0) -lm
@@ -17,6 +17,7 @@ TARGET_LAU_PLUGIN = $(BUILD_DIR)/launcher.so
 TARGET_FL_PLUGIN = $(BUILD_DIR)/frame_launcher.so
 TARGET_RSS_PLUGIN = $(BUILD_DIR)/clearrss.so
 TARGET_CPU_PLUGIN = $(BUILD_DIR)/cpu_monitor.so
+TARGET_MEMORY_PLUGIN = $(BUILD_DIR)/memory_monitor.so
 TARGET_PROCESS_PLUGIN = $(BUILD_DIR)/process_list.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
@@ -43,7 +44,7 @@ OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -69,6 +70,15 @@ $(TARGET_RSS_PLUGIN): $(BUILD_DIR) $(OBJS_RSS)
 $(TARGET_CPU_PLUGIN): $(BUILD_DIR) build/cpu_monitor.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/cpu_monitor.o $(LDFLAGS_PLUGIN)
 
+$(BUILD_DIR)/memory_monitor_core.o: src/widgets/memory_monitor_core.c src/widgets/memory_monitor_core.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+
+$(BUILD_DIR)/memory_monitor.o: src/widgets/memory_monitor.c src/widgets/memory_monitor_core.h include/xs_api.h src/core/common.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+
+$(TARGET_MEMORY_PLUGIN): $(BUILD_DIR) build/memory_monitor.o build/memory_monitor_core.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/memory_monitor.o build/memory_monitor_core.o $(LDFLAGS_PLUGIN)
+
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
@@ -80,6 +90,12 @@ $(BUILD_DIR)/%.o: src/core/%.c include/xs_api.h src/core/common.h
 
 $(BUILD_DIR)/%.o: src/widgets/%.c include/xs_api.h src/core/common.h
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+
+$(BUILD_DIR)/test_memory_monitor: tests/test_memory_monitor.c src/widgets/memory_monitor_core.c src/widgets/memory_monitor_core.h
+	$(CC) $(CFLAGS) -o $@ tests/test_memory_monitor.c src/widgets/memory_monitor_core.c $(LDFLAGS_PLUGIN)
+
+test: $(BUILD_DIR)/test_memory_monitor
+	$(BUILD_DIR)/test_memory_monitor
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -94,10 +110,12 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_FL_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/frame_launcher.so
 	$(INSTALL) -m 0755 $(TARGET_RSS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/clearrss.so
 	$(INSTALL) -m 0755 $(TARGET_CPU_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/cpu_monitor.so
+	$(INSTALL) -m 0755 $(TARGET_MEMORY_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/memory_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_PROCESS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/process_list.so
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
 	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg
 	$(INSTALL) -m 0644 icons/cpu_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/cpu_monitor.svg
+	$(INSTALL) -m 0644 icons/memory_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/memory_monitor.svg
 	$(INSTALL) -m 0644 icons/process_list.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/process_list.svg
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple
@@ -107,7 +125,6 @@ install: all
 run: all
 	@echo "To run the daemon: ./$(TARGET_DAEMON)"
 	@echo "To run the standalone clock: ./$(TARGET_STANDALONE)"
-
 
 # debug — промежуточная сборка: -O0 + макросы + фреймы (как у shaping-view-gtk3)
 BIN_DBG = $(BUILD_DIR)/xscreenletsd-debug
@@ -137,4 +154,4 @@ sanitize: all $(BIN_SAN)
 $(BIN_SAN): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON) -fsanitize=address,undefined
 
-.PHONY: all clean run install debug sanitize
+.PHONY: all clean test run install debug sanitize

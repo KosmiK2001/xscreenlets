@@ -1,0 +1,636 @@
+/* memory_monitor.c — C/GTK3 RAM and swap history monitor.
+ *
+ * tick() is the only path which reads /proc/meminfo. draw() only paints a
+ * cached Cairo surface and therefore performs no I/O.
+ */
+#include <gtk/gtk.h>
+#include <glib.h>
+#include <math.h>
+#include <string.h>
+#include "xs_api.h"
+#include "common.h"
+#include "memory_monitor_core.h"
+
+#define MM_DEFAULT_WINDOW_WIDTH 320
+#define MM_DEFAULT_WINDOW_HEIGHT 344
+#define MM_DEFAULT_RAM_HEIGHT 148
+#define MM_DEFAULT_SWAP_HEIGHT 148
+#define MM_HISTORY_MAX 4096
+#define MM_DEFAULT_FONT "Ubuntu 8"
+#define MM_PAD 4.0
+
+typedef struct {
+    XsPlugin *plugin;
+    GKeyFile *kf;
+    guint update_ms;
+    int window_width;
+    int window_height;
+    int ram_graph_height;
+    int swap_graph_height;
+    char *font;
+    gdouble background_color[4];
+    gdouble text_color[4];
+    gdouble border_color[4];
+    gdouble ram_color[4];
+    gdouble swap_color[4];
+    gdouble ram_history[MM_HISTORY_MAX];
+    gdouble swap_history[MM_HISTORY_MAX];
+    guint ram_head;
+    guint swap_head;
+    guint ram_count;
+    guint swap_count;
+    cairo_surface_t *cache;
+    int cache_width;
+    int cache_height;
+    MemorySample sample;
+} PrivData;
+
+static const gdouble mm_default_background[4] = {0.098, 0.098, 0.098, 0.75};
+static const gdouble mm_default_text[4] = {1.0, 1.0, 1.0, 1.0};
+static const gdouble mm_default_border[4] = {0.451, 0.451, 0.451, 1.0};
+static const gdouble mm_default_ram[4] = {0.325, 0.510, 0.729, 1.0};
+static const gdouble mm_default_swap[4] = {1.0, 0.647, 0.0, 1.0};
+
+static gboolean mm_parse_color(const char *text, gdouble out[4])
+{
+    const char *p = text;
+    int i;
+
+    if (!text || !text[0])
+        return FALSE;
+    for (i = 0; i < 4; i++) {
+        char *end = NULL;
+        gdouble value = g_ascii_strtod(p, &end);
+
+        if (end == p || !isfinite(value))
+            return FALSE;
+        out[i] = CLAMP(value, 0.0, 1.0);
+        p = end;
+        while (g_ascii_isspace(*p))
+            p++;
+        if (i < 3) {
+            if (*p != ',')
+                return FALSE;
+            p++;
+        } else if (*p != '\0') {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static char *mm_color_string(const GdkRGBA *color)
+{
+    return g_strdup_printf("%.9g,%.9g,%.9g,%.9g", color->red, color->green,
+                           color->blue, color->alpha);
+}
+
+static void mm_read_color(PrivData *priv, const char *key,
+                          const gdouble fallback[4], gdouble out[4])
+{
+    char *text = xs_host_api()->conf_str(priv->kf, priv->plugin->name,
+                                         key, NULL);
+
+    memcpy(out, fallback, 4 * sizeof(gdouble));
+    if (!text) {
+        GdkRGBA color = {fallback[0], fallback[1], fallback[2], fallback[3]};
+        char *default_text = mm_color_string(&color);
+
+        g_key_file_set_string(priv->kf, priv->plugin->name, key, default_text);
+        g_free(default_text);
+    } else if (!mm_parse_color(text, out)) {
+        priv->plugin->host->log("memory_monitor %s: invalid %s, using defaults",
+                                priv->plugin->name, key);
+    }
+    g_free(text);
+}
+
+static gboolean mm_read_meminfo(MemorySample *sample)
+{
+    char *text = NULL;
+    gboolean valid;
+
+    if (!g_file_get_contents("/proc/meminfo", &text, NULL, NULL))
+        return FALSE;
+    valid = mm_parse_meminfo(text, sample);
+    g_free(text);
+    return valid;
+}
+
+static char *mm_format_kib(guint64 kib)
+{
+    static const char *units[] = {"KiB", "MiB", "GiB", "TiB", "PiB"};
+    gdouble value = kib;
+    guint i = 0;
+
+    while (value >= 1024.0 && i + 1 < G_N_ELEMENTS(units)) {
+        value /= 1024.0;
+        i++;
+    }
+    if (i == 0)
+        return g_strdup_printf("%.0f %s", value, units[i]);
+    return g_strdup_printf(value < 10.0 ? "%.2f %s" : "%.1f %s",
+                           value, units[i]);
+}
+
+static void mm_push(gdouble *history, guint *head, guint *count, gdouble value)
+{
+    history[*head] = CLAMP(value, 0.0, 1.0);
+    *head = (*head + 1) % MM_HISTORY_MAX;
+    *count = MIN(*count + 1, MM_HISTORY_MAX);
+}
+
+static void mm_draw_graph(cairo_t *cr, double x, double y, int width,
+                          int height, const gdouble *history, guint head,
+                          guint count, const gdouble color[4],
+                          const gdouble border[4])
+{
+    guint visible = MIN(count, (guint)width);
+    guint start = (head + MM_HISTORY_MAX - visible) % MM_HISTORY_MAX;
+    guint i;
+
+    cairo_set_source_rgba(cr, 0.04, 0.05, 0.07, 0.92);
+    cairo_rectangle(cr, x, y, width, height);
+    cairo_fill(cr);
+    cairo_save(cr);
+    cairo_rectangle(cr, x + 1.0, y + 1.0, width - 2.0, height - 2.0);
+    cairo_clip(cr);
+    cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
+    for (i = 0; i < visible; i++) {
+        gdouble value = history[(start + i) % MM_HISTORY_MAX];
+        double bar_height = (height - 2.0) * value;
+        /* Oldest sample starts at the left; each new tick shifts right-to-left. */
+        double px = x + 1.0 + (width - 2 - (int)visible) + (int)i;
+
+        if (bar_height > 0.0)
+            cairo_rectangle(cr, px, y + height - 1.0 - bar_height, 1.0,
+                            bar_height);
+    }
+    cairo_fill(cr);
+    cairo_restore(cr);
+    cairo_set_source_rgba(cr, border[0], border[1], border[2], border[3]);
+    cairo_set_line_width(cr, 1.0);
+    cairo_rectangle(cr, x + 0.5, y + 0.5, width - 1.0, height - 1.0);
+    cairo_stroke(cr);
+}
+
+static void mm_set_text_color(cairo_t *cr, const gdouble color[4])
+{
+    cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
+}
+
+static void mm_draw_stippled_hr(cairo_t *cr, double x, double y, double width,
+                                const gdouble color[4])
+{
+    double sx;
+
+    cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
+    for (sx = x; sx < x + width; sx += 3.0) {
+        cairo_rectangle(cr, sx, y, 1.0, 1.0);
+    }
+    cairo_fill(cr);
+}
+
+static char *mm_section_text(guint64 used, guint64 total)
+{
+    char *used_text = mm_format_kib(used);
+    char *total_text = mm_format_kib(total);
+    char *result = g_strdup_printf("%s\n%s", used_text, total_text);
+
+    g_free(total_text);
+    g_free(used_text);
+    return result;
+}
+
+static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
+{
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                           width, height);
+    cairo_t *cr = cairo_create(surface);
+    PangoFontDescription *font;
+    PangoLayout *layout;
+    guint64 ram_used, swap_used = 0;
+    char *ram_section = NULL;
+    char *swap_section = NULL;
+    char *text;
+    int detail_width = 0;
+    int graph_width;
+    double ram_x = MM_PAD;
+    double text_x;
+    int text_width;
+
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_rgba(cr, priv->background_color[0], priv->background_color[1],
+                          priv->background_color[2], priv->background_color[3]);
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    font = pango_font_description_from_string(priv->font);
+    layout = pango_cairo_create_layout(cr);
+    pango_layout_set_font_description(layout, font);
+    pango_font_description_free(font);
+
+    if (priv->sample.valid) {
+        int max_text_width;
+        int measured_width = 0;
+
+        ram_used = priv->sample.total_kib -
+                   MIN(priv->sample.available_kib, priv->sample.total_kib);
+        if (priv->sample.swap_total_kib > 0)
+            swap_used = priv->sample.swap_total_kib -
+                        MIN(priv->sample.swap_free_kib,
+                            priv->sample.swap_total_kib);
+        ram_section = mm_section_text(ram_used, priv->sample.total_kib);
+        swap_section = mm_section_text(swap_used, priv->sample.swap_total_kib);
+        max_text_width = MAX(1, width - 2 * (int)MM_PAD - 20 - 6);
+        pango_layout_set_width(layout, max_text_width * PANGO_SCALE);
+        pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+        pango_layout_set_text(layout, ram_section, -1);
+        pango_layout_get_pixel_size(layout, &measured_width, NULL);
+        detail_width = MAX(detail_width, measured_width);
+        pango_layout_set_text(layout, swap_section, -1);
+        pango_layout_get_pixel_size(layout, &measured_width, NULL);
+        detail_width = MAX(detail_width, measured_width);
+    }
+    graph_width = mm_graph_width(width, detail_width, (int)MM_PAD, 6);
+    text_x = ram_x + graph_width + 6.0;
+    text_width = MAX(1, width - (int)text_x - (int)MM_PAD);
+
+    if (!priv->sample.valid) {
+        pango_layout_set_text(layout, "Waiting for /proc/meminfo...", -1);
+        pango_layout_set_width(layout, text_width * PANGO_SCALE);
+        pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+        mm_set_text_color(cr, priv->text_color);
+        cairo_move_to(cr, MM_PAD, MM_PAD);
+        pango_cairo_show_layout(cr, layout);
+        goto done;
+    }
+
+    ram_used = priv->sample.total_kib -
+               MIN(priv->sample.available_kib, priv->sample.total_kib);
+    if (priv->sample.swap_total_kib > 0)
+        swap_used = priv->sample.swap_total_kib -
+                    MIN(priv->sample.swap_free_kib, priv->sample.swap_total_kib);
+
+    /* Both histories use all horizontal space left after the measured text. */
+    mm_draw_graph(cr, ram_x, 30.0, graph_width,
+                  priv->ram_graph_height, priv->ram_history, priv->ram_head,
+                  priv->ram_count, priv->ram_color, priv->border_color);
+    mm_draw_graph(cr, ram_x, 194.0, graph_width,
+                  priv->swap_graph_height, priv->swap_history, priv->swap_head,
+                  priv->swap_count, priv->swap_color, priv->border_color);
+
+    pango_layout_set_width(layout, width * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
+    pango_layout_set_text(layout, "Ram:", -1);
+    mm_set_text_color(cr, priv->text_color);
+    cairo_move_to(cr, MM_PAD, 4.0);
+    pango_cairo_show_layout(cr, layout);
+    text = g_strdup_printf("%.0f%%", mm_ram_fraction(&priv->sample) * 100.0);
+    pango_layout_set_text(layout, text, -1);
+    mm_set_text_color(cr, priv->ram_color);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    cairo_move_to(cr, 0.0, 4.0);
+    pango_cairo_show_layout(cr, layout);
+    g_free(text);
+
+    pango_layout_set_width(layout, text_width * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    pango_layout_set_text(layout, ram_section, -1);
+    mm_set_text_color(cr, priv->text_color);
+    cairo_move_to(cr, text_x, 34.0);
+    pango_cairo_show_layout(cr, layout);
+    {
+        int layout_height = 0;
+        int line_count = MAX(pango_layout_get_line_count(layout), 1);
+        int line_height;
+        pango_layout_get_pixel_size(layout, NULL, &layout_height);
+        line_height = MAX(layout_height / line_count, 1);
+        mm_draw_stippled_hr(cr, text_x, 34.0 + line_height - 1.0,
+                            text_width, priv->text_color);
+    }
+
+    pango_layout_set_width(layout, width * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
+    pango_layout_set_text(layout, "Swap:", -1);
+    mm_set_text_color(cr, priv->text_color);
+    cairo_move_to(cr, MM_PAD, 168.0);
+    pango_cairo_show_layout(cr, layout);
+    text = g_strdup_printf("%.0f%%", mm_swap_fraction(&priv->sample) * 100.0);
+    pango_layout_set_text(layout, text, -1);
+    mm_set_text_color(cr, priv->swap_color);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    cairo_move_to(cr, 0.0, 168.0);
+    pango_cairo_show_layout(cr, layout);
+    g_free(text);
+
+    pango_layout_set_width(layout, text_width * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    pango_layout_set_text(layout, swap_section, -1);
+    mm_set_text_color(cr, priv->text_color);
+    cairo_move_to(cr, text_x, 198.0);
+    pango_cairo_show_layout(cr, layout);
+    {
+        int layout_height = 0;
+        int line_count = MAX(pango_layout_get_line_count(layout), 1);
+        int line_height;
+        pango_layout_get_pixel_size(layout, NULL, &layout_height);
+        line_height = MAX(layout_height / line_count, 1);
+        mm_draw_stippled_hr(cr, text_x, 198.0 + line_height - 1.0,
+                            text_width, priv->text_color);
+    }
+
+done:
+    g_free(swap_section);
+    g_free(ram_section);
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    cairo_surface_mark_dirty(surface);
+    return surface;
+}
+
+static void mm_rebuild_cache(PrivData *priv)
+{
+    cairo_surface_t *replacement;
+
+    if (!priv->plugin->win)
+        return;
+    replacement = mm_render(priv, priv->cache_width, priv->cache_height);
+    if (priv->cache)
+        cairo_surface_destroy(priv->cache);
+    priv->cache = replacement;
+}
+
+static int mm_init(XsPlugin *p, GKeyFile *kf)
+{
+    PrivData *priv = g_new0(PrivData, 1);
+    int x, y;
+    gdouble opacity;
+
+    p->priv = priv;
+    priv->plugin = p;
+    priv->kf = kf;
+    priv->update_ms = (guint)CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                       "update_ms", 1000), 100, 60000);
+    priv->window_width = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                       "window_width", MM_DEFAULT_WINDOW_WIDTH),
+                               120, 1600);
+    priv->window_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                        "window_height", MM_DEFAULT_WINDOW_HEIGHT),
+                                320, 1200);
+    priv->ram_graph_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                           "ram_graph_height", MM_DEFAULT_RAM_HEIGHT),
+                                   40, 1000);
+    priv->swap_graph_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                           "swap_graph_height", MM_DEFAULT_SWAP_HEIGHT),
+                                    40, 1000);
+    priv->font = xs_host_api()->conf_str(kf, p->name, "font", MM_DEFAULT_FONT);
+    mm_read_color(priv, "background_color", mm_default_background, priv->background_color);
+    mm_read_color(priv, "text_color", mm_default_text, priv->text_color);
+    mm_read_color(priv, "border_color", mm_default_border, priv->border_color);
+    mm_read_color(priv, "ram_color", mm_default_ram, priv->ram_color);
+    mm_read_color(priv, "swap_color", mm_default_swap, priv->swap_color);
+
+    g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
+    g_key_file_set_integer(kf, p->name, "window_width", priv->window_width);
+    g_key_file_set_integer(kf, p->name, "window_height", priv->window_height);
+    g_key_file_set_integer(kf, p->name, "ram_graph_height", priv->ram_graph_height);
+    g_key_file_set_integer(kf, p->name, "swap_graph_height", priv->swap_graph_height);
+    if (!g_key_file_has_key(kf, p->name, "font", NULL))
+        g_key_file_set_string(kf, p->name, "font", priv->font);
+    xs_core_plugin_conf_flush(p->name);
+
+    x = xs_host_api()->conf_int(kf, p->name, "x", 80);
+    y = xs_host_api()->conf_int(kf, p->name, "y", 80);
+    opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
+    p->win = xs_host_api()->make_window(p, x, y, priv->window_width,
+                                        priv->window_height);
+    if (!p->win) {
+        p->host->log("memory_monitor: failed to create window");
+        g_free(priv->font);
+        g_free(priv);
+        p->priv = NULL;
+        return -1;
+    }
+    priv->cache_width = priv->window_width;
+    priv->cache_height = priv->window_height;
+    if (mm_read_meminfo(&priv->sample)) {
+        mm_push(priv->ram_history, &priv->ram_head, &priv->ram_count,
+                mm_ram_fraction(&priv->sample));
+        mm_push(priv->swap_history, &priv->swap_head, &priv->swap_count,
+                mm_swap_fraction(&priv->sample));
+    }
+    priv->cache = mm_render(priv, priv->cache_width, priv->cache_height);
+    xs_host_api()->set_opacity(p, CLAMP(opacity, 0.1, 1.0));
+    xs_host_api()->set_tick(p, priv->update_ms);
+    return 0;
+}
+
+static guint mm_tick(XsPlugin *p)
+{
+    PrivData *priv = p ? p->priv : NULL;
+
+    if (!priv || !p->win)
+        return 0;
+    if (mm_read_meminfo(&priv->sample)) {
+        mm_push(priv->ram_history, &priv->ram_head, &priv->ram_count,
+                mm_ram_fraction(&priv->sample));
+        mm_push(priv->swap_history, &priv->swap_head, &priv->swap_count,
+                mm_swap_fraction(&priv->sample));
+    }
+    mm_rebuild_cache(priv);
+    xs_host_api()->invalidate(p);
+    gtk_widget_queue_draw(p->win);
+    return priv->update_ms;
+}
+
+static void mm_draw(XsPlugin *p, cairo_t *cr, int w, int h)
+{
+    PrivData *priv = p ? p->priv : NULL;
+
+    if (!priv || !priv->cache)
+        return;
+    if (priv->cache_width != w || priv->cache_height != h) {
+        priv->cache_width = w;
+        priv->cache_height = h;
+        mm_rebuild_cache(priv);
+    }
+    cairo_set_source_surface(cr, priv->cache, 0, 0);
+    cairo_paint(cr);
+}
+
+static void mm_shutdown(XsPlugin *p)
+{
+    PrivData *priv = p ? p->priv : NULL;
+
+    if (!priv)
+        return;
+    if (priv->cache)
+        cairo_surface_destroy(priv->cache);
+    g_free(priv->font);
+    g_free(priv);
+    p->priv = NULL;
+}
+
+static void mm_int_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    const char *key;
+    int value;
+
+    if (!priv)
+        return;
+    key = g_object_get_data(G_OBJECT(spin), "xs-key");
+    value = (int)gtk_spin_button_get_value(spin);
+    if (strcmp(key, "update_ms") == 0) {
+        priv->update_ms = (guint)CLAMP(value, 100, 60000);
+        xs_host_api()->set_tick(p, priv->update_ms);
+    } else if (strcmp(key, "window_width") == 0)
+        priv->window_width = CLAMP(value, 120, 1600);
+    else if (strcmp(key, "window_height") == 0)
+        priv->window_height = CLAMP(value, 320, 1200);
+    else if (strcmp(key, "ram_graph_height") == 0)
+        priv->ram_graph_height = CLAMP(value, 40, 1000);
+    else
+        priv->swap_graph_height = CLAMP(value, 40, 1000);
+    g_key_file_set_integer(priv->kf, p->name, key, value);
+    xs_host_api()->resize(p, priv->window_width, priv->window_height);
+    priv->cache_width = priv->window_width;
+    priv->cache_height = priv->window_height;
+    mm_rebuild_cache(priv);
+    xs_core_plugin_conf_flush(p->name);
+    gtk_widget_queue_draw(p->win);
+}
+
+static void mm_font_set(GtkFontButton *button, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    const char *value;
+
+    if (!priv)
+        return;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    value = gtk_font_button_get_font_name(button);
+#pragma GCC diagnostic pop
+    g_free(priv->font);
+    priv->font = g_strdup(value ? value : MM_DEFAULT_FONT);
+    g_key_file_set_string(priv->kf, p->name, "font", priv->font);
+    mm_rebuild_cache(priv);
+    xs_core_plugin_conf_flush(p->name);
+    gtk_widget_queue_draw(p->win);
+}
+
+static void mm_color_set(GtkColorButton *button, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    const char *key;
+    gdouble *target;
+    GdkRGBA color;
+    char *value;
+
+    if (!priv)
+        return;
+    key = g_object_get_data(G_OBJECT(button), "xs-key");
+    if (strcmp(key, "background_color") == 0)
+        target = priv->background_color;
+    else if (strcmp(key, "text_color") == 0)
+        target = priv->text_color;
+    else if (strcmp(key, "border_color") == 0)
+        target = priv->border_color;
+    else if (strcmp(key, "ram_color") == 0)
+        target = priv->ram_color;
+    else
+        target = priv->swap_color;
+    gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(button), &color);
+    memcpy(target, &color.red, 3 * sizeof(gdouble));
+    target[3] = color.alpha;
+    value = mm_color_string(&color);
+    g_key_file_set_string(priv->kf, p->name, key, value);
+    g_free(value);
+    mm_rebuild_cache(priv);
+    xs_core_plugin_conf_flush(p->name);
+    gtk_widget_queue_draw(p->win);
+}
+
+static void mm_add_int(GtkWidget *page, XsPlugin *p, const char *key,
+                       const char *label, int value, int min, int max)
+{
+    GtkWidget *widget = xs_prop_add_int(GTK_BOX(page), label,
+                                        "Memory monitor setting", value,
+                                        min, max, 1);
+
+    g_object_set_data_full(G_OBJECT(widget), "xs-key", g_strdup(key), g_free);
+    g_signal_connect(widget, "value-changed", G_CALLBACK(mm_int_changed), p);
+}
+
+static void mm_add_color(GtkWidget *page, XsPlugin *p, const char *key,
+                         const char *label, const gdouble color[4])
+{
+    GtkWidget *widget = xs_prop_add_color(GTK_BOX(page), label,
+                                          "Memory monitor RGBA color", color[0],
+                                          color[1], color[2], color[3]);
+
+    g_object_set_data_full(G_OBJECT(widget), "xs-key", g_strdup(key), g_free);
+    g_signal_connect(widget, "color-set", G_CALLBACK(mm_color_set), p);
+}
+
+static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
+{
+    PrivData *priv = p ? p->priv : NULL;
+    GtkWidget *page;
+    GtkWidget *font;
+
+    if (!priv)
+        return;
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_container_set_border_width(GTK_CONTAINER(page), 10);
+    xs_prop_add_group_header(GTK_BOX(page),
+                             "RAM and swap histories are sampled from /proc/meminfo; each tick scrolls both graphs right-to-left.");
+    mm_add_int(page, p, "update_ms", "Update (ms)", priv->update_ms, 100, 60000);
+    mm_add_int(page, p, "window_width", "Window width", priv->window_width, 120, 1600);
+    mm_add_int(page, p, "window_height", "Window height", priv->window_height, 320, 1200);
+    mm_add_int(page, p, "ram_graph_height", "RAM graph height", priv->ram_graph_height, 40, 1000);
+    mm_add_int(page, p, "swap_graph_height", "Swap graph height", priv->swap_graph_height, 40, 1000);
+    font = xs_prop_add_font(GTK_BOX(page), "Font", "Monitor text font", priv->font);
+    g_signal_connect(font, "font-set", G_CALLBACK(mm_font_set), p);
+    mm_add_color(page, p, "background_color", "Background", priv->background_color);
+    mm_add_color(page, p, "text_color", "Text", priv->text_color);
+    mm_add_color(page, p, "border_color", "Graph border", priv->border_color);
+    mm_add_color(page, p, "ram_color", "RAM history", priv->ram_color);
+    mm_add_color(page, p, "swap_color", "Swap history", priv->swap_color);
+    gtk_notebook_append_page(notebook, page, gtk_label_new("Memory Monitor"));
+    gtk_widget_show_all(page);
+}
+
+static const XsPluginOps mm_ops = {
+    .init = mm_init,
+    .draw = mm_draw,
+    .tick = mm_tick,
+    .button = NULL,
+    .motion = NULL,
+    .shutdown = mm_shutdown,
+    .menu = NULL,
+    .menu_cmd = NULL,
+    .properties = mm_properties,
+    .fill_themes = NULL,
+    .scroll = NULL,
+    .enter = NULL,
+    .leave = NULL,
+    .guest_list_changed = NULL,
+};
+
+static XsPluginDesc mm_desc = {
+    "memory_monitor",
+    XS_API_VERSION,
+    &mm_ops,
+    "System RAM and swap monitor with independent scrolling histories",
+    "xscreenlets",
+    "1.0"
+};
+
+XS_PLUGIN_EXPORT(&mm_desc)
