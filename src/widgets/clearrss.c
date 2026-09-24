@@ -51,6 +51,7 @@ typedef struct {
     int window_width;
     int window_height;
     int news_count;
+    int visible_count;
     gboolean auto_news_count;
     int button_pressed;
     gboolean loading;
@@ -797,12 +798,10 @@ static int rss_font_size(const PrivData *priv)
 
 static int rss_header_height(PrivData *priv)
 {
-    int h = priv ? priv->window_height : RSS_H;
-
-    /* Градиент исходной темы заканчивается около y=100. При обычной
-     * высоте 200/500px резервируем этот участок полностью; на очень
-     * маленьком окне оставляем не больше половины высоты. */
-    return CLAMP(h / 2, 40, 100);
+    (void)priv;
+    /* Верхний визуальный блок SVG — rect высотой около 39px.
+     * Не используем h/2: это оставляло текст ниже невидимого запаса. */
+    return 40;
 }
 
 static int rss_control_height(const PrivData *priv)
@@ -930,15 +929,8 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         cairo_fill(cr);
     }
     if (xs_core_theme_has(p, "background")) {
-        /* Полный SVG рисуем только ниже фиксированной header-полосы.
-         * Наложение натуральной полосы поверх растянутого SVG оставляло
-         * серый градиент видимым сквозь прозрачные участки. */
-        /* Нижняя часть должна брать только низ исходного SVG
-         * (y=100..200), а не его начало. Иначе серый градиент из
-         * y=0..100 повторно попадает под header и выглядит как
-         * растянутый дубликат. Размер viewport увеличен вдвое, а
-         * начало сдвинуто вверх, чтобы source y=100 приходился на
-         * destination y=header, source y=200 — на destination y=h. */
+        /* Нижняя часть темы берётся только из исходного диапазона
+         * y=100..200, поэтому верхний серый градиент не дублируется. */
         cairo_save(cr);
         cairo_rectangle(cr, 0, rss_header_height(priv), w,
                         h - rss_header_height(priv));
@@ -948,7 +940,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             2 * (h - rss_header_height(priv)));
         cairo_restore(cr);
 
-        /* Верхнюю часть темы рисуем один раз в натуральном масштабе. */
+        /* Верхняя полоса рисуется один раз в натуральном масштабе. */
         cairo_save(cr);
         cairo_rectangle(cr, 0, 0, w, rss_header_height(priv));
         cairo_clip(cr);
@@ -1022,6 +1014,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     pango_layout_get_pixel_extents(layout, NULL, &logical);
     text_h = logical.height;
     priv->content_extent = text_h;
+    priv->visible_count = MAX(1, rss_display_count(priv, layout, text_h));
     cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
                           priv->text_color[2], priv->text_color[3]);
     cairo_save(cr);
@@ -1067,12 +1060,24 @@ controls:
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
                                CAIRO_FONT_WEIGHT_BOLD);
         cairo_set_font_size(cr, 11 + radius);
-        cairo_move_to(cr, x1 - radius, cy + radius / 2);
-        cairo_show_text(cr, "‹");
-        cairo_move_to(cr, x2 - radius / 2, cy + radius / 2);
-        cairo_show_text(cr, "·");
-        cairo_move_to(cr, x3 - radius / 2, cy + radius / 2);
-        cairo_show_text(cr, "›");
+        {
+            cairo_text_extents_t ext;
+            const char *glyph = "‹";
+            cairo_text_extents(cr, glyph, &ext);
+            cairo_move_to(cr, x1 - ext.width / 2.0,
+                          cy - ext.height / 2.0 - ext.y_bearing);
+            cairo_show_text(cr, glyph);
+            glyph = "·";
+            cairo_text_extents(cr, glyph, &ext);
+            cairo_move_to(cr, x2 - ext.width / 2.0,
+                          cy - ext.height / 2.0 - ext.y_bearing);
+            cairo_show_text(cr, glyph);
+            glyph = "›";
+            cairo_text_extents(cr, glyph, &ext);
+            cairo_move_to(cr, x3 - ext.width / 2.0,
+                          cy - ext.height / 2.0 - ext.y_bearing);
+            cairo_show_text(cr, glyph);
+        }
     }
     cairo_restore(cr);
 }
@@ -1104,6 +1109,8 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
             else if (x >= allocation.width - 26 - radius &&
                      x <= allocation.width - 26 + radius)
                 priv->button_pressed = 3;
+            xs_host_api()->log("clearrss: button press at %.1f,%.1f -> %d",
+                               x, y, priv->button_pressed);
         }
         if (priv->button_pressed)
             gtk_widget_queue_draw(p->win);
@@ -1112,6 +1119,7 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
     if (ev->type == GDK_BUTTON_RELEASE) {
         int button = priv->button_pressed;
         priv->button_pressed = 0;
+        xs_host_api()->log("clearrss: button release at %.1f,%.1f", x, y);
         if (!button)
             return FALSE;
         if (button == 1)
@@ -1132,12 +1140,17 @@ static void rss_scroll_by(XsPlugin *p, int delta)
 {
     PrivData *priv = p ? p->priv : NULL;
     int max;
+    gboolean changed;
 
     if (!priv)
         return;
     max = MAX(0, priv->content_extent - rss_viewport_height(p));
+    changed = priv->scroll_px != CLAMP(priv->scroll_px + delta, 0, max);
     priv->scroll_px = CLAMP(priv->scroll_px + delta, 0, max);
-    if (p->win)
+    xs_host_api()->log("clearrss: scroll %d -> %d (max=%d, visible=%d)",
+                       priv->scroll_px - delta, priv->scroll_px, max,
+                       priv->visible_count);
+    if (changed && p->win)
         gtk_widget_queue_draw(p->win);
 }
 
