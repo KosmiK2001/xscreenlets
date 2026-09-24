@@ -1821,6 +1821,55 @@ static GtkWidget *rss_header_align_buttons(XsPlugin *p, PrivData *priv)
     return box;
 }
 
+static GtkWidget *rss_header_font_color_row(XsPlugin *p, PrivData *priv)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *label = gtk_label_new("Header");
+    GtkWidget *font;
+    GtkWidget *spacer;
+    GtkWidget *color;
+    GdkRGBA rgba = {
+        priv->header_color[0], priv->header_color[1],
+        priv->header_color[2], priv->header_color[3]
+    };
+
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_size_request(label, 180, 28);
+    gtk_box_pack_start(GTK_BOX(row), label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row),
+                       gtk_separator_new(GTK_ORIENTATION_VERTICAL),
+                       FALSE, TRUE, 5);
+    gtk_widget_set_size_request(row, -1, 28);
+    gtk_widget_set_hexpand(row, TRUE);
+
+    font = gtk_font_button_new();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    if (priv->header_font)
+        gtk_font_button_set_font_name(GTK_FONT_BUTTON(font), priv->header_font);
+#pragma GCC diagnostic pop
+    gtk_widget_set_tooltip_text(font, "Header font and size");
+    gtk_widget_set_halign(font, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(row), font, FALSE, TRUE, 0);
+    g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("header_font"),
+                           g_free);
+    g_signal_connect(font, "font-set", G_CALLBACK(rss_font_set), p);
+
+    spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_pack_start(GTK_BOX(row), spacer, TRUE, TRUE, 0);
+
+    color = gtk_color_button_new_with_rgba(&rgba);
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
+    gtk_widget_set_tooltip_text(color, "Header color");
+    gtk_widget_set_halign(color, GTK_ALIGN_END);
+    gtk_box_pack_start(GTK_BOX(row), color, FALSE, TRUE, 0);
+    g_object_set_data_full(G_OBJECT(color), "xs-key", g_strdup("header_color"),
+                           g_free);
+    g_signal_connect(color, "color-set", G_CALLBACK(rss_color_set), p);
+    return row;
+}
+
 static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -1961,12 +2010,9 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         w = xs_prop_add_bool(GTK_BOX(header_box), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
         g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
-        w = xs_prop_add_font(GTK_BOX(header_box), "Header Font", "Feed-header font", priv->header_font);
-        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("header_font"), g_free);
-        g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
-        w = xs_prop_add_color(GTK_BOX(header_box), "Header color", "Feed-header color", priv->header_color[0], priv->header_color[1], priv->header_color[2], priv->header_color[3]);
-        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("header_color"), g_free);
-        g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
+        gtk_box_pack_start(GTK_BOX(header_box),
+                           rss_header_font_color_row(p, priv),
+                           FALSE, FALSE, 0);
         w = rss_header_align_buttons(p, priv);
         w = xs_prop_add_row(GTK_BOX(header_box), "Header align", "Header alignment", w);
         gtk_box_pack_start(GTK_BOX(page), header_frame, FALSE, FALSE, 0);
