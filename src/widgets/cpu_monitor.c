@@ -34,6 +34,7 @@
 #define CM_DEFAULT_WINDOW_WIDTH 200
 #define CM_DEFAULT_WINDOW_HEIGHT 152
 #define CM_TEXT_PADDING 2.0
+#define CM_CORE_MARGIN 2.0
 #define CM_HISTORY_MIN_POINTS 1
 #define CM_HISTORY_MAX_POINTS 4096
 #define CM_LOAD_COMPONENTS 4
@@ -712,10 +713,12 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         double cell_right = (double)width * (col + 1) / MAX(priv->columns, 1);
         double cell_top = (double)height * row / MAX(priv->rows, 1);
         double cell_bottom = (double)height * (row + 1) / MAX(priv->rows, 1);
-        double x = cell_left + 1.0;
-        double y = cell_top + 1.0;
-        double block_w = cell_right - cell_left - 2.0;
-        double content_h = MAX(1.0, cell_bottom - cell_top - 2.0);
+        double x = cell_left + 1.0 + CM_CORE_MARGIN;
+        double y = cell_top + 1.0 + CM_CORE_MARGIN;
+        double block_w = MAX(1.0, cell_right - cell_left -
+                                      2.0 - 2.0 * CM_CORE_MARGIN);
+        double content_h = MAX(1.0, cell_bottom - cell_top -
+                                         2.0 - 2.0 * CM_CORE_MARGIN);
         double text_y;
         int text_height;
         char *text;
