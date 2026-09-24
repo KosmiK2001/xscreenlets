@@ -122,7 +122,7 @@ static void rss_job_free(FetchJob *job);
 static void rss_request_set_stop(RequestSet *set);
 static gboolean rss_finish_fetch(gpointer data);
 static void rss_request_refresh(XsPlugin *p, gboolean force);
-static void rss_scroll_by(XsPlugin *p, int delta);
+static void rss_scroll_by(XsPlugin *p, int delta, gboolean page_when_fit);
 static int rss_viewport_height(XsPlugin *p);
 static int rss_display_count(PrivData *priv, PangoLayout *layout, int height);
 static gboolean rss_display_entries(PrivData *priv);
@@ -996,8 +996,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         goto controls;
     }
     first = CLAMP(priv->feed_number, 0,
-                  (int)priv->entries->len - rss_display_count(priv, layout, h));
-    entry_count = rss_display_count(priv, layout, h);
+                  (int)priv->entries->len - entry_count);
     all = g_string_new(NULL);
     for (i = 0; i < entry_count; i++) {
         entry = g_ptr_array_index(priv->entries, first + i);
@@ -1014,13 +1013,17 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     pango_layout_get_pixel_extents(layout, NULL, &logical);
     text_h = logical.height;
     priv->content_extent = text_h;
-    priv->visible_count = MAX(1, rss_display_count(priv, layout, text_h));
+    priv->visible_count = entry_count;
     cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
                           priv->text_color[2], priv->text_color[3]);
+    int content_top = header_h + 3;
+    int content_bottom = h - rss_control_height(priv) - 3;
+
     cairo_save(cr);
-    cairo_rectangle(cr, 7, 7 + header_h, w - 14, viewport_h);
+    cairo_rectangle(cr, 7, content_top, w - 14,
+                    MAX(24, content_bottom - content_top));
     cairo_clip(cr);
-    cairo_move_to(cr, 10, 10 + header_h - priv->scroll_px);
+    cairo_move_to(cr, 10, content_top - logical.y - priv->scroll_px);
     pango_cairo_show_layout(cr, layout);
     cairo_restore(cr);
     g_object_unref(layout);
@@ -1123,44 +1126,62 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
         if (!button)
             return FALSE;
         if (button == 1)
-            rss_scroll_by(p, -170);
+            rss_scroll_by(p, -170, TRUE);
         else if (button == 2) {
             priv->scroll_px = 0;
             if (p->win)
                 gtk_widget_queue_draw(p->win);
         } else {
-            rss_scroll_by(p, 170);
+            rss_scroll_by(p, 170, TRUE);
         }
         return TRUE;
     }
     return FALSE;
 }
 
-static void rss_scroll_by(XsPlugin *p, int delta)
+static void rss_scroll_by(XsPlugin *p, int delta, gboolean page_when_fit)
 {
     PrivData *priv = p ? p->priv : NULL;
     int max;
+    int old_scroll;
+    int old_feed;
+    int page;
     gboolean changed;
 
     if (!priv)
         return;
     max = MAX(0, priv->content_extent - rss_viewport_height(p));
-    changed = priv->scroll_px != CLAMP(priv->scroll_px + delta, 0, max);
-    priv->scroll_px = CLAMP(priv->scroll_px + delta, 0, max);
-    xs_host_api()->log("clearrss: scroll %d -> %d (max=%d, visible=%d)",
-                       priv->scroll_px - delta, priv->scroll_px, max,
-                       priv->visible_count);
+    if (max > 0) {
+        old_scroll = priv->scroll_px;
+        priv->scroll_px = CLAMP(priv->scroll_px + delta, 0, max);
+        changed = priv->scroll_px != old_scroll;
+        xs_host_api()->log("clearrss: scroll %d -> %d (max=%d, visible=%d)",
+                           old_scroll, priv->scroll_px, max,
+                           priv->visible_count);
+    } else if (page_when_fit) {
+        page = MAX(1, priv->visible_count);
+        old_feed = priv->feed_number;
+        priv->feed_number = CLAMP(old_feed + (delta > 0 ? page : -page),
+                                   0, MAX(0, (priv->entries ?
+                                              (int)priv->entries->len - 1 : 0)));
+        changed = priv->feed_number != old_feed;
+        xs_host_api()->log("clearrss: page %d -> %d (page=%d, entries=%u)",
+                           old_feed, priv->feed_number, page,
+                           priv->entries ? priv->entries->len : 0);
+    } else {
+        return;
+    }
     if (changed && p->win)
         gtk_widget_queue_draw(p->win);
 }
 
 static gboolean rss_scroll(XsPlugin *p, GdkEventScroll *ev)
 {
-    if (ev->direction == GDK_SCROLL_UP) rss_scroll_by(p, -60);
-    else if (ev->direction == GDK_SCROLL_DOWN) rss_scroll_by(p, 60);
+    if (ev->direction == GDK_SCROLL_UP) rss_scroll_by(p, -60, FALSE);
+    else if (ev->direction == GDK_SCROLL_DOWN) rss_scroll_by(p, 60, FALSE);
     else if (ev->direction == GDK_SCROLL_SMOOTH) {
-        if (ev->delta_y < 0) rss_scroll_by(p, -60);
-        else if (ev->delta_y > 0) rss_scroll_by(p, 60);
+        if (ev->delta_y < 0) rss_scroll_by(p, -60, FALSE);
+        else if (ev->delta_y > 0) rss_scroll_by(p, 60, FALSE);
     } else return FALSE;
     return TRUE;
 }
