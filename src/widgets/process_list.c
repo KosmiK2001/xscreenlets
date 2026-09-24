@@ -698,11 +698,13 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
 
             if (!left)
                 x += columns.width[i] - text_width;
+            cairo_save(cr);
             cairo_set_source_rgba(cr, 0.20, 0.85, 0.35, 1.0);
             cairo_set_line_width(cr, 1.0);
             cairo_rectangle(cr, x - 1.5, floor(PL_HEADER_Y) - 2.5,
                             text_width + 6.0, pl_text_height(layout) + 4.0);
             cairo_stroke(cr);
+            cairo_restore(cr);
         }
     }
 
