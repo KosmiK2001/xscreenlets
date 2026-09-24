@@ -947,6 +947,20 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
     pango_layout_set_spacing(layout, 1 * PANGO_SCALE);
     entry_count = rss_display_count(priv, layout, h);
+    if (priv->show_feed_name) {
+        char *feed = priv->feed_name ? priv->feed_name : "RSS";
+        char *heading = g_markup_escape_text(feed, -1);
+        cairo_save(cr);
+        cairo_rectangle(cr, 7, 7, w - 14, rss_header_height(priv));
+        cairo_clip(cr);
+        pango_layout_set_markup(layout, heading, -1);
+        cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
+                              priv->text_color[2], priv->text_color[3]);
+        cairo_move_to(cr, 10, 10);
+        pango_cairo_show_layout(cr, layout);
+        cairo_restore(cr);
+        g_free(heading);
+    }
 
     if (!priv->loading && priv->status && priv->status->len &&
         (!priv->entries || !priv->entries->len)) {
@@ -1028,9 +1042,9 @@ controls:
     {
         int radius = rss_button_radius(priv);
         int cy = h - 10 - radius;
-        int x1 = w - 58;
-        int x2 = w - 38;
-        int x3 = w - 18;
+        int x1 = w - 90;
+        int x2 = w - 58;
+        int x3 = w - 26;
         cairo_set_line_width(cr, 1.2);
         cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
         cairo_arc(cr, x1, cy, radius, 0, 2 * RSS_PI);
