@@ -7,6 +7,7 @@
 #include <gtk/gtk.h>
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <gdk/gdk.h>
 #include <pango/pangocairo.h>
 #include <libsoup/soup.h>
 #include <libxml/parser.h>
@@ -1820,6 +1821,50 @@ static GtkWidget *rss_header_align_buttons(XsPlugin *p, PrivData *priv)
     return box;
 }
 
+static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *label = gtk_label_new("Time");
+    GtkWidget *font;
+    GtkWidget *color;
+    GdkRGBA rgba = {
+        priv->time_color[0], priv->time_color[1],
+        priv->time_color[2], priv->time_color[3]
+    };
+
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_size_request(label, 180, 28);
+    gtk_box_pack_start(GTK_BOX(row), label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row),
+                       gtk_separator_new(GTK_ORIENTATION_VERTICAL),
+                       FALSE, TRUE, 5);
+    gtk_widget_set_size_request(row, -1, 28);
+    gtk_widget_set_hexpand(row, TRUE);
+
+    font = gtk_font_button_new();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    if (priv->time_font)
+        gtk_font_button_set_font_name(GTK_FONT_BUTTON(font), priv->time_font);
+#pragma GCC diagnostic pop
+    gtk_widget_set_tooltip_text(font, "Published-time font and size");
+    gtk_widget_set_halign(font, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(row), font, FALSE, TRUE, 0);
+    g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("time_font"),
+                           g_free);
+    g_signal_connect(font, "font-set", G_CALLBACK(rss_font_set), p);
+
+    color = gtk_color_button_new_with_rgba(&rgba);
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
+    gtk_widget_set_tooltip_text(color, "Published-time color");
+    gtk_widget_set_halign(color, GTK_ALIGN_END);
+    gtk_box_pack_start(GTK_BOX(row), color, FALSE, TRUE, 0);
+    g_object_set_data_full(G_OBJECT(color), "xs-key", g_strdup("time_color"),
+                           g_free);
+    g_signal_connect(color, "color-set", G_CALLBACK(rss_color_set), p);
+    return row;
+}
+
 static void rss_properties(XsPlugin *p, GtkNotebook *nb)
 {
     PrivData *priv = p ? p->priv : NULL;
@@ -1882,12 +1927,8 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         w = xs_prop_add_bool(GTK_BOX(text_box), "Show published time", "Show HH:MM:SS before each news title", priv->show_published_time);
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_published_time"), g_free);
         g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
-        w = xs_prop_add_font(GTK_BOX(text_box), "Time Font", "Published-time font", priv->time_font);
-        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_font"), g_free);
-        g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
-        w = xs_prop_add_color(GTK_BOX(text_box), "Time Color", "Published-time color", priv->time_color[0], priv->time_color[1], priv->time_color[2], priv->time_color[3]);
-        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_color"), g_free);
-        g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
+        gtk_box_pack_start(GTK_BOX(text_box), rss_time_settings_row(p, priv),
+                           FALSE, FALSE, 0);
         gtk_box_pack_start(GTK_BOX(text_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 3);
         w = xs_prop_add_font(GTK_BOX(text_box), "Text Font", "Text font", priv->text_font);
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("font"), g_free);
