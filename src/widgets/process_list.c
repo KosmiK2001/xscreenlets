@@ -6,6 +6,7 @@
 #include <pango/pangocairo.h>
 #include <cairo.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
 #include <string.h>
@@ -33,6 +34,7 @@
 #define PL_TITLE_Y             3.0
 #define PL_HEADER_Y           21.0
 #define PL_ROWS_Y             36.0
+#define PL_PROC_READ_SIZE     8192
 
 typedef struct {
     gint pid;
@@ -90,6 +92,8 @@ typedef struct {
     guint process_count;
     guint running_count;
     gint64 last_sample_us;
+    int proc_fd;
+    char *read_buffer;
 } PrivData;
 
 static const gdouble pl_background_default[4] = {
@@ -227,14 +231,51 @@ static gboolean pl_parse_status(const char *text, gint64 *rss_kb,
     return found_rss;
 }
 
-static gboolean pl_read_io(const gint pid, guint64 *read_bytes,
-                           guint64 *write_bytes)
+static gboolean pl_read_proc(PrivData *priv, const char *relative,
+                             char **data)
 {
-    g_autofree char *path = g_strdup_printf("/proc/%d/io", pid);
-    g_autofree char *text = NULL;
+    int fd;
+    gsize used = 0;
+
+    if (priv->proc_fd < 0)
+        return FALSE;
+    fd = openat(priv->proc_fd, relative, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return FALSE;
+    for (;;) {
+        gssize n;
+
+        if (used + 1 >= PL_PROC_READ_SIZE) {
+            close(fd);
+            return FALSE;
+        }
+        n = read(fd, priv->read_buffer + used,
+                 PL_PROC_READ_SIZE - used - 1);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            close(fd);
+            return FALSE;
+        }
+        if (n == 0)
+            break;
+        used += (gsize)n;
+    }
+    close(fd);
+    priv->read_buffer[used] = '\0';
+    *data = priv->read_buffer;
+    return TRUE;
+}
+
+static gboolean pl_read_io(PrivData *priv, gint pid,
+                           guint64 *read_bytes, guint64 *write_bytes)
+{
+    char relative[64];
+    char *text = NULL;
     g_auto(GStrv) lines = NULL;
 
-    if (!g_file_get_contents(path, &text, NULL, NULL))
+    g_snprintf(relative, sizeof(relative), "%d/io", pid);
+    if (!pl_read_proc(priv, relative, &text))
         return FALSE;
     lines = g_strsplit(text, "\n", -1);
     for (guint i = 0; lines[i]; i++) {
@@ -256,12 +297,12 @@ static gboolean pl_read_io(const gint pid, guint64 *read_bytes,
     return *read_bytes != G_MAXUINT64 && *write_bytes != G_MAXUINT64;
 }
 
-static PlProcess *pl_read_pid(const char *pid_text, gboolean *running)
+static PlProcess *pl_read_pid(PrivData *priv, const char *pid_text,
+                              gboolean *running)
 {
-    g_autofree char *stat_path = NULL;
-    g_autofree char *status_path = NULL;
-    g_autofree char *stat_data = NULL;
-    g_autofree char *status_data = NULL;
+    char relative[64];
+    char *stat_data;
+    char *status_data;
     g_autofree char *name = NULL;
     const char *open_paren;
     const char *close_paren;
@@ -278,12 +319,9 @@ static PlProcess *pl_read_pid(const char *pid_text, gboolean *running)
     if (!g_ascii_isdigit(pid_text[0]) || !pl_number(pid_text, &pid) ||
         pid > G_MAXINT)
         return NULL;
-    stat_path = g_strdup_printf("/proc/%d/stat", (gint)pid);
-    status_path = g_strdup_printf("/proc/%d/status", (gint)pid);
-    if (!g_file_get_contents(stat_path, &stat_data, NULL, NULL) ||
-        !g_file_get_contents(status_path, &status_data, NULL, NULL))
+    g_snprintf(relative, sizeof(relative), "%d/stat", (gint)pid);
+    if (!pl_read_proc(priv, relative, &stat_data))
         return NULL;
-
     open_paren = strchr(stat_data, '(');
     close_paren = open_paren ? strrchr(open_paren, ')') : NULL;
     if (!open_paren || !close_paren)
@@ -299,6 +337,9 @@ static PlProcess *pl_read_pid(const char *pid_text, gboolean *running)
         return NULL;
     }
     g_strfreev(fields);
+    g_snprintf(relative, sizeof(relative), "%d/status", (gint)pid);
+    if (!pl_read_proc(priv, relative, &status_data))
+        return NULL;
     pl_parse_status(status_data, &rss_kb, &is_running);
 
     proc = g_new0(PlProcess, 1);
@@ -307,7 +348,7 @@ static PlProcess *pl_read_pid(const char *pid_text, gboolean *running)
     proc->start_time = start_time;
     proc->disk_read_bytes = G_MAXUINT64;
     proc->disk_write_bytes = G_MAXUINT64;
-    (void)pl_read_io(proc->pid, &proc->disk_read_bytes,
+    (void)pl_read_io(priv, proc->pid, &proc->disk_read_bytes,
                      &proc->disk_write_bytes);
     proc->rss_bytes = rss_kb > 0 &&
                       rss_kb <= G_MAXINT64 / 1024 ?
@@ -444,7 +485,7 @@ static void pl_sample(PrivData *priv)
 
             if (!g_ascii_isdigit(entry[0]))
                 continue;
-            proc = pl_read_pid(entry, &running);
+            proc = pl_read_pid(priv, entry, &running);
             if (!proc)
                 continue;
             priv->process_count++;
@@ -1151,6 +1192,12 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
 
     priv->plugin = plugin;
     priv->kf = kf;
+    priv->proc_fd = open("/proc", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (priv->proc_fd < 0) {
+        g_free(priv);
+        return -1;
+    }
+    priv->read_buffer = g_malloc(PL_PROC_READ_SIZE);
     priv->update_ms = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "update_ms", PL_UPDATE_DEFAULT), 100, 60000);
     priv->row_count = CLAMP(xs_host_api()->conf_int(
@@ -1225,6 +1272,8 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
         g_ptr_array_unref(priv->rows);
         g_free(priv->title_font);
         g_free(priv->row_font);
+        g_free(priv->read_buffer);
+        close(priv->proc_fd);
         g_free(priv);
         plugin->priv = NULL;
         return -1;
@@ -1249,6 +1298,9 @@ static void pl_shutdown(XsPlugin *plugin)
     g_ptr_array_unref(priv->rows);
     g_free(priv->title_font);
     g_free(priv->row_font);
+    g_free(priv->read_buffer);
+    if (priv->proc_fd >= 0)
+        close(priv->proc_fd);
     g_free(priv);
     plugin->priv = NULL;
 }
