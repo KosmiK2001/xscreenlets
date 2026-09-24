@@ -36,7 +36,7 @@ typedef struct {
     guint64 disk_write_bytes;
     gint64 rss_kb;
     gint mem_permille;               /* 1000 = 100.0 percent */
-    gint cpu_milli;                 /* 100 = one CPU core at 100 percent */
+    gint cpu_tenths;                 /* 100 = one CPU core at 100 percent */
     gint64 io_bytes_per_sec;
     gboolean running;
     char name[PL_NAME_MAX];
@@ -326,8 +326,8 @@ static gint pl_compare(gconstpointer a, gconstpointer b)
     const PlProcess *pa = *(PlProcess * const *)a;
     const PlProcess *pb = *(PlProcess * const *)b;
 
-    if (pa->cpu_milli != pb->cpu_milli)
-        return pa->cpu_milli < pb->cpu_milli ? 1 : -1;
+    if (pa->cpu_tenths != pb->cpu_tenths)
+        return pa->cpu_tenths < pb->cpu_tenths ? 1 : -1;
     if (pa->pid != pb->pid)
         return pa->pid < pb->pid ? -1 : 1;
     return 0;
@@ -409,14 +409,14 @@ static void pl_sample(PrivData *priv)
         if (old && old->start_time == proc->start_time) {
             if (proc->cpu_ticks >= old->cpu_ticks) {
                 guint64 delta = proc->cpu_ticks - old->cpu_ticks;
-                /* cpu_milli: 1000 = 100.0% of one logical thread.
-                 * elapsed_us is microseconds; CPU ticks are CLK_TCK units. */
-                gdouble milli = 100.0 * (gdouble)delta * 1000000.0 /
+                /* cpu_tenths is 1000 = 100.0% of one logical thread.
+                 * CPU ticks are CLK_TCK units; elapsed_us is microseconds. */
+                gdouble tenths = 100.0 * (gdouble)delta * 10000000.0 /
                                 ((gdouble)ticks_per_second *
                                  (gdouble)elapsed_us);
                 if (priv->cpu_basis == 1)
-                    milli /= (gdouble)pl_online_cpu_count();
-                proc->cpu_milli = (gint)CLAMP((gint64)(milli + 0.5),
+                    tenths /= (gdouble)pl_online_cpu_count();
+                proc->cpu_tenths = (gint)CLAMP((gint64)(tenths + 0.5),
                                                (gint64)0, (gint64)G_MAXINT);
             }
             if (proc->disk_read_bytes != G_MAXUINT64 &&
@@ -598,7 +598,7 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         g_snprintf(pid_text, sizeof(pid_text), "%d", proc->pid);
         pl_show_column(layout, cr, pid_text, pid_right, y, 58.0, FALSE);
         g_snprintf(cpu_text, sizeof(cpu_text), "%.1f%%",
-                   proc->cpu_milli / 100.0);
+                   proc->cpu_tenths / 10.0);
         pl_show_column(layout, cr, cpu_text, cpu_right, y, 46.0, FALSE);
         g_snprintf(mem_text, sizeof(mem_text), "%.1f",
                    proc->mem_permille / 100.0);
