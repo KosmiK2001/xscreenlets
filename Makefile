@@ -16,6 +16,7 @@ TARGET_CAL_PLUGIN = $(BUILD_DIR)/calendar.so
 TARGET_LAU_PLUGIN = $(BUILD_DIR)/launcher.so
 TARGET_FL_PLUGIN = $(BUILD_DIR)/frame_launcher.so
 TARGET_RSS_PLUGIN = $(BUILD_DIR)/clearrss.so
+TARGET_CPU_PLUGIN = $(BUILD_DIR)/cpu_monitor.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
 SRC_COMMON = src/core/common.c
@@ -41,7 +42,7 @@ OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_STANDALONE)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -63,6 +64,9 @@ $(TARGET_FL_PLUGIN): $(BUILD_DIR) $(OBJS_FL)
 
 $(TARGET_RSS_PLUGIN): $(BUILD_DIR) $(OBJS_RSS)
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_RSS) $(LDFLAGS_RSS_PLUGIN)
+
+$(TARGET_CPU_PLUGIN): $(BUILD_DIR) build/cpu_monitor.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/cpu_monitor.o $(LDFLAGS_PLUGIN)
 
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
@@ -86,8 +90,10 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_LAU_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/launcher.so
 	$(INSTALL) -m 0755 $(TARGET_FL_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/frame_launcher.so
 	$(INSTALL) -m 0755 $(TARGET_RSS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/clearrss.so
+	$(INSTALL) -m 0755 $(TARGET_CPU_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/cpu_monitor.so
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
 	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg
+	$(INSTALL) -m 0644 icons/cpu_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/cpu_monitor.svg
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple
 	$(INSTALL) -m 0644 themes/clearrss/default/background.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default/background.svg
