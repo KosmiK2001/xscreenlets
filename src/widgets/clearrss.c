@@ -1824,8 +1824,9 @@ static GtkWidget *rss_header_align_buttons(XsPlugin *p, PrivData *priv)
 static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *label = gtk_label_new("Time");
+    GtkWidget *label = gtk_label_new("Header");
     GtkWidget *font;
+    GtkWidget *spacer;
     GtkWidget *color;
     GdkRGBA rgba = {
         priv->time_color[0], priv->time_color[1],
@@ -1853,6 +1854,10 @@ static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
     g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("time_font"),
                            g_free);
     g_signal_connect(font, "font-set", G_CALLBACK(rss_font_set), p);
+
+    spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_pack_start(GTK_BOX(row), spacer, TRUE, TRUE, 0);
 
     color = gtk_color_button_new_with_rgba(&rgba);
     gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
