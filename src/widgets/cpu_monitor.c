@@ -99,6 +99,8 @@ static const gdouble cm_color_nice[4] = {0.95, 0.75, 0.18, 1.0};
 static const gdouble cm_color_io[4] = {0.80, 0.24, 0.24, 1.0};
 static GHashTable *cm_socket_claims;
 
+static gint cm_read_int_file(const char *path, gint *value);
+
 static gboolean cm_parse_color(const char *text, gdouble out[4])
 {
     const char *p = text;
@@ -159,6 +161,61 @@ static void cm_read_color(PrivData *priv, const char *key,
                                     priv->plugin->name, key);
     }
     g_free(s);
+}
+
+static gboolean cm_package_in_array(const GArray *packages, gint package)
+{
+    guint i;
+
+    for (i = 0; i < packages->len; i++)
+        if (g_array_index(packages, gint, i) == package)
+            return TRUE;
+    return FALSE;
+}
+
+static gint cm_next_free_socket(void)
+{
+    GDir *dir;
+    const gchar *entry;
+    GArray *packages;
+    guint i;
+    gint result = -1;
+
+    if (!cm_socket_claims)
+        return 0;
+    packages = g_array_new(FALSE, FALSE, sizeof(gint));
+    dir = g_dir_open(CM_SYS_CPU_DIR, 0, NULL);
+    if (dir) {
+        while ((entry = g_dir_read_name(dir)) != NULL) {
+            gint package;
+            char *cpu_name;
+            char *package_path;
+
+            if (!g_str_has_prefix(entry, "cpu") ||
+                !g_ascii_isdigit(entry[3]))
+                continue;
+            cpu_name = g_strdup(entry);
+            package_path = g_build_filename(CM_SYS_CPU_DIR, cpu_name,
+                                            "topology",
+                                            "physical_package_id", NULL);
+            if (cm_read_int_file(package_path, &package) &&
+                !cm_package_in_array(packages, package))
+                g_array_append_val(packages, package);
+            g_free(package_path);
+            g_free(cpu_name);
+        }
+        g_dir_close(dir);
+    }
+    for (i = 0; i < packages->len; i++) {
+        gint package = g_array_index(packages, gint, i);
+        if (!g_hash_table_lookup(cm_socket_claims,
+                                 GINT_TO_POINTER(package))) {
+            result = package;
+            break;
+        }
+    }
+    g_array_unref(packages);
+    return result;
 }
 
 static gint cm_read_int_file(const char *path, gint *value)
@@ -785,6 +842,8 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
     int x = xs_host_api()->conf_int(kf, p->name, "x", 80);
     int y = xs_host_api()->conf_int(kf, p->name, "y", 80);
     gdouble opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
+    gboolean has_socket_key = g_key_file_has_key(kf, p->name,
+                                                   "socket_id", NULL);
     int width, height;
 
     p->priv = priv;
@@ -826,6 +885,11 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
     xs_core_plugin_conf_flush(p->name);
     if (!cm_socket_claims)
         cm_socket_claims = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (!has_socket_key) {
+        gint free_socket = cm_next_free_socket();
+        if (free_socket >= 0)
+            priv->socket_id = free_socket;
+    }
     gpointer old_owner = g_hash_table_lookup(cm_socket_claims,
                                               GINT_TO_POINTER(priv->socket_id));
     if (old_owner && old_owner != p) {
