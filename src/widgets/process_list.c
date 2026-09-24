@@ -17,7 +17,7 @@
 
 #define PL_TITLE_FONT_DEFAULT "Ubuntu 8"
 #define PL_ROW_FONT_DEFAULT   "Verdana 7"
-#define PL_WIDTH_DEFAULT      236
+#define PL_WIDTH_DEFAULT      240
 #define PL_HEIGHT_DEFAULT     164
 #define PL_UPDATE_DEFAULT     1000
 #define PL_ROWS_DEFAULT       8
@@ -444,10 +444,15 @@ static double pl_text_height(PangoLayout *layout)
     return height;
 }
 
-static void pl_show_right(PangoLayout *layout, cairo_t *cr, double right,
-                          double y)
+static void pl_show_column(PangoLayout *layout, cairo_t *cr,
+                           const char *text, double right, double y,
+                           double column_width)
 {
-    cairo_move_to(cr, right - pl_text_width(layout), y);
+    pango_layout_set_text(layout, text, -1);
+    pango_layout_set_width(layout, (int)(column_width * PANGO_SCALE));
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    cairo_move_to(cr, right - column_width, y);
     pango_cairo_show_layout(cr, layout);
 }
 
@@ -486,11 +491,12 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     PangoFontDescription *title_font = pl_font(priv->title_font);
     PangoFontDescription *row_font = pl_font(priv->row_font);
     double right = width - PL_PADDING;
-    double mem_right = right - 38.0;
-    double io_right = mem_right - 42.0;
-    double cpu_right = io_right - 28.0;
-    double pid_right = cpu_right - 32.0;
-    double name_right = pid_right - 34.0;
+    double io_right = right;
+    double mem_right = io_right - 42.0;
+    double cpu_right = mem_right - 40.0;
+    double pid_right = cpu_right - 40.0;
+    double name_right = pid_right - 40.0;
+    double name_width = MAX(name_right - PL_PADDING, 1.0);
     double available_rows_height = MAX(height - PL_ROWS_Y - PL_PADDING, 1.0);
     double row_height = MIN(16.0, available_rows_height /
                             MAX(priv->row_count, 1U));
@@ -534,16 +540,11 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     pango_layout_set_font_description(layout, row_font);
     cairo_set_source_rgba(cr, priv->header[0], priv->header[1],
                           priv->header[2], priv->header[3]);
-    pango_layout_set_text(layout, "NAME", -1);
-    pl_show_right(layout, cr, name_right, PL_HEADER_Y);
-    pango_layout_set_text(layout, "PID", -1);
-    pl_show_right(layout, cr, pid_right, PL_HEADER_Y);
-    pango_layout_set_text(layout, "CPU", -1);
-    pl_show_right(layout, cr, cpu_right, PL_HEADER_Y);
-    pango_layout_set_text(layout, "MEM", -1);
-    pl_show_right(layout, cr, mem_right, PL_HEADER_Y);
-    pango_layout_set_text(layout, "I/O", -1);
-    pl_show_right(layout, cr, io_right, PL_HEADER_Y);
+    pl_show_column(layout, cr, "NAME", name_right, PL_HEADER_Y, name_width);
+    pl_show_column(layout, cr, "PID", pid_right, PL_HEADER_Y, 40.0);
+    pl_show_column(layout, cr, "CPU", cpu_right, PL_HEADER_Y, 40.0);
+    pl_show_column(layout, cr, "MEM", mem_right, PL_HEADER_Y, 42.0);
+    pl_show_column(layout, cr, "I/O", io_right, PL_HEADER_Y, 42.0);
 
     cairo_set_source_rgba(cr, priv->text[0], priv->text[1],
                           priv->text[2], priv->text[3]);
@@ -559,23 +560,16 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
             g_regex_replace(regex, proc->name, -1, 0, "_", 0, NULL) :
             g_strdup(proc->name);
 
-        pango_layout_set_text(layout, clean_name, -1);
-        cairo_move_to(cr, MAX(PL_PADDING, name_right - pl_text_width(layout)),
-                      y);
-        pango_cairo_show_layout(cr, layout);
+        pl_show_column(layout, cr, clean_name, name_right, y, name_width);
         g_snprintf(pid_text, sizeof(pid_text), "%d", proc->pid);
-        pango_layout_set_text(layout, pid_text, -1);
-        pl_show_right(layout, cr, pid_right, y);
+        pl_show_column(layout, cr, pid_text, pid_right, y, 40.0);
         g_snprintf(cpu_text, sizeof(cpu_text), "%.1f", proc->cpu_milli / 100.0);
-        pango_layout_set_text(layout, cpu_text, -1);
-        pl_show_right(layout, cr, cpu_right, y);
+        pl_show_column(layout, cr, cpu_text, cpu_right, y, 40.0);
         g_snprintf(mem_text, sizeof(mem_text), "%.1f",
                    proc->mem_permille / 100.0);
-        pango_layout_set_text(layout, mem_text, -1);
-        pl_show_right(layout, cr, mem_right, y);
+        pl_show_column(layout, cr, mem_text, mem_right, y, 42.0);
         pl_format_io(io_text, sizeof(io_text), proc->io_bytes_per_sec);
-        pango_layout_set_text(layout, io_text, -1);
-        pl_show_right(layout, cr, io_right, y);
+        pl_show_column(layout, cr, io_text, io_right, y, 42.0);
         g_free(clean_name);
         if (regex)
             g_regex_unref(regex);
@@ -668,7 +662,7 @@ static void pl_int_changed(GtkSpinButton *spin, gpointer data)
         priv->row_count = CLAMP(value, 1, 32);
         value = priv->row_count;
     } else if (strcmp(key, "window_width") == 0) {
-        priv->window_width = CLAMP(value, 220, 1200);
+        priv->window_width = CLAMP(value, 240, 1200);
         value = priv->window_width;
     } else {
         priv->window_height = CLAMP(value, 100, 1000);
@@ -761,7 +755,7 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
                100, 60000);
     pl_add_int(plugin, page, "Rows", "row_count", priv->row_count, 1, 32);
     pl_add_int(plugin, page, "Window width", "window_width",
-               priv->window_width, 220, 1200);
+               priv->window_width, 240, 1200);
     pl_add_int(plugin, page, "Window height", "window_height",
                priv->window_height, 100, 1000);
     pl_add_font(plugin, page, "Title font", "title_font", priv->title_font);
@@ -836,7 +830,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     priv->row_count = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "row_count", PL_ROWS_DEFAULT), 1, 32);
     priv->window_width = CLAMP(xs_host_api()->conf_int(
-        kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 220, 1200);
+        kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 240, 1200);
     priv->window_height = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "window_height", PL_HEIGHT_DEFAULT), 100, 1000);
     title_font = xs_host_api()->conf_str(kf, plugin->name, "title_font",
