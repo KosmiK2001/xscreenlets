@@ -31,8 +31,10 @@
 #define CM_CELL_HEIGHT 76
 #define CM_BLOCK_HEIGHT 9.0
 #define CM_TEXT_HEIGHT 24.0
+#define CM_DEFAULT_WINDOW_WIDTH 200
+#define CM_DEFAULT_WINDOW_HEIGHT 152
 #define CM_HISTORY_MIN_POINTS 1
-#define CM_HISTORY_MAX_POINTS 256
+#define CM_HISTORY_MAX_POINTS 4096
 #define CM_LOAD_COMPONENTS 4
 
 typedef struct {
@@ -67,6 +69,8 @@ typedef struct {
     guint update_ms;
     gint columns;
     gint rows;
+    int window_width;
+    int window_height;
     char *font;
     gdouble background_color[4];
     gdouble text_color[4];
@@ -673,7 +677,7 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
     cairo_t *cr = cairo_create(surface);
     PangoFontDescription *font;
     PangoLayout *layout;
-    int cell_w, cell_h, i;
+    int i;
 
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_rgba(cr, priv->background_color[0], priv->background_color[1],
@@ -686,24 +690,31 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
     pango_font_description_free(font);
     pango_layout_set_single_paragraph_mode(layout, TRUE);
 
-    cell_w = width / MAX(priv->columns, 1);
-    cell_h = height / MAX(priv->rows, 1);
     for (i = 0; i < (int)priv->cores->len; i++) {
         CoreData *core = g_ptr_array_index(priv->cores, i);
         int row = i / MAX(priv->columns, 1);
         int col = i % MAX(priv->columns, 1);
-        double x = col * cell_w + 3.0;
-        double y = row * cell_h + 3.0;
-        double block_w = cell_w - 6.0;
+        double cell_left = (double)width * col / MAX(priv->columns, 1);
+        double cell_right = (double)width * (col + 1) / MAX(priv->columns, 1);
+        double cell_top = (double)height * row / MAX(priv->rows, 1);
+        double cell_bottom = (double)height * (row + 1) / MAX(priv->rows, 1);
+        double x = cell_left + 1.0;
+        double y = cell_top + 1.0;
+        double block_w = cell_right - cell_left - 2.0;
+        double block_h = MIN(CM_BLOCK_HEIGHT,
+                             (cell_bottom - cell_top - 2.0) * 0.25);
+        double middle_h = MAX(1.0, cell_bottom - cell_top -
+                                      2.0 - 2.0 * block_h);
         double text_y;
+        int text_height;
         char *text;
 
         if (row >= priv->rows)
             break;
-        cm_draw_history(cr, x, y, block_w, CM_BLOCK_HEIGHT, core, 0,
+        cm_draw_history(cr, x, y, block_w, block_h, core, 0,
                         core->history_points, priv->history_head,
                         priv->history_count, priv->load_colors);
-        text_y = y + CM_BLOCK_HEIGHT + 4.0;
+        text_y = y + block_h + 1.0;
         text = isfinite(core->frequency_mhz) ?
                g_strdup_printf("%.2fG", core->frequency_mhz / 1000.0) : g_strdup("---");
         pango_layout_set_text(layout, text, -1);
@@ -711,9 +722,10 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         pango_layout_set_width(layout, block_w * PANGO_SCALE / 2);
         pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
         pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+        pango_layout_get_pixel_size(layout, NULL, &text_height);
         cairo_set_source_rgba(cr, priv->text_color[0], priv->text_color[1],
                               priv->text_color[2], priv->text_color[3]);
-        cairo_move_to(cr, x, text_y);
+        cairo_move_to(cr, x, text_y + MAX(0.0, (middle_h - text_height) / 2.0));
         pango_cairo_show_layout(cr, layout);
 
         text = isfinite(core->temperature) ?
@@ -721,16 +733,17 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         pango_layout_set_text(layout, text, -1);
         pango_layout_set_width(layout, block_w * PANGO_SCALE / 2);
         pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+        pango_layout_get_pixel_size(layout, NULL, &text_height);
         cairo_set_source_rgba(cr, priv->temp_color[0], priv->temp_color[1],
                               priv->temp_color[2], priv->temp_color[3]);
-        cairo_move_to(cr, x + block_w / 2.0, text_y);
+        cairo_move_to(cr, x + block_w / 2.0,
+                      text_y + MAX(0.0, (middle_h - text_height) / 2.0));
         pango_cairo_show_layout(cr, layout);
         g_free(text);
 
-        cm_draw_history(cr, x, text_y + CM_TEXT_HEIGHT, block_w,
-                        CM_BLOCK_HEIGHT, core, 1, core->history_points,
-                        priv->history_head, priv->history_count,
-                        priv->load_colors);
+        cm_draw_history(cr, x, text_y + middle_h, block_w, block_h,
+                        core, 1, core->history_points, priv->history_head,
+                        priv->history_count, priv->load_colors);
     }
     g_object_unref(layout);
     cairo_destroy(cr);
@@ -755,9 +768,15 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
     priv->update_ms = (guint)xs_host_api()->conf_int(kf, p->name, "update_ms", 1000);
     priv->columns = xs_host_api()->conf_int(kf, p->name, "columns", CM_COLUMNS_DEFAULT);
     priv->rows = xs_host_api()->conf_int(kf, p->name, "rows", CM_ROWS_DEFAULT);
+    priv->window_width = xs_host_api()->conf_int(kf, p->name, "window_width",
+                                                  CM_DEFAULT_WINDOW_WIDTH);
+    priv->window_height = xs_host_api()->conf_int(kf, p->name, "window_height",
+                                                   CM_DEFAULT_WINDOW_HEIGHT);
     priv->update_ms = CLAMP(priv->update_ms, 100U, 60000U);
     priv->columns = CLAMP(priv->columns, 1, 16);
     priv->rows = CLAMP(priv->rows, 1, 16);
+    priv->window_width = CLAMP(priv->window_width, 100, 1600);
+    priv->window_height = CLAMP(priv->window_height, 80, 1200);
     priv->font = xs_host_api()->conf_str(kf, p->name, "font", CM_DEFAULT_FONT);
     if (!g_key_file_has_key(kf, p->name, "font", NULL))
         g_key_file_set_string(kf, p->name, "font", priv->font);
@@ -774,6 +793,8 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
     g_key_file_set_integer(kf, p->name, "columns", priv->columns);
     g_key_file_set_integer(kf, p->name, "rows", priv->rows);
+    g_key_file_set_integer(kf, p->name, "window_width", priv->window_width);
+    g_key_file_set_integer(kf, p->name, "window_height", priv->window_height);
     xs_core_plugin_conf_flush(p->name);
     if (!cm_socket_claims)
         cm_socket_claims = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -793,7 +814,6 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
                         GINT_TO_POINTER(priv->socket_id), p);
     cm_discover_topology(priv);
     cm_discover_temperatures(priv);
-    cm_ensure_history(priv, CM_CELL_WIDTH - 6);
     if (priv->cores->len == 0) {
         p->host->log("cpu_monitor: physical package %d has no discoverable cores",
                      priv->socket_id);
@@ -802,8 +822,9 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
     for (width = 0; width < CM_MAX_CPUS; width++)
         priv->stat_valid[width] = priv->previous[width].valid;
 
-    width = priv->columns * CM_CELL_WIDTH;
-    height = priv->rows * CM_CELL_HEIGHT;
+    width = priv->window_width;
+    height = priv->window_height;
+    cm_ensure_history(priv, MAX(width / MAX(priv->columns, 1) - 2, 1));
     p->win = xs_host_api()->make_window(p, x, y, width, height);
     if (!p->win) {
         p->host->log("cpu_monitor: failed to create window");
@@ -853,7 +874,7 @@ static void cm_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     if (!priv || !priv->cache)
         return;
     if (priv->cache_width != w || priv->cache_height != h) {
-        cm_ensure_history(priv, MAX((int)(w / MAX(priv->columns, 1)) - 6, 1));
+        cm_ensure_history(priv, MAX((int)(w / MAX(priv->columns, 1)) - 2, 1));
         cairo_surface_destroy(priv->cache);
         priv->cache = cm_render(priv, w, h);
         priv->cache_width = w;
@@ -919,7 +940,7 @@ static void cm_int_changed(GtkSpinButton *spin, gpointer data)
         value = priv->socket_id;
         cm_discover_topology(priv);
         cm_discover_temperatures(priv);
-        cm_ensure_history(priv, CM_CELL_WIDTH - 6);
+        cm_ensure_history(priv, MAX(priv->window_width / priv->columns - 2, 1));
         memset(priv->previous, 0, sizeof(priv->previous));
         memset(priv->stat_valid, 0, sizeof(priv->stat_valid));
     } else if (strcmp(key, "update_ms") == 0) {
@@ -933,10 +954,18 @@ static void cm_int_changed(GtkSpinButton *spin, gpointer data)
     } else if (strcmp(key, "rows") == 0) {
         priv->rows = CLAMP(value, 1, 16);
         value = priv->rows;
-        xs_host_api()->resize(p, priv->columns * CM_CELL_WIDTH,
-                              priv->rows * CM_CELL_HEIGHT);
+    } else if (strcmp(key, "window_width") == 0) {
+        priv->window_width = CLAMP(value, 100, 1600);
+        value = priv->window_width;
+    } else if (strcmp(key, "window_height") == 0) {
+        priv->window_height = CLAMP(value, 80, 1200);
+        value = priv->window_height;
     }
     g_key_file_set_integer(priv->kf, p->name, key, value);
+    if (priv->plugin->win) {
+        xs_host_api()->resize(p, priv->window_width, priv->window_height);
+        cm_ensure_history(priv, MAX(priv->window_width / priv->columns - 2, 1));
+    }
     cm_flush(priv);
     if (priv->cache) {
         cairo_surface_destroy(priv->cache);
@@ -1052,6 +1081,16 @@ static void cm_properties(XsPlugin *p, GtkNotebook *nb)
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup(int_keys[i]), g_free);
         g_signal_connect(w, "value-changed", G_CALLBACK(cm_int_changed), p);
     }
+    w = xs_prop_add_int(GTK_BOX(page), "Window width",
+                        "Overall applet width in pixels", priv->window_width,
+                        100, 1600, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_width"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cm_int_changed), p);
+    w = xs_prop_add_int(GTK_BOX(page), "Window height",
+                        "Overall applet height in pixels", priv->window_height,
+                        80, 1200, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cm_int_changed), p);
     w = xs_prop_add_font(GTK_BOX(page), "Font", "Frequency and temperature text",
                          priv->font);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("font"), g_free);
