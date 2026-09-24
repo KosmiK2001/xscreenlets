@@ -1852,9 +1852,6 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     gtk_widget_set_sensitive(w, !priv->auto_news_count);
     g_object_set_data(G_OBJECT(w), "xs-news-count-spin", w);
     g_object_set_data(G_OBJECT(auto_toggle), "xs-news-count-spin", w);
-    w = xs_prop_add_bool(GTK_BOX(page), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
-    g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
     {
         GtkWidget *header_frame = gtk_frame_new("Header");
         GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
@@ -1862,6 +1859,9 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_frame_set_shadow_type(GTK_FRAME(header_frame), GTK_SHADOW_IN);
         gtk_container_set_border_width(GTK_CONTAINER(header_frame), 7);
         gtk_container_add(GTK_CONTAINER(header_frame), header_box);
+        w = xs_prop_add_bool(GTK_BOX(header_box), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
+        g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
         w = xs_prop_add_font(GTK_BOX(header_box), "Header Font", "Feed-header font", priv->header_font);
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("header_font"), g_free);
         g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
