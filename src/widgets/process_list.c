@@ -532,18 +532,59 @@ static const PlSort pl_column_sorts[] = {
     PL_SORT_NAME, PL_SORT_PID, PL_SORT_CPU, PL_SORT_MEM, PL_SORT_IO
 };
 
-static int pl_column_at(const PlColumns *columns, double x, double y)
+static int pl_column_at(const PlColumns *columns, double x, double y,
+                        const char *font_name)
 {
-    guint i;
+    static const gdouble hit_padding = 3.0;
+    PangoFontDescription *font = pango_font_description_from_string(font_name);
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *cr = cairo_create(surface);
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    int result = -1;
 
-    if (y < PL_HEADER_Y - 5.0 || y > PL_HEADER_Y + 16.0)
+    if (!font || cairo_status(cr) != CAIRO_STATUS_SUCCESS) {
+        if (layout)
+            g_object_unref(layout);
+        if (font)
+            pango_font_description_free(font);
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
         return -1;
-    for (i = 0; i < G_N_ELEMENTS(pl_column_names); i++) {
-        if (x >= columns->right[i] - columns->width[i] &&
-            x <= columns->right[i])
-            return (int)i;
     }
-    return -1;
+    pango_layout_set_font_description(layout, font);
+    if (y < PL_HEADER_Y - 5.0 || y > PL_HEADER_Y + 16.0) {
+        result = -1;
+    } else {
+        for (guint i = 0; i < G_N_ELEMENTS(pl_column_names); i++) {
+            gboolean left = i == PL_SORT_NAME;
+            double layout_width = MAX(columns->width[i] -
+                                      2.0 * PL_TEXT_PADDING, 1.0);
+            PangoRectangle ink;
+            PangoRectangle logical;
+            double text_x;
+
+            pango_layout_set_text(layout, pl_column_names[i], -1);
+            pango_layout_set_width(layout,
+                                   (int)(layout_width * PANGO_SCALE));
+            pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+            pango_layout_set_alignment(layout, left ? PANGO_ALIGN_LEFT :
+                                                    PANGO_ALIGN_RIGHT);
+            pango_layout_get_pixel_extents(layout, &ink, &logical);
+            text_x = left ?
+                columns->right[i] - columns->width[i] + PL_TEXT_PADDING + ink.x :
+                columns->right[i] - PL_TEXT_PADDING - ink.width;
+            if (x >= text_x - hit_padding &&
+                x <= text_x + ink.width + hit_padding) {
+                result = (int)i;
+                break;
+            }
+        }
+    }
+    g_object_unref(layout);
+    pango_font_description_free(font);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+    return result;
 }
 
 static PangoFontDescription *pl_font(const char *name)
@@ -1222,7 +1263,7 @@ static gboolean pl_button_press(XsPlugin *plugin, GdkEventButton *event)
         return FALSE;
     columns = pl_columns(priv->cache_width > 0 ? priv->cache_width :
                          priv->window_width);
-    column = pl_column_at(&columns, event->x, event->y);
+    column = pl_column_at(&columns, event->x, event->y, priv->row_font);
     if (column < 0)
         return FALSE;
     priv->sorting.pressed_column = column;
@@ -1240,7 +1281,7 @@ static gboolean pl_button_release(XsPlugin *plugin, GdkEventButton *event)
         return FALSE;
     columns = pl_columns(priv->cache_width > 0 ? priv->cache_width :
                          priv->window_width);
-    column = pl_column_at(&columns, event->x, event->y);
+    column = pl_column_at(&columns, event->x, event->y, priv->row_font);
     if (column < 0 || column != priv->sorting.pressed_column) {
         priv->sorting.pressed_column = -1;
         return FALSE;
