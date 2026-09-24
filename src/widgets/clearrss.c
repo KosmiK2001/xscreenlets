@@ -1855,8 +1855,23 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     w = xs_prop_add_bool(GTK_BOX(page), "Show feed name", "Show the feed name above the current entry", priv->show_feed_name);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_feed_name"), g_free);
     g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
-    w = rss_header_align_buttons(p, priv);
-    w = xs_prop_add_row(GTK_BOX(page), "Header align", "Header alignment", w);
+    {
+        GtkWidget *header_frame = gtk_frame_new("Header");
+        GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+
+        gtk_frame_set_shadow_type(GTK_FRAME(header_frame), GTK_SHADOW_IN);
+        gtk_container_set_border_width(GTK_CONTAINER(header_frame), 7);
+        gtk_container_add(GTK_CONTAINER(header_frame), header_box);
+        w = xs_prop_add_font(GTK_BOX(header_box), "Header Font", "Feed-header font", priv->header_font);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("header_font"), g_free);
+        g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
+        w = xs_prop_add_color(GTK_BOX(header_box), "Header color", "Feed-header color", priv->header_color[0], priv->header_color[1], priv->header_color[2], priv->header_color[3]);
+        g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("header_color"), g_free);
+        g_signal_connect(w, "color-set", G_CALLBACK(rss_color_set), p);
+        w = rss_header_align_buttons(p, priv);
+        w = xs_prop_add_row(GTK_BOX(header_box), "Header align", "Header alignment", w);
+        gtk_box_pack_start(GTK_BOX(page), header_frame, FALSE, FALSE, 0);
+    }
     w = xs_prop_add_bool(GTK_BOX(page), "Show published time", "Show HH:MM:SS before each news title", priv->show_published_time);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("show_published_time"), g_free);
     g_signal_connect(w, "toggled", G_CALLBACK(rss_bool_toggled), p);
@@ -1877,9 +1892,6 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
     w = xs_prop_add_font(GTK_BOX(page), "Time Font", "Published-time font", priv->time_font);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("time_font"), g_free);
-    g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
-    w = xs_prop_add_font(GTK_BOX(page), "Header Font", "Feed-header font", priv->header_font);
-    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("header_font"), g_free);
     g_signal_connect(w, "font-set", G_CALLBACK(rss_font_set), p);
     gtk_widget_show_all(page);
     gtk_notebook_append_page(nb, page, gtk_label_new("Rss"));
