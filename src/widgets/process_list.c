@@ -47,8 +47,7 @@ typedef struct {
     GKeyFile *kf;
     guint update_ms;
     guint row_count;
-    guint cpu_basis;                  /* 0 = per core, 1 = all cores */
-    gdouble cpu_coefficient;
+    guint cpu_basis;                  /* 0 = per core, 1 = Conky total */
     int window_width;
     int window_height;
     gdouble background[4];
@@ -415,7 +414,6 @@ static void pl_sample(PrivData *priv)
                                   (gdouble)elapsed_us;
                 if (priv->cpu_basis == 1)
                     percent /= (gdouble)pl_online_cpu_count();
-                percent *= priv->cpu_coefficient;
                 gdouble rounded = percent * 1000.0;
                 proc->cpu_milli = (gint)CLAMP((gint64)(rounded + 0.5),
                                                (gint64)0, (gint64)G_MAXINT);
@@ -598,7 +596,8 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pl_show_column(layout, cr, clean_name, name_right, y, name_width, TRUE);
         g_snprintf(pid_text, sizeof(pid_text), "%d", proc->pid);
         pl_show_column(layout, cr, pid_text, pid_right, y, 58.0, FALSE);
-        g_snprintf(cpu_text, sizeof(cpu_text), "%.1f", proc->cpu_milli / 100.0);
+        g_snprintf(cpu_text, sizeof(cpu_text), "%.1f%%",
+                   proc->cpu_milli / 100.0);
         pl_show_column(layout, cr, cpu_text, cpu_right, y, 46.0, FALSE);
         g_snprintf(mem_text, sizeof(mem_text), "%.1f",
                    proc->mem_permille / 100.0);
@@ -778,34 +777,6 @@ static void pl_cpu_basis_changed(GtkComboBox *combo, gpointer data)
     pl_flush(priv);
 }
 
-static void pl_cpu_coefficient_changed(GtkSpinButton *spin, gpointer data)
-{
-    XsPlugin *plugin = data;
-    PrivData *priv = plugin ? plugin->priv : NULL;
-    gchar value[32];
-
-    if (!priv)
-        return;
-    priv->cpu_coefficient = CLAMP(gtk_spin_button_get_value(spin), 0.01, 100.0);
-    gtk_spin_button_set_value(spin, priv->cpu_coefficient);
-    g_ascii_dtostr(value, sizeof(value), priv->cpu_coefficient);
-    g_key_file_set_string(priv->kf, plugin->name, "cpu_coefficient", value);
-    pl_flush(priv);
-}
-
-static void pl_add_float(XsPlugin *plugin, GtkWidget *page, const char *label,
-                         const char *key, gdouble value, gdouble min,
-                         gdouble max, gdouble step, guint digits)
-{
-    GtkWidget *widget = xs_prop_add_float(GTK_BOX(page), label,
-                                          "Multiplier applied after CPU basis",
-                                          value, min, max, step, digits);
-
-    g_signal_connect(widget, "value-changed",
-                     G_CALLBACK(pl_cpu_coefficient_changed), plugin);
-    (void)key;
-}
-
 static void pl_add_int(XsPlugin *plugin, GtkWidget *page, const char *label,
                        const char *key, gint value, gint min, gint max)
 {
@@ -835,22 +806,20 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
     {
         GtkWidget *combo = gtk_combo_box_text_new();
         GtkWidget *row = xs_prop_add_row(
-            GTK_BOX(page), "CPU basis",
-            "100% per core or 100% across all online logical CPUs",
+            GTK_BOX(page), "CPU mode",
+            "Per core: 100% is one thread; Conky: 100% is all online threads",
             combo);
 
         (void)row;
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
                                       "Per core (100% = one thread)");
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
-                                      "All cores (100% = all online threads)");
+                                      "Conky (${top cpu} — 100% = all online threads)");
         gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
                                  priv->cpu_basis ? 1 : 0);
         g_signal_connect(combo, "changed",
                          G_CALLBACK(pl_cpu_basis_changed), plugin);
     }
-    pl_add_float(plugin, page, "CPU coefficient", "cpu_coefficient",
-                 priv->cpu_coefficient, 0.01, 100.0, 0.01, 2);
     pl_add_int(plugin, page, "Window width", "window_width",
                priv->window_width, 264, 1200);
     pl_add_int(plugin, page, "Window height", "window_height",
@@ -930,8 +899,6 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     cpu_basis = xs_host_api()->conf_str(kf, plugin->name, "cpu_basis",
                                         "per-core");
     priv->cpu_basis = g_strcmp0(cpu_basis, "all-cores") == 0;
-    priv->cpu_coefficient = CLAMP(xs_host_api()->conf_dbl(
-        kf, plugin->name, "cpu_coefficient", 1.0), 0.01, 100.0);
     priv->window_width = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 264, 1200);
     priv->window_height = CLAMP(xs_host_api()->conf_int(
@@ -959,13 +926,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     g_key_file_set_integer(kf, plugin->name, "row_count", priv->row_count);
     g_key_file_set_string(kf, plugin->name, "cpu_basis",
                           priv->cpu_basis ? "all-cores" : "per-core");
-    {
-        gchar coefficient[32];
-        g_ascii_dtostr(coefficient, sizeof(coefficient),
-                       priv->cpu_coefficient);
-        g_key_file_set_string(kf, plugin->name, "cpu_coefficient",
-                              coefficient);
-    }
+    g_key_file_remove_key(kf, plugin->name, "cpu_coefficient", NULL);
     g_key_file_set_integer(kf, plugin->name, "window_width",
                            priv->window_width);
     g_key_file_set_integer(kf, plugin->name, "window_height",
