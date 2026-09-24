@@ -3321,14 +3321,20 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
                      G_CALLBACK(on_enter_notify), p);
     g_signal_connect(window, "leave-notify-event",
                      G_CALLBACK(on_leave_notify), p);
-    g_signal_connect(window, "motion-notify-event", G_CALLBACK(on_motion), p);
-    gtk_widget_add_events(window,
-                          GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
+    if (p->ops && p->ops->motion)
+        g_signal_connect(window, "motion-notify-event",
+                         G_CALLBACK(on_motion), p);
+    {
+        GdkEventMask events = GDK_BUTTON_PRESS_MASK |
+                              GDK_BUTTON_RELEASE_MASK |
                               GDK_SCROLL_MASK |
                               GDK_ENTER_NOTIFY_MASK |
-                              GDK_LEAVE_NOTIFY_MASK |
-                              GDK_POINTER_MOTION_MASK |
-                              GDK_POINTER_MOTION_HINT_MASK);
+                              GDK_LEAVE_NOTIFY_MASK;
+        if (p->ops && p->ops->motion)
+            events |= GDK_POINTER_MOTION_MASK |
+                      GDK_POINTER_MOTION_HINT_MASK;
+        gtk_widget_add_events(window, events);
+    }
     gtk_widget_show_all(window);
 
     /* Флаги окна из конфига плагина (перекрывают глобальные дефолты) */
