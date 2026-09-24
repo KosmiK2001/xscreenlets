@@ -44,6 +44,10 @@ typedef struct {
 	gboolean alarm_fired;  /* будильник уже сработал (раз в сутки) */
 	int alarm_until_s;     /* конец мигания (сек от полуночи) */
 	gboolean alarm_fired_day; /* день последнего срабатывания (tm_yday) */
+	cairo_surface_t *base_cache;
+	cairo_surface_t *overlay_cache;
+	int cache_width;
+	int cache_height;
 } PrivData;
 
 /* Читает булево значение в формате строк; "true"/"1"/"yes" = TRUE */
@@ -282,6 +286,24 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 	return 0;
 }
 
+static void clock_render_cache(int w, int h, cairo_surface_t *old,
+                               cairo_surface_t **surface_out,
+                               cairo_t **cr_out)
+{
+	cairo_surface_t *surface;
+	cairo_t *cr;
+
+	if (old)
+		cairo_surface_destroy(old);
+	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cr = cairo_create(surface);
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	*surface_out = surface;
+	*cr_out = cr;
+}
+
 static void clock_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
 	PrivData *priv = p->priv;
@@ -292,11 +314,38 @@ static void clock_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	if (!priv || !p->win)
 		return;
 	/* Clear already done by core, we just draw */
-	/* Draw background elements */
-	xs_host_api()->theme_draw(p, cr, "clock-drop-shadow", 0, 0, w);
-	xs_host_api()->theme_draw(p, cr, "clock-face-shadow", 0, 0, w);
-	xs_host_api()->theme_draw(p, cr, "clock-face", 0, 0, w);
-	xs_host_api()->theme_draw(p, cr, "clock-marks", 0, 0, w);
+	if (w >= 16 && w <= 2048 && h >= 16 && h <= 2048) {
+		cairo_t *cache_cr;
+
+		if (!priv->base_cache || priv->cache_width != w ||
+		    priv->cache_height != h) {
+			clock_render_cache(w, h, priv->base_cache,
+			                   &priv->base_cache, &cache_cr);
+			if (priv->overlay_cache)
+				cairo_surface_destroy(priv->overlay_cache);
+			priv->overlay_cache = NULL;
+			priv->cache_width = w;
+			priv->cache_height = h;
+			xs_host_api()->theme_draw(p, cache_cr,
+			                           "clock-drop-shadow", 0, 0, w);
+			xs_host_api()->theme_draw(p, cache_cr,
+			                           "clock-face-shadow", 0, 0, w);
+			xs_host_api()->theme_draw(p, cache_cr,
+			                           "clock-face", 0, 0, w);
+			xs_host_api()->theme_draw(p, cache_cr,
+			                           "clock-marks", 0, 0, w);
+			cairo_destroy(cache_cr);
+		}
+		cairo_set_source_surface(cr, priv->base_cache, 0, 0);
+		cairo_pattern_set_filter(cairo_get_source(cr),
+		                         CAIRO_FILTER_GOOD);
+		cairo_paint(cr);
+	} else {
+		xs_host_api()->theme_draw(p, cr, "clock-drop-shadow", 0, 0, w);
+		xs_host_api()->theme_draw(p, cr, "clock-face-shadow", 0, 0, w);
+		xs_host_api()->theme_draw(p, cr, "clock-face", 0, 0, w);
+		xs_host_api()->theme_draw(p, cr, "clock-marks", 0, 0, w);
+	}
 
 	/* Время: если задан timezone — UNIX-время + смещение зоны (без DST);
 	 * затем добавляем time_offset (часы). Единый путь через gmtime_r. */
@@ -376,8 +425,26 @@ static void clock_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	}
 
 	/* Glass and frame */
-	xs_host_api()->theme_draw(p, cr, "clock-glass", 0, 0, w);
-	xs_host_api()->theme_draw(p, cr, "clock-frame", 0, 0, w);
+	if (w >= 16 && w <= 2048 && h >= 16 && h <= 2048) {
+		cairo_t *cache_cr;
+
+		if (!priv->overlay_cache) {
+			clock_render_cache(w, h, NULL, &priv->overlay_cache,
+			                   &cache_cr);
+			xs_host_api()->theme_draw(p, cache_cr,
+			                           "clock-glass", 0, 0, w);
+			xs_host_api()->theme_draw(p, cache_cr,
+			                           "clock-frame", 0, 0, w);
+			cairo_destroy(cache_cr);
+		}
+		cairo_set_source_surface(cr, priv->overlay_cache, 0, 0);
+		cairo_pattern_set_filter(cairo_get_source(cr),
+		                         CAIRO_FILTER_GOOD);
+		cairo_paint(cr);
+	} else {
+		xs_host_api()->theme_draw(p, cr, "clock-glass", 0, 0, w);
+		xs_host_api()->theme_draw(p, cr, "clock-frame", 0, 0, w);
+	}
 
 	/* Face-текст и дата (группа Face, как в оригинале) */
 	if ((priv->face_text && priv->face_text[0]) || priv->show_date) {
@@ -473,6 +540,10 @@ static void clock_shutdown(XsPlugin *p)
 {
 	PrivData *priv = p->priv;
 	if (priv) {
+		if (priv->base_cache)
+			cairo_surface_destroy(priv->base_cache);
+		if (priv->overlay_cache)
+			cairo_surface_destroy(priv->overlay_cache);
 		g_free(priv->theme);
 		g_free(priv);
 		p->priv = NULL;
