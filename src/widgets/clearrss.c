@@ -927,10 +927,17 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         cairo_fill(cr);
     }
     if (xs_core_theme_has(p, "background")) {
-        /* Сначала обычный фон/рамка на весь размер окна. */
+        /* Полный SVG рисуем только ниже фиксированной header-полосы.
+         * Наложение натуральной полосы поверх растянутого SVG оставляло
+         * серый градиент видимым сквозь прозрачные участки. */
+        cairo_save(cr);
+        cairo_rectangle(cr, 0, rss_header_height(priv), w,
+                        h - rss_header_height(priv));
+        cairo_clip(cr);
         xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, w, h);
-        /* Верхний заголовок рисуем отдельно в натуральном масштабе.
-         * Список начинается ниже фиксированной полосы header_h. */
+        cairo_restore(cr);
+
+        /* Header рисуем один раз в натуральном масштабе 200px по высоте. */
         cairo_save(cr);
         cairo_rectangle(cr, 0, 0, w, rss_header_height(priv));
         cairo_clip(cr);
