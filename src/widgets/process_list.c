@@ -341,7 +341,8 @@ static void pl_sample(PrivData *priv)
             proc->cpu_ticks >= old->cpu_ticks)
             delta = proc->cpu_ticks - old->cpu_ticks;
         if (delta) {
-            guint64 scaled = delta * (guint64)ticks_per_second * 1000000;
+            guint64 scaled = delta * (guint64)ticks_per_second *
+                             G_GUINT64_CONSTANT(1000000000);
             guint64 milli = scaled / (guint64)elapsed_us;
             proc->cpu_milli = (gint)MIN(milli, G_GUINT64_CONSTANT(100000));
         }
