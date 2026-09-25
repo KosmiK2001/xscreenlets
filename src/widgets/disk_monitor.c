@@ -505,7 +505,7 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
                           MAX(device->history.write_count, device->history.temp_count));
     guint columns = dm_history_columns(width - 4, available);
     gint min_temp = G_MAXINT, max_temp = G_MININT, t_lo = 0, t_hi = 0;
-    guint64 scale_max = 1;
+    guint64 read_scale_max = 1, write_scale_max = 1;
     guint i;
     char *read_text, *write_text;
     int graph_y, graph_h, relative_y, relative_h;
@@ -537,15 +537,19 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-    /* gkrellm contract: both series share ONE bytes/s scale taken from the
-     * max of the two visible histories, so the two lines stay comparable. */
+    /* Each series is scaled by its OWN window maximum, which is what conky
+     * does: diskiograph_read and diskiograph_write are separate objects and
+     * scan_graph() sets graph->scale to the max of that graph's own values.
+     * A single shared scale let one burst on one series flatten the other
+     * into a few percent of the plot height, which is unreadable when the
+     * two series differ in magnitude by several times. */
     for (i = 0; i < columns; i++) {
         guint64 r = dm_history_value(device->history.read, device->history.read_head,
                                      device->history.read_count, i);
         guint64 w = dm_history_value(device->history.write, device->history.write_head,
                                      device->history.write_count, i);
-        if (r > scale_max) scale_max = r;
-        if (w > scale_max) scale_max = w;
+        if (r > read_scale_max) read_scale_max = r;
+        if (w > write_scale_max) write_scale_max = w;
         /* G_MININT markers never reach the temperature scale. */
         if (dm_temp_history_is_valid(device->history.temp, device->history.temp_head,
                                      device->history.temp_count, i)) {
@@ -581,10 +585,10 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     dm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
     cairo_clip(cr);
     dm_draw_series(cr, device->history.write, device->history.write_head,
-                   device->history.write_count, columns, width - 4, scale_max,
+                   device->history.write_count, columns, width - 4, write_scale_max,
                    2.0, graph_y + 1.0, graph_h - 2.0, priv->write_color);
     dm_draw_series(cr, device->history.read, device->history.read_head,
-                   device->history.read_count, columns, width - 4, scale_max,
+                   device->history.read_count, columns, width - 4, read_scale_max,
                    2.0, graph_y + 1.0, graph_h - 2.0, priv->read_color);
     /* Temperature overlay: the line is drawn on the SAME columns, and a
      * missing sample breaks the polyline instead of bridging the gap. */

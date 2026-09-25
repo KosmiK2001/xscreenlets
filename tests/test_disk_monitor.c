@@ -71,15 +71,25 @@ static void test_overflow_saturates(void)
 
 static void test_hddtemp_pipe_protocol(void)
 {
+    /* hddtemp reports WHOLE degrees: dsk->value is one SMART byte
+     * (dsk->value = buffer[9] in scsi.c) and daemon.c formats it with %d.
+     * There is no milli-degree form, so the parser scales to millidegrees
+     * itself to match hwmon and dm_format_temperature(). The old fixtures
+     * used 42500 C, which the daemon can never emit. */
     assert(dm_parse_hddtemp_response(
-               "|/dev/sda|Samsung SSD|42500|C|42.5 C|", "/dev/sda") == 42500);
+               "|/dev/sda|Samsung SSD|42|C|", "/dev/sda") == 42000);
     assert(dm_parse_hddtemp_response(
-               "|/dev/sda|model|98.6 F|100.0 F|", "/dev/sda") == G_MININT);
+               "|/dev/sda|model|98|F|", "/dev/sda") == G_MININT);
     assert(dm_parse_hddtemp_response(
-               "|/dev/sda|other|30000|C||/dev/sdb|selected|42000|C|",
+               "|/dev/sda|other|30|C||/dev/sdb|selected|42|C|",
                "/dev/sdb") == 42000);
     assert(dm_parse_hddtemp_response(
-               "|/dev/sdb|other|35000|C|", "/dev/sda") == G_MININT);
+               "|/dev/sdb|other|35|C|", "/dev/sda") == G_MININT);
+    /* The non-numeric sentinels the daemon emits are not readings. */
+    assert(dm_parse_hddtemp_response(
+               "|/dev/sda|model|UNK|*|", "/dev/sda") == G_MININT);
+    assert(dm_parse_hddtemp_response(
+               "|/dev/sda|model|NA|*|", "/dev/sda") == G_MININT);
     assert(dm_parse_hddtemp_response("bad", "/dev/sda") == G_MININT);
     assert(dm_hddtemp_due(0, 1000000));
     assert(!dm_hddtemp_due(1000000, 1000001));
@@ -1738,6 +1748,68 @@ static void test_disk_name_comparator(void)
     g_assert_cmpint(dm_compare_disk_names(NULL, NULL), ==, 0);
 }
 
+/* hddtemp reports whole degrees Celsius while the plugin carries
+ * milli-degrees everywhere else (hwmon temp*__input, dm_format_temperature
+ * dividing by 1000). Storing 35 instead of 35000 rendered "0.0 C". */
+static void test_hddtemp_millidegrees(void)
+{
+    const char *reply =
+        "|/dev/sda|Samsung SSD|35|C||/dev/sdb|WDC WD40EFRX|41|C|";
+    gint t = dm_parse_hddtemp_response(reply, "/dev/sda");
+
+    g_assert_cmpint(t, ==, 35000);
+    /* The second device must be reachable too. */
+    g_assert_cmpint(dm_parse_hddtemp_response(reply, "/dev/sdb"), ==, 41000);
+    /* A non-Celsius unit must be ignored rather than scaled. */
+    g_assert_cmpint(dm_parse_hddtemp_response("|/dev/sda|X|100|F|", "/dev/sda"),
+                    ==, G_MININT);
+    /* An unknown device is not a reading. */
+    g_assert_cmpint(dm_parse_hddtemp_response(reply, "/dev/sdz"), ==, G_MININT);
+
+    /* The scaled value must render as a real temperature, not 0.0 C. */
+    {
+        gint milli[1] = {t};
+        char *text = dm_format_temperature(milli, 1);
+        g_assert_cmpstr(text, ==, "35.0 C");
+        g_free(text);
+    }
+}
+
+/* Each series is scaled by its own window maximum, like conky's separate
+ * diskiograph_read / diskiograph_write objects. A shared scale let a burst on
+ * one series flatten the other into a few percent of the plot height. */
+static void test_series_scaling_is_per_series(void)
+{
+    guint64 read[DM_HISTORY_MAX] = {0};
+    guint64 write[DM_HISTORY_MAX] = {0};
+    guint64 read_scale = 1, write_scale = 1;
+    guint i;
+
+    /* One read burst two orders of magnitude above the write traffic, which
+     * is the situation that flattened the write plot on a busy disk. */
+    for (i = 0; i < 8; i++) {
+        read[i] = 1000;
+        write[i] = 100;
+    }
+    read[0] = 1000000;
+
+    for (i = 0; i < 8; i++) {
+        if (read[i] > read_scale) read_scale = read[i];
+        if (write[i] > write_scale) write_scale = write[i];
+    }
+    /* Each reaches the full plot height on its own peak. */
+    g_assert_cmpint(read_scale, ==, 1000000);
+    g_assert_cmpint(write_scale, ==, 100);
+    /* Under a shared scale the write peak would collapse to 0.01% of the
+     * height, i.e. an invisible band. With per-series scales each reaches
+     * the top of the plot on its own burst. */
+    g_assert_cmpint(read_scale, >, write_scale * 1000);
+    g_assert_cmpint(write_scale * 100, >, read_scale / 10000);
+
+    /* All-zero history must not divide by zero. */
+    g_assert_cmpint(MIN(0, read_scale) / (gdouble)(read_scale ? read_scale : 1), ==, 0);
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1786,6 +1858,8 @@ int main(void)
     test_sector_units_independent_of_logical_block_size();
     test_rate_smoothing();
     test_disk_name_comparator();
+    test_hddtemp_millidegrees();
+    test_series_scaling_is_per_series();
     test_rate_smooth_saturation();
     test_diskstats_failure_clears_rate_ring();
     test_parse_null_inputs_rejected();
