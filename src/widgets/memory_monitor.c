@@ -286,10 +286,12 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     cairo_move_to(cr, MM_PAD, 4.0);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_ram_fraction(&priv->sample) * 100.0);
+    pango_layout_set_width(layout, mm_percent_column_width() * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->ram_color);
-    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, compact ? MM_PAD : 0.0, 4.0);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    cairo_move_to(cr, mm_percent_column_x(width), 4.0);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
@@ -322,10 +324,12 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     cairo_move_to(cr, MM_PAD, swap_label_y);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_swap_fraction(&priv->sample) * 100.0);
+    pango_layout_set_width(layout, mm_percent_column_width() * PANGO_SCALE);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->swap_color);
-    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, compact ? MM_PAD : 0.0, swap_label_y);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    cairo_move_to(cr, mm_percent_column_x(width), swap_label_y);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 

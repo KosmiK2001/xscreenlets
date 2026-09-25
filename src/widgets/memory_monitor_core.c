@@ -107,6 +107,17 @@ int mm_stippled_width(int text_width, int available_width)
     return CLAMP(text_width, 0, MAX(available_width, 0));
 }
 
+int mm_percent_column_x(int window_width)
+{
+    (void)window_width;
+    return 36;
+}
+
+int mm_percent_column_width(void)
+{
+    return 28;
+}
+
 int mm_section_hr_width(int graph_width, int gap, int text_width,
                        int available_width)
 {

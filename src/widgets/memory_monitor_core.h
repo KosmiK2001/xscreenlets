@@ -21,6 +21,8 @@ int mm_compact_hr_y(int window_height);
 int mm_compact_content_width(int window_width);
 char *mm_section_values_text(guint64 used_kib, guint64 total_kib);
 int mm_stippled_width(int text_width, int available_width);
+int mm_percent_column_x(int window_width);
+int mm_percent_column_width(void);
 int mm_section_hr_width(int graph_width, int gap, int text_width,
                        int available_width);
 
