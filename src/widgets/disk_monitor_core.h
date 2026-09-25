@@ -79,6 +79,36 @@ GtkWidget *dm_position_pair_widget(const char *label,
                                    GtkWidget **x_spin,
                                    GtkWidget **y_spin);
 
+typedef struct {
+    const char *title;
+    const char *font_key;
+    const char *text_color_key;
+    const char *x_key;
+    const char *y_key;
+    const char *history_color_key;
+    const char *font;
+    const char *history_label;
+    gdouble text_color[4];
+    gdouble history_color[4];
+    int x;
+    int y;
+} DmSeriesBlockSpec;
+
+gboolean dm_series_block_spec(const char *title,
+                               const char *font_key,
+                               const char *text_color_key,
+                               const char *x_key,
+                               const char *y_key,
+                               const char *history_color_key,
+                               const char *font,
+                               const char *history_label,
+                               const gdouble text_color[4],
+                               const gdouble history_color[4],
+                               int x, int y,
+                               DmSeriesBlockSpec *out);
+GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
+                                  GtkWidget **content);
+
 DmDialogContext *dm_dialog_context_new(const char *instance_name);
 DmDialogContext *dm_dialog_context_ref(DmDialogContext *ctx);
 void dm_dialog_context_unref(DmDialogContext *ctx);

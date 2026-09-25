@@ -846,6 +846,64 @@ static void test_position_pair_spec(void)
     }
 }
 
+static void test_series_block_widget(void)
+{
+    DmSeriesBlockSpec spec = {0};
+    const gdouble blue[4] = {0.2, 0.75, 1.0, 1.0};
+    const gdouble history[4] = {0.1, 0.5, 0.8, 1.0};
+    GtkWidget *block, *content;
+    GList *rows;
+
+    gtk_init_check(NULL, NULL);
+    assert(dm_series_block_spec("Read text", "read_font", "read_text_color",
+                                "read_x", "read_y", "read_color",
+                                "Sans 8", "Read history", blue, history,
+                                8, 52, &spec));
+    block = dm_series_block_widget(&spec, &content);
+    assert(GTK_IS_FRAME(block));
+    assert(GTK_IS_BOX(content));
+    assert(g_strcmp0(gtk_frame_get_label(GTK_FRAME(block)), "Read text") == 0);
+    rows = gtk_container_get_children(GTK_CONTAINER(content));
+    assert(g_list_length(rows) == 4);
+    for (guint row = 0; row < 4; row++)
+        assert(GTK_IS_BOX(g_list_nth_data(rows, row)));
+    {
+        GtkWidget *font_row = g_list_nth_data(rows, 0);
+        GtkWidget *text_color_row = g_list_nth_data(rows, 1);
+        GtkWidget *position_row = g_list_nth_data(rows, 2);
+        GtkWidget *history_row = g_list_nth_data(rows, 3);
+        GtkWidget *font = g_list_nth_data(
+            gtk_container_get_children(GTK_CONTAINER(font_row)), 1);
+        GtkWidget *text_color = g_list_nth_data(
+            gtk_container_get_children(GTK_CONTAINER(text_color_row)), 1);
+        GtkWidget *history_color = g_list_nth_data(
+            gtk_container_get_children(GTK_CONTAINER(history_row)), 1);
+        const char *labels[4] = {"Font", "Color", "Position", "Read history"};
+        for (guint row = 0; row < 4; row++) {
+            GList *children = gtk_container_get_children(
+                GTK_CONTAINER(g_list_nth_data(rows, row)));
+            GtkWidget *label = g_list_nth_data(children, 0);
+            assert(GTK_IS_LABEL(label));
+            assert(g_strcmp0(gtk_label_get_text(GTK_LABEL(label)),
+                             labels[row]) == 0);
+            g_list_free(children);
+        }
+        assert(GTK_IS_FONT_BUTTON(font));
+        assert(GTK_IS_COLOR_BUTTON(text_color));
+        assert(GTK_IS_BOX(position_row));
+        assert(GTK_IS_COLOR_BUTTON(history_color));
+        assert(g_strcmp0(g_object_get_data(G_OBJECT(font), "xs-key"),
+                         "read_font") == 0);
+        assert(g_strcmp0(g_object_get_data(G_OBJECT(text_color), "xs-key"),
+                         "read_text_color") == 0);
+        assert(g_strcmp0(g_object_get_data(G_OBJECT(history_color), "xs-key"),
+                         "read_color") == 0);
+    }
+    g_list_free(rows);
+    g_object_ref_sink(block);
+    g_object_unref(block);
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -880,6 +938,7 @@ int main(void)
     test_deadline_remaining_is_never_negative();
     test_render_style_contract();
     test_position_pair_spec();
+    test_series_block_widget();
     puts("disk_monitor core tests: OK");
     return 0;
 }

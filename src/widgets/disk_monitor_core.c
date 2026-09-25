@@ -66,6 +66,97 @@ GtkWidget *dm_position_pair_widget(const char *label,
     return row;
 }
 
+gboolean dm_series_block_spec(const char *title,
+                              const char *font_key,
+                              const char *text_color_key,
+                              const char *x_key,
+                              const char *y_key,
+                              const char *history_color_key,
+                              const char *font,
+                              const char *history_label,
+                              const gdouble text_color[4],
+                              const gdouble history_color[4],
+                              int x, int y,
+                              DmSeriesBlockSpec *out)
+{
+    if (!title || !*title || !font_key || !*font_key ||
+        !text_color_key || !*text_color_key || !x_key || !*x_key ||
+        !y_key || !*y_key || !history_color_key || !*history_color_key ||
+        !font || !*font || !history_label || !*history_label ||
+        !text_color || !history_color || !out)
+        return FALSE;
+    out->title = title;
+    out->font_key = font_key;
+    out->text_color_key = text_color_key;
+    out->x_key = x_key;
+    out->y_key = y_key;
+    out->history_color_key = history_color_key;
+    out->font = font;
+    out->history_label = history_label;
+    memcpy(out->text_color, text_color, 4 * sizeof(gdouble));
+    memcpy(out->history_color, history_color, 4 * sizeof(gdouble));
+    out->x = x;
+    out->y = y;
+    return TRUE;
+}
+
+static GtkWidget *dm_series_row(GtkWidget *content, const char *label,
+                                GtkWidget *control)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *text = gtk_label_new(label);
+
+    gtk_widget_set_size_request(text, 130, 28);
+    gtk_widget_set_halign(text, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(row), text, FALSE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(row), control, FALSE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(content), row, FALSE, TRUE, 0);
+    return row;
+}
+
+GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
+                                  GtkWidget **content)
+{
+    GtkWidget *frame, *box, *font, *text_color, *history_color;
+    GtkWidget *position, *x_spin, *y_spin;
+    GdkRGBA rgba;
+
+    if (!spec || !content)
+        return NULL;
+    frame = gtk_frame_new(spec->title);
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_container_set_border_width(GTK_CONTAINER(box), 8);
+    gtk_container_add(GTK_CONTAINER(frame), box);
+    *content = box;
+
+    font = gtk_font_button_new_with_font(spec->font);
+    g_object_set_data_full(G_OBJECT(font), "xs-key",
+                           g_strdup(spec->font_key), g_free);
+    dm_series_row(box, "Font", font);
+
+    text_color = gtk_color_button_new_with_rgba(
+        &(GdkRGBA){spec->text_color[0], spec->text_color[1],
+                   spec->text_color[2], spec->text_color[3]});
+    g_object_set_data_full(G_OBJECT(text_color), "xs-key",
+                           g_strdup(spec->text_color_key), g_free);
+    dm_series_row(box, "Color", text_color);
+
+    position = dm_position_pair_widget("Position", spec->x_key, spec->y_key,
+                                       spec->x, spec->y, 1599, 1199,
+                                       &x_spin, &y_spin);
+    dm_series_row(box, "Position", position);
+
+    rgba.red = spec->history_color[0];
+    rgba.green = spec->history_color[1];
+    rgba.blue = spec->history_color[2];
+    rgba.alpha = spec->history_color[3];
+    history_color = gtk_color_button_new_with_rgba(&rgba);
+    g_object_set_data_full(G_OBJECT(history_color), "xs-key",
+                           g_strdup(spec->history_color_key), g_free);
+    dm_series_row(box, spec->history_label, history_color);
+    return frame;
+}
+
 DmDialogContext *dm_dialog_context_new(const char *instance_name)
 {
     DmDialogContext *ctx = g_new0(DmDialogContext, 1);

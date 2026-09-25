@@ -22,12 +22,14 @@ typedef struct {
     GKeyFile *kf;
     char *graph_label;
     char *font;
+    char *read_font, *write_font, *temp_font;
     int width, height;
     guint update_ms;
     int read_x, read_y, write_x, write_y, temp_x, temp_y;
     gboolean show_temperature_history;
     gdouble bg[4], graph_bg[4], border[4], text_color[4];
     gdouble read_color[4], write_color[4], temp_color[4];
+    gdouble read_text_color[4], write_text_color[4], temp_text_color[4];
     /* The monitored device and all of its sampled state live in ONE struct so
      * a disk switch can be prepared in a temporary copy and committed whole. */
     DmDeviceState device;
@@ -334,9 +336,14 @@ histories:
                              ? device->sample.temperature_milli : G_MININT);
 }
 
-static void dm_show_text(cairo_t *cr, PangoLayout *layout, int x, int y,
+static void dm_show_text(cairo_t *cr, PangoLayout *layout,
+                         const char *font_name, int x, int y,
                          const char *text, const gdouble color[4])
 {
+    PangoFontDescription *font = pango_font_description_from_string(font_name);
+
+    pango_layout_set_font_description(layout, font);
+    pango_font_description_free(font);
     pango_layout_set_text(layout, text, -1);
     cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
     cairo_move_to(cr, x, y);
@@ -375,7 +382,6 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     DmDeviceState *device = &priv->device;
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
     cairo_t *cr = cairo_create(surface);
-    PangoFontDescription *font = pango_font_description_from_string(priv->font);
     PangoLayout *layout = pango_cairo_create_layout(cr);
     guint available = MAX(device->history.read_count,
                           MAX(device->history.write_count, device->history.temp_count));
@@ -387,8 +393,7 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     int graph_y, graph_h, relative_y, relative_h;
     double temp_span;
 
-    pango_layout_set_font_description(layout, font);
-    pango_font_description_free(font);
+    pango_layout_set_font_description(layout, NULL);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_rgba(cr, priv->bg[0], priv->bg[1], priv->bg[2], priv->bg[3]);
     cairo_paint(cr);
@@ -467,7 +472,8 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
 
     /* Label and the three current values, each at its configured position.
      * An invalid sample shows N/A — never a stale rate. */
-    dm_show_text(cr, layout, 4, 3, priv->graph_label, priv->text_color);
+    dm_show_text(cr, layout, priv->font, 4, 3, priv->graph_label,
+                 priv->text_color);
     read_text = priv->device.sample.io_valid
                     ? dm_format_rate(priv->device.sample.read_bytes)
                     : g_strdup("N/A");
@@ -477,9 +483,12 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     temp_text = priv->device.sample.temperature_valid
                     ? g_strdup_printf("%.1f C", priv->device.sample.temperature_milli / 1000.0)
                     : g_strdup("N/A");
-    dm_show_text(cr, layout, priv->read_x, priv->read_y, read_text, priv->read_color);
-    dm_show_text(cr, layout, priv->write_x, priv->write_y, write_text, priv->write_color);
-    dm_show_text(cr, layout, priv->temp_x, priv->temp_y, temp_text, priv->temp_color);
+    dm_show_text(cr, layout, priv->read_font, priv->read_x, priv->read_y,
+                 read_text, priv->read_text_color);
+    dm_show_text(cr, layout, priv->write_font, priv->write_x, priv->write_y,
+                 write_text, priv->write_text_color);
+    dm_show_text(cr, layout, priv->temp_font, priv->temp_x, priv->temp_y,
+                 temp_text, priv->temp_text_color);
     g_free(read_text); g_free(write_text); g_free(temp_text);
     g_object_unref(layout); cairo_destroy(cr); cairo_surface_mark_dirty(surface);
     return surface;
@@ -577,11 +586,20 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     priv->graph_label=xs_host_api()->conf_str(kf,p->name,"graph_label",label);
     g_free(label);
     priv->font=xs_host_api()->conf_str(kf,p->name,"font",DM_DEFAULT_FONT);
+    priv->read_font=xs_host_api()->conf_str(kf,p->name,"read_font",priv->font);
+    priv->write_font=xs_host_api()->conf_str(kf,p->name,"write_font",priv->font);
+    priv->temp_font=xs_host_api()->conf_str(kf,p->name,"temp_font",priv->font);
     dm_read_color(priv,"background_color",dm_bg_default,priv->bg); dm_read_color(priv,"graph_background_color",dm_graph_bg_default,priv->graph_bg); dm_read_color(priv,"border_color",dm_border_default,priv->border);
     dm_read_color(priv,"text_color",dm_text_default,priv->text_color); dm_read_color(priv,"read_color",dm_read_default,priv->read_color);
     dm_read_color(priv,"write_color",dm_write_default,priv->write_color); dm_read_color(priv,"temp_color",dm_temp_default,priv->temp_color);
-    /* The by-id identity is persisted verbatim — never the kernel name. */
+    dm_read_color(priv,"read_text_color",priv->read_color,priv->read_text_color);
+    dm_read_color(priv,"write_text_color",priv->write_color,priv->write_text_color);
+    dm_read_color(priv,"temp_text_color",priv->temp_color,priv->temp_text_color);
+    /* by_id identity and all defaults are persisted for the new instance. */
     g_key_file_set_string(kf,p->name,"by_id",priv->device.by_id); g_key_file_set_string(kf,p->name,"graph_label",priv->graph_label); g_key_file_set_string(kf,p->name,"font",priv->font);
+    if (!g_key_file_has_key(kf, p->name, "read_font", NULL)) g_key_file_set_string(kf,p->name,"read_font",priv->read_font);
+    if (!g_key_file_has_key(kf, p->name, "write_font", NULL)) g_key_file_set_string(kf,p->name,"write_font",priv->write_font);
+    if (!g_key_file_has_key(kf, p->name, "temp_font", NULL)) g_key_file_set_string(kf,p->name,"temp_font",priv->temp_font);
     g_key_file_set_boolean(kf,p->name,"show_temperature_history",priv->show_temperature_history);
     g_key_file_set_integer(kf,p->name,"window_width",priv->width); g_key_file_set_integer(kf,p->name,"window_height",priv->height); g_key_file_set_integer(kf,p->name,"update_ms",priv->update_ms);
     xs_core_plugin_conf_flush(p->name); g_ptr_array_free(disks,TRUE);
@@ -623,7 +641,9 @@ static void dm_shutdown(XsPlugin *p)
     }
     if (priv->cache) cairo_surface_destroy(priv->cache);
     dm_device_state_clear(&priv->device);
-    g_free(priv->graph_label); g_free(priv->font); g_free(priv); p->priv=NULL;
+    g_free(priv->graph_label); g_free(priv->font);
+    g_free(priv->read_font); g_free(priv->write_font); g_free(priv->temp_font);
+    g_free(priv); p->priv=NULL;
 }
 
 static gint dm_combo_find_text(GtkComboBox *combo, const char *text)
@@ -769,7 +789,11 @@ static void dm_color_set(GtkColorButton *button, gpointer data)
     else if (!strcmp(key, "text_color")) target = priv->text_color;
     else if (!strcmp(key, "read_color")) target = priv->read_color;
     else if (!strcmp(key, "write_color")) target = priv->write_color;
-    else target = priv->temp_color;
+    else if (!strcmp(key, "temp_color")) target = priv->temp_color;
+    else if (!strcmp(key, "read_text_color")) target = priv->read_text_color;
+    else if (!strcmp(key, "write_text_color")) target = priv->write_text_color;
+    else if (!strcmp(key, "temp_text_color")) target = priv->temp_text_color;
+    else return;
     gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(button), &color);
     target[0] = color.red; target[1] = color.green; target[2] = color.blue; target[3] = color.alpha;
     value = dm_format_rgba(target);
@@ -804,20 +828,80 @@ static void dm_add_int(GtkWidget *page, DmDialogContext *ctx, const char *key, c
     dm_bind(w, ctx, "value-changed", G_CALLBACK(dm_position_changed));
 }
 
-static void dm_add_position_pair(GtkWidget *page, DmDialogContext *ctx,
-                                 const char *label, const char *x_key,
-                                 const char *y_key, int x, int y)
+static void dm_series_font_set(GtkFontButton *button, gpointer data)
 {
-    GtkWidget *pair, *x_spin, *y_spin;
+    DmDialogContext *ctx = data;
+    PrivData *priv = dm_live_priv(ctx);
+    const char *key, *value = NULL;
+    char **target;
 
-    pair = dm_position_pair_widget(label, x_key, y_key, x, y,
-                                   1599, 1199, &x_spin, &y_spin);
-    if (!pair)
+    if (!priv)
         return;
-    dm_bind(x_spin, ctx, "value-changed", G_CALLBACK(dm_position_changed));
-    dm_bind(y_spin, ctx, "value-changed", G_CALLBACK(dm_position_changed));
-    xs_prop_add_row(GTK_BOX(page), label,
-                    "Independent X/Y position of this text", pair);
+    key = g_object_get_data(G_OBJECT(button), "xs-key");
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    value = gtk_font_button_get_font_name(button);
+#pragma GCC diagnostic pop
+    if (!key || !value || !*value)
+        return;
+    if (!strcmp(key, "read_font")) target = &priv->read_font;
+    else if (!strcmp(key, "write_font")) target = &priv->write_font;
+    else if (!strcmp(key, "temp_font")) target = &priv->temp_font;
+    else return;
+    g_free(*target);
+    *target = g_strdup(value);
+    g_key_file_set_string(priv->kf, priv->plugin->name, key, value);
+    xs_core_plugin_conf_flush(priv->plugin->name);
+    dm_rebuild(priv);
+    gtk_widget_queue_draw(priv->plugin->win);
+}
+
+static void dm_bind_keyed_descendants(GtkWidget *widget, DmDialogContext *ctx)
+{
+    if (GTK_IS_FONT_BUTTON(widget))
+        dm_bind(widget, ctx, "font-set", G_CALLBACK(dm_series_font_set));
+    else if (GTK_IS_COLOR_BUTTON(widget))
+        dm_bind(widget, ctx, "color-set", G_CALLBACK(dm_color_set));
+    else if (GTK_IS_SPIN_BUTTON(widget))
+        dm_bind(widget, ctx, "value-changed", G_CALLBACK(dm_position_changed));
+    if (GTK_IS_CONTAINER(widget)) {
+        GList *children = gtk_container_get_children(GTK_CONTAINER(widget));
+        GList *item;
+        for (item = children; item; item = item->next)
+            dm_bind_keyed_descendants(item->data, ctx);
+        g_list_free(children);
+    }
+}
+
+static void dm_add_separator(GtkWidget *page)
+{
+    GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_margin_top(separator, 6);
+    gtk_widget_set_margin_bottom(separator, 6);
+    gtk_box_pack_start(GTK_BOX(page), separator, FALSE, TRUE, 0);
+}
+
+static void dm_add_series_block(GtkWidget *page, DmDialogContext *ctx,
+                                const char *title, const char *font_key,
+                                const char *text_color_key, const char *x_key,
+                                const char *y_key, const char *history_key,
+                                const char *history_label, const char *font,
+                                const gdouble text_color[4],
+                                const gdouble history_color[4],
+                                int x, int y)
+{
+    DmSeriesBlockSpec spec;
+    GtkWidget *block, *content;
+
+    if (!dm_series_block_spec(title, font_key, text_color_key, x_key, y_key,
+                              history_key, font, history_label,
+                              text_color, history_color, x, y, &spec))
+        return;
+    block = dm_series_block_widget(&spec, &content);
+    if (!block)
+        return;
+    gtk_box_pack_start(GTK_BOX(page), block, FALSE, TRUE, 0);
+    dm_bind_keyed_descendants(content, ctx);
 }
 
 /* GTK3 has no gtk_combo_box_text_find_text(); dm_combo_find_text() above does
@@ -862,21 +946,29 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     }
     xs_prop_add_row(GTK_BOX(page),"Disk (whole disk only)","Stable by-id path",combo);
     dm_bind(combo, ctx, "changed", G_CALLBACK(dm_disk_changed));
-    entry=xs_prop_add_bool(GTK_BOX(page),"Temperature history","Show the temperature line in the disk graph",priv->show_temperature_history);
+    entry=xs_prop_add_bool(GTK_BOX(page),"Show temperature graph","Show the temperature line in the disk graph",priv->show_temperature_history);
     dm_bind(entry, ctx, "toggled", G_CALLBACK(dm_temperature_history_toggled));
     entry=xs_prop_add_string(GTK_BOX(page),"Graph label","Text shown over the graph",priv->graph_label);
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
     dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
-    dm_add_position_pair(page,ctx,"Read text","read_x","read_y",priv->read_x,priv->read_y);
-    dm_add_position_pair(page,ctx,"Write text","write_x","write_y",priv->write_x,priv->write_y);
-    dm_add_position_pair(page,ctx,"Temperature text","temp_x","temp_y",priv->temp_x,priv->temp_y);
+    dm_add_series_block(page,ctx,"Read text","read_font","read_text_color",
+                        "read_x","read_y","read_color","Read history",
+                        priv->read_font,priv->read_text_color,priv->read_color,
+                        priv->read_x,priv->read_y);
+    dm_add_separator(page);
+    dm_add_series_block(page,ctx,"Write text","write_font","write_text_color",
+                        "write_x","write_y","write_color","Write history",
+                        priv->write_font,priv->write_text_color,priv->write_color,
+                        priv->write_x,priv->write_y);
+    dm_add_separator(page);
+    dm_add_series_block(page,ctx,"Temperature text","temp_font","temp_text_color",
+                        "temp_x","temp_y","temp_color","Temperature history",
+                        priv->temp_font,priv->temp_text_color,priv->temp_color,
+                        priv->temp_x,priv->temp_y);
     dm_add_color(page,ctx,"background_color","Background",priv->bg);
     dm_add_color(page,ctx,"graph_background_color","Graph background",priv->graph_bg);
     dm_add_color(page,ctx,"text_color","Text",priv->text_color);
     dm_add_color(page,ctx,"border_color","Graph border",priv->border);
-    dm_add_color(page,ctx,"read_color","Read history",priv->read_color);
-    dm_add_color(page,ctx,"write_color","Write history",priv->write_color);
-    dm_add_color(page,ctx,"temp_color","Temperature line",priv->temp_color);
     g_ptr_array_free(disks,TRUE); gtk_notebook_append_page(notebook,page,gtk_label_new("Disk Monitor")); gtk_widget_show_all(page);
 }
 
