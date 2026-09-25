@@ -912,8 +912,19 @@ gint dm_parse_hddtemp_response(const char *response, const char *selected_real_d
             char *unit = g_strdup(fields[i + 4]);
 
             g_strstrip(device); g_strstrip(temperature); g_strstrip(unit);
-            if (!strcmp(unit, "C") && !strcmp(device, selected_real_device))
-                result = dm_parse_temperature(temperature);
+            if (!strcmp(unit, "C") && !strcmp(device, selected_real_device)) {
+                gint parsed = dm_parse_temperature(temperature);
+
+                /* hddtemp reports whole degrees Celsius ("35"), while the
+                 * rest of the plugin carries milli-degrees: hwmon
+                 * temp*__input is in millidegrees and dm_format_temperature()
+                 * divides by 1000. Without this scaling a valid 35 C reading
+                 * was stored as 35 and rendered as "0.0 C". */
+                if (parsed != G_MININT && parsed <= G_MAXINT / 1000)
+                    result = parsed * 1000;
+                else
+                    result = G_MININT;
+            }
             g_free(device); g_free(temperature); g_free(unit);
             if (result != G_MININT)
                 break;
@@ -997,9 +1008,12 @@ gint dm_hddtemp_query(const char *host, guint16 port,
             if (count <= 0)
                 break;
             length += (gsize)count;
-            if (!g_socket_condition_timed_wait(socket, G_IO_IN, remaining,
-                                                NULL, &error))
-                break;
+            /* Do NOT wait for more data here. hddtemp answers the whole
+             * request in one write and then keeps the connection open, so a
+             * G_IO_IN wait after the complete answer blocks until the
+             * deadline: measured 490 ms of dead time per query. The loop must
+             * drain what is already buffered and stop when recv reports
+             * G_IO_ERROR_WOULD_BLOCK. */
         }
     }
     if (length > 0) {

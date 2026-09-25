@@ -506,6 +506,7 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     guint columns = dm_history_columns(width - 4, available);
     gint min_temp = G_MAXINT, max_temp = G_MININT, t_lo = 0, t_hi = 0;
     guint64 read_scale_max = 1, write_scale_max = 1;
+    guint64 read_total = 0, write_total = 0;
     guint i;
     char *read_text, *write_text;
     int graph_y, graph_h, relative_y, relative_h;
@@ -550,6 +551,11 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
                                      device->history.write_count, i);
         if (r > read_scale_max) read_scale_max = r;
         if (w > write_scale_max) write_scale_max = w;
+        /* With per-series scaling every series reaches 100% of the plot on its
+         * own peak, so peaks cannot decide the stacking order. The totals say
+         * which series actually occupies more of the plot. */
+        read_total += r;
+        write_total += w;
         /* G_MININT markers never reach the temperature scale. */
         if (dm_temp_history_is_valid(device->history.temp, device->history.temp_head,
                                      device->history.temp_count, i)) {
@@ -584,12 +590,36 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
      * blocks, which is exactly the leftover "raw transparency" artefact. */
     dm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
     cairo_clip(cr);
-    dm_draw_series(cr, device->history.write, device->history.write_head,
-                   device->history.write_count, columns, width - 4, write_scale_max,
-                   2.0, graph_y + 1.0, graph_h - 2.0, priv->write_color);
-    dm_draw_series(cr, device->history.read, device->history.read_head,
-                   device->history.read_count, columns, width - 4, read_scale_max,
-                   2.0, graph_y + 1.0, graph_h - 2.0, priv->read_color);
+    /* Draw the TALLER series first so it ends up behind: both fills share the
+     * same plot area and the baseline, so whichever is drawn later hides the
+     * other below the crossing point. Ordering by peak keeps both readable —
+     * a tall read burst no longer paints over a low write trace. Series that
+     * are equal in peak keep the historical order (write first). */
+    {
+        const guint64 *read_hist = device->history.read;
+        const guint64 *write_hist = device->history.write;
+        gboolean read_behind = read_total >= write_total;
+
+        if (read_behind) {
+            dm_draw_series(cr, read_hist, device->history.read_head,
+                           device->history.read_count, columns, width - 4,
+                           read_scale_max, 2.0, graph_y + 1.0, graph_h - 2.0,
+                           priv->read_color);
+            dm_draw_series(cr, write_hist, device->history.write_head,
+                           device->history.write_count, columns, width - 4,
+                           write_scale_max, 2.0, graph_y + 1.0, graph_h - 2.0,
+                           priv->write_color);
+        } else {
+            dm_draw_series(cr, write_hist, device->history.write_head,
+                           device->history.write_count, columns, width - 4,
+                           write_scale_max, 2.0, graph_y + 1.0, graph_h - 2.0,
+                           priv->write_color);
+            dm_draw_series(cr, read_hist, device->history.read_head,
+                           device->history.read_count, columns, width - 4,
+                           read_scale_max, 2.0, graph_y + 1.0, graph_h - 2.0,
+                           priv->read_color);
+        }
+    }
     /* Temperature overlay: the line is drawn on the SAME columns, and a
      * missing sample breaks the polyline instead of bridging the gap. */
     if (dm_temp_scale(min_temp, max_temp, &t_lo, &t_hi) &&

@@ -1810,6 +1810,60 @@ static void test_series_scaling_is_per_series(void)
     g_assert_cmpint(MIN(0, read_scale) / (gdouble)(read_scale ? read_scale : 1), ==, 0);
 }
 
+/* Both fills share the plot area and baseline, so the series drawn LAST
+ * hides the other below the crossing point. With per-series scaling every
+ * series peaks at 100% of the plot, so the stacking order must be decided by
+ * the totals of the visible window, not by the peaks. */
+static guint64 dm_series_total(const guint64 *history, guint head, guint count,
+                               guint columns)
+{
+    guint64 sum = 0;
+    guint i;
+
+    for (i = 0; i < columns; i++)
+        sum += dm_history_value(history, head, count, i);
+    return sum;
+}
+
+static void test_series_stacking_order(void)
+{
+    guint64 read[DM_HISTORY_MAX] = {0};
+    guint64 write[DM_HISTORY_MAX] = {0};
+    guint read_head = 0, write_head = 0;
+    guint read_count = 0, write_count = 0;
+    guint i;
+
+    /* A read burst that is brief and low, against a steady write stream:
+     * read peaks higher but occupies far less of the plot area. */
+    for (i = 0; i < 6; i++) {
+        read[i] = 100;
+        write[i] = 2000;
+    }
+    read[0] = 1000;
+    read_head = 6; read_count = 6;
+    write_head = 6; write_count = 6;
+
+    /* Write occupies far more of the plot, so read goes behind. */
+    g_assert_cmpint(dm_series_total(read, read_head, read_count, 6), <,
+                    dm_series_total(write, write_head, write_count, 6));
+
+    /* Reversed traffic flips the order. */
+    for (i = 0; i < 6; i++) {
+        read[i] = 2000;
+        write[i] = 100;
+    }
+    g_assert_cmpint(dm_series_total(read, read_head, read_count, 6), >,
+                    dm_series_total(write, write_head, write_count, 6));
+
+    /* Equal totals must not flip back and forth between ticks. */
+    for (i = 0; i < 6; i++) {
+        read[i] = 500;
+        write[i] = 500;
+    }
+    g_assert_cmpint(dm_series_total(read, read_head, read_count, 6), ==,
+                    dm_series_total(write, write_head, write_count, 6));
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1860,6 +1914,7 @@ int main(void)
     test_disk_name_comparator();
     test_hddtemp_millidegrees();
     test_series_scaling_is_per_series();
+    test_series_stacking_order();
     test_rate_smooth_saturation();
     test_diskstats_failure_clears_rate_ring();
     test_parse_null_inputs_rejected();
