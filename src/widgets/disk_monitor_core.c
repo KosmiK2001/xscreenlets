@@ -77,6 +77,7 @@ gboolean dm_series_block_spec(const char *title,
                               const gdouble text_color[4],
                               const gdouble history_color[4],
                               int x, int y,
+                              int x_max, int y_max,
                               DmSeriesBlockSpec *out)
 {
     /* The history row is OPTIONAL: the Graph label block has no fill of its
@@ -106,6 +107,10 @@ gboolean dm_series_block_spec(const char *title,
     memcpy(out->text_color, text_color, 4 * sizeof(gdouble));
     out->x = x;
     out->y = y;
+    /* An anchor past the design base can only scale off-window, so cap the
+     * spinner at the design size and keep at least the whole range usable. */
+    out->x_max = x_max > 0 ? x_max : x;
+    out->y_max = y_max > 0 ? y_max : y;
     return TRUE;
 }
 
@@ -161,7 +166,8 @@ GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
     gtk_box_pack_start(GTK_BOX(box), appearance, FALSE, TRUE, 0);
 
     position = dm_position_pair_widget("Position", spec->x_key, spec->y_key,
-                                       spec->x, spec->y, 1599, 1199,
+                                       spec->x, spec->y,
+                                       spec->x_max, spec->y_max,
                                        &x_spin, &y_spin);
     dm_series_compact_row(box, "Position", position);
 
@@ -1221,6 +1227,132 @@ guint dm_history_columns(int width, guint available)
     if (available == 0 || width <= 0)
         return 0;
     return MIN(available, (guint)width);
+}
+
+/* Blocker 1: order-independent selection by the (driver rank, label rank)
+ * tuple — directory order can never make Sensor 1 beat NVMe Composite.
+ * Locate the hwmon attribute directory for a block device and return the best
+ * and second-best temperature input paths.
+ *
+ * The sysfs depth differs by transport: NVMe exposes its attributes directly in
+ * device/hwmonN, while a SATA/SAS drive behind the ata_piix bridge inserts an
+ * intermediate device/hwmon/hwmonN directory. The directory is probed first
+ * and only descended into when it holds no "name" file, so both layouts resolve
+ * to the same flat attribute directory. */
+char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
+                         char **secondary)
+{
+    GDir *dir;
+    const char *entry;
+    char *device_dir, *best = NULL, *second = NULL;
+    int best_driver = 9, best_label = 9;
+    int second_driver = 9, second_label = 9;
+
+    if (secondary)
+        *secondary = NULL;
+    if (!block_root || !device_name)
+        return NULL;
+    device_dir = g_build_filename(block_root, device_name, "device", NULL);
+    dir = g_dir_open(device_dir, 0, NULL);
+    g_free(device_dir);
+    if (!dir)
+        return NULL;
+    while ((entry = g_dir_read_name(dir))) {
+        char *child, *name_path, *hwmon_name = NULL;
+        GDir *hdir;
+        const char *file;
+        int driver_rank;
+        char *probe = NULL;
+        if (!g_str_has_prefix(entry, "hwmon"))
+            continue;
+        child = g_build_filename(block_root, device_name, "device", entry, NULL);
+        name_path = g_build_filename(child, "name", NULL);
+        if (g_file_test(name_path, G_FILE_TEST_EXISTS)) {
+            probe = child;
+        } else {
+            GDir *probe_dir = g_dir_open(child, 0, NULL);
+            const char *sub;
+            if (probe_dir) {
+                while ((sub = g_dir_read_name(probe_dir))) {
+                    char *cand, *cand_name;
+                    if (!g_str_has_prefix(sub, "hwmon"))
+                        continue;
+                    cand = g_build_filename(child, sub, NULL);
+                    cand_name = g_build_filename(cand, "name", NULL);
+                    if (g_file_test(cand_name, G_FILE_TEST_EXISTS)) {
+                        g_free(probe);
+                        probe = cand;
+                    } else {
+                        g_free(cand);
+                    }
+                    g_free(cand_name);
+                }
+                g_dir_close(probe_dir);
+            }
+            if (probe) {
+                g_free(name_path);
+                name_path = g_build_filename(probe, "name", NULL);
+            }
+        }
+        if (g_file_get_contents(name_path, &hwmon_name, NULL, NULL))
+            g_strstrip(hwmon_name);
+        if (hwmon_name && !strcmp(hwmon_name, "drivetemp")) driver_rank = 0;
+        else if (hwmon_name && !strcmp(hwmon_name, "nvme")) driver_rank = 1;
+        else driver_rank = 9;
+        /* probe may be NULL when the entry is neither a hwmon dir nor holds a
+         * nested one; rank 9 then skips the open below. */
+        hdir = (driver_rank < 9 && probe) ? g_dir_open(probe, 0, NULL) : NULL;
+        if (hdir) {
+            while ((file = g_dir_read_name(hdir))) {
+                char *label_path, *label = NULL, *label_base, *label_name;
+                int label_rank;
+                if (!g_str_has_prefix(file, "temp") || !strstr(file, "_input"))
+                    continue;
+                label_base = g_strndup(file, strlen(file) - strlen("_input"));
+                label_name = g_strconcat(label_base, "_label", NULL);
+                g_free(label_base);
+                label_path = g_build_filename(probe, label_name, NULL);
+                g_free(label_name);
+                if (g_file_get_contents(label_path, &label, NULL, NULL))
+                    g_strstrip(label);
+                label_rank = dm_hwmon_temp_priority(hwmon_name, label);
+                if (dm_hwmon_candidate_preferred(driver_rank, label_rank,
+                                                 best_driver, best_label)) {
+                    /* The previous best becomes the second reading, so a drive
+                     * with a composite and a second sensor reports both. */
+                    g_free(second);
+                    second = best;
+                    second_driver = best_driver;
+                    second_label = best_label;
+                    best = g_build_filename(probe, file, NULL);
+                    best_driver = driver_rank;
+                    best_label = label_rank;
+                } else if (!second ||
+                           dm_hwmon_candidate_preferred(driver_rank, label_rank,
+                                                        second_driver,
+                                                        second_label)) {
+                    g_free(second);
+                    second = g_build_filename(probe, file, NULL);
+                    second_driver = driver_rank;
+                    second_label = label_rank;
+                }
+                g_free(label_path);
+                g_free(label);
+            }
+            g_dir_close(hdir);
+        }
+        g_free(name_path);
+        g_free(hwmon_name);
+        g_free(child);
+        if (probe != child)
+            g_free(probe);
+    }
+    g_dir_close(dir);
+    if (secondary)
+        *secondary = second;
+    else
+        g_free(second);
+    return best;
 }
 
 int dm_hwmon_temp_priority(const char *driver_name, const char *label)

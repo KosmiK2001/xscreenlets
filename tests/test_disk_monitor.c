@@ -859,7 +859,12 @@ static void test_series_block_widget(void)
     assert(dm_series_block_spec("Read text", "read_font", "read_text_color",
                                 "read_x", "read_y", "read_color",
                                 "Sans 8", "Read history", blue, history,
-                                8, 52, &spec));
+                                8, 52, 419, 219, &spec));
+    /* The anchor bounds come from the instance design base, and they must be
+     * reported back so the spinner cannot be wound past a value that could
+     * only ever scale off-window. */
+    assert(spec.x_max == 419);
+    assert(spec.y_max == 219);
     block = dm_series_block_widget(&spec, &content);
     assert(GTK_IS_FRAME(block));
     assert(GTK_IS_BOX(content));
@@ -1080,7 +1085,8 @@ static void test_series_color_picker_is_rgb_only(void)
         DmSeriesBlockSpec s2 = {0};
         g_assert_true(dm_series_block_spec(
             "Graph label", "label_font", "text_color", "label_x", "label_y",
-            NULL, "Sans 8", NULL, s2.text_color, s2.history_color, 0, 0, &s2));
+            NULL, "Sans 8", NULL, s2.text_color, s2.history_color, 0, 0,
+            419, 219, &s2));
         g_assert_null(s2.history_color_key);
         g_assert_null(s2.history_label);
     }
@@ -1437,6 +1443,78 @@ static void test_disk_selector_and_properties_size(void)
     }
 }
 
+/* The hwmon attribute directory is one level deep for NVMe and two for a
+ * SATA/SAS drive behind an ata bridge, so both layouts must resolve. A SATA SSD
+ * silently reported N/A before this was covered. */
+static void test_find_hwmon_temp_layouts(void)
+{
+    char *root = g_dir_make_tmp("dm-hwmon-XXXXXX", NULL);
+    char *dev, *best, *second = NULL;
+    gboolean ok;
+
+    g_assert_nonnull(root);
+
+    /* NVMe layout: device/hwmon0/{name,temp1_input,temp1_label} */
+    dev = g_build_filename(root, "nvme0n1", "device", "hwmon0", NULL);
+    /* g_mkdir_with_parents returns 0 on success, -1 on error. */
+    ok = g_mkdir_with_parents(dev, 0755);
+    g_assert_cmpint(ok, ==, 0);
+    g_file_set_contents(g_build_filename(dev, "name", NULL), "nvme\n", -1, NULL);
+    g_file_set_contents(g_build_filename(dev, "temp1_input", NULL), "34000", -1, NULL);
+    g_file_set_contents(g_build_filename(dev, "temp1_label", NULL), "Composite\n", -1, NULL);
+    g_free(dev);
+
+    /* SATA layout: device/hwmon/hwmon16/{...} one level deeper. */
+    dev = g_build_filename(root, "sdi", "device", "hwmon", "hwmon16", NULL);
+    /* g_mkdir_with_parents returns 0 on success, -1 on error. */
+    ok = g_mkdir_with_parents(dev, 0755);
+    g_assert_cmpint(ok, ==, 0);
+    g_file_set_contents(g_build_filename(dev, "name", NULL), "drivetemp\n", -1, NULL);
+    g_file_set_contents(g_build_filename(dev, "temp1_input", NULL), "35000", -1, NULL);
+    g_free(dev);
+
+    /* A dir that merely starts with "hwmon" but has no name file is not a
+     * sensor and must not be selected. */
+    dev = g_build_filename(root, "sdb", "device", "hwmon3", NULL);
+    /* g_mkdir_with_parents returns 0 on success, -1 on error. */
+    ok = g_mkdir_with_parents(dev, 0755);
+    g_assert_cmpint(ok, ==, 0);
+    g_free(dev);
+
+    best = dm_find_hwmon_temp(root, "nvme0n1", NULL);
+    g_assert_nonnull(best);
+    g_assert_true(g_str_has_suffix(best, "hwmon0/temp1_input"));
+    g_free(best);
+
+    best = dm_find_hwmon_temp(root, "sdi", &second);
+    g_assert_nonnull(best);
+    g_assert_true(g_str_has_suffix(best, "hwmon16/temp1_input"));
+    g_free(best);
+    g_assert_null(second);
+
+    /* No sensor at all must report N/A rather than a wrong path. */
+    g_assert_null(dm_find_hwmon_temp(root, "sdb", NULL));
+    g_assert_null(dm_find_hwmon_temp(root, "missing", NULL));
+
+    /* GDir-based cleanup keeps the test free of a shell. */
+    {
+        GDir *d = g_dir_open(root, 0, NULL);
+        const char *e;
+        if (d) {
+            while ((e = g_dir_read_name(d))) {
+                char *sub = g_build_filename(root, e, NULL);
+                char *cmd = g_strdup_printf("rm -rf '%s'", sub);
+                int rc = system(cmd);
+                (void)rc;
+                g_free(cmd);
+                g_free(sub);
+            }
+            g_dir_close(d);
+        }
+    }
+    g_free(root);
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1480,6 +1558,7 @@ int main(void)
     test_scale_position_design_coords();
     test_fit_text_coordinate();
     test_fit_text_coordinate_with_shadow();
+    test_find_hwmon_temp_layouts();
     test_series_color_picker_is_rgb_only();
     test_rounded_region();
     test_rounded_region_cut_profile();

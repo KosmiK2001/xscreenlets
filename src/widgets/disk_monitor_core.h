@@ -8,6 +8,8 @@
 typedef struct _GtkWidget GtkWidget;
 
 #define DM_HISTORY_MAX 4096U
+/* Root of the sysfs block class; injected so the hwmon walk is testable. */
+#define DM_BLOCK_CLASS_ROOT "/sys/class/block"
 #define DM_DEFAULT_HEIGHT 220
 /* Smallest usable applet. Below ~60 px of height the two temperature lines
  * overlap each other, and below ~80 px of width the graph has no room left for
@@ -102,6 +104,13 @@ typedef struct {
     gdouble history_color[4];
     int x;
     int y;
+    /* Spinner upper bounds for the anchor pair. They track the instance's
+     * design base (the window size at startup), NOT the 1600x1200 window
+     * maximum: an anchor is design pixels that dm_scale_position() maps to the
+     * live window, so anything past the design size can only ever point
+     * off-window and get clamped away from the value the user set. */
+    int x_max;
+    int y_max;
 } DmSeriesBlockSpec;
 
 gboolean dm_series_block_spec(const char *title,
@@ -115,6 +124,7 @@ gboolean dm_series_block_spec(const char *title,
                                const gdouble text_color[4],
                                const gdouble history_color[4],
                                int x, int y,
+                               int x_max, int y_max,
                                DmSeriesBlockSpec *out);
 GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
                                   GtkWidget **content);
@@ -169,8 +179,7 @@ gboolean dm_corner_radius_is_rounded(double radius);
  * window transparent at the corners. Returns a region the caller owns, or
  * NULL when the radius is 0 (square corners; the caller must then clear any
  * shape it set earlier). */
-cairo_region_t *dm_rounded_region(int width, int height, int radius);
-void dm_device_state_secondary_reset(DmDeviceState *state);
+cairo_region_t *dm_rounded_region(int width, int height, int radius);void dm_device_state_secondary_reset(DmDeviceState *state);
 void dm_device_state_clear(DmDeviceState *state);
 void dm_device_state_replace_owned(DmDeviceState *state,
                                    const char *by_id,
@@ -242,6 +251,8 @@ gboolean dm_temp_scale(gint observed_min, gint observed_max, gint *scale_min,
                        gint *scale_max);
 guint dm_history_columns(int width, guint available);
 gboolean dm_by_id_link_name_is_candidate(const char *link_name);
+char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
+                         char **secondary);
 int dm_hwmon_temp_priority(const char *driver_name, const char *label);
 void dm_graph_background_rgba(const gdouble input[4], gdouble output[4]);
 

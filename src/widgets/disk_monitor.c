@@ -142,92 +142,6 @@ static GPtrArray *dm_discover_disks(void)
     return result;
 }
 
-/* Blocker 1: order-independent selection by the (driver rank, label rank)
- * tuple — directory order can never make Sensor 1 beat NVMe Composite. */
-static char *dm_find_hwmon_temp(DmDeviceState *device, char **secondary)
-{
-    GDir *dir;
-    const char *entry;
-    char *device_dir, *best = NULL, *second = NULL;
-    int best_driver = 9, best_label = 9;
-    int second_driver = 9, second_label = 9;
-
-    if (secondary)
-        *secondary = NULL;
-    if (!device->device_name)
-        return NULL;
-    device_dir = g_strdup_printf("/sys/class/block/%s/device", device->device_name);
-    dir = g_dir_open(device_dir, 0, NULL);
-    g_free(device_dir);
-    if (!dir)
-        return NULL;
-    while ((entry = g_dir_read_name(dir))) {
-        char *child, *name_path, *hwmon_name = NULL;
-        GDir *hdir;
-        const char *file;
-        int driver_rank;
-        if (!g_str_has_prefix(entry, "hwmon"))
-            continue;
-        child = g_build_filename("/sys/class/block", device->device_name,
-                                 "device", entry, NULL);
-        name_path = g_build_filename(child, "name", NULL);
-        if (g_file_get_contents(name_path, &hwmon_name, NULL, NULL))
-            g_strstrip(hwmon_name);
-        if (hwmon_name && !strcmp(hwmon_name, "drivetemp")) driver_rank = 0;
-        else if (hwmon_name && !strcmp(hwmon_name, "nvme")) driver_rank = 1;
-        else driver_rank = 9;
-        hdir = driver_rank < 9 ? g_dir_open(child, 0, NULL) : NULL;
-        if (hdir) {
-            while ((file = g_dir_read_name(hdir))) {
-                char *label_path, *label = NULL, *label_base, *label_name;
-                int label_rank;
-                if (!g_str_has_prefix(file, "temp") || !strstr(file, "_input"))
-                    continue;
-                label_base = g_strndup(file, strlen(file) - strlen("_input"));
-                label_name = g_strconcat(label_base, "_label", NULL);
-                g_free(label_base);
-                label_path = g_build_filename(child, label_name, NULL);
-                g_free(label_name);
-                if (g_file_get_contents(label_path, &label, NULL, NULL))
-                    g_strstrip(label);
-                label_rank = dm_hwmon_temp_priority(hwmon_name, label);
-                if (dm_hwmon_candidate_preferred(driver_rank, label_rank,
-                                                 best_driver, best_label)) {
-                    /* The previous best becomes the second reading, so a drive
-                     * with a composite and a second sensor reports both. */
-                    g_free(second);
-                    second = best;
-                    second_driver = best_driver;
-                    second_label = best_label;
-                    best = g_build_filename(child, file, NULL);
-                    best_driver = driver_rank;
-                    best_label = label_rank;
-                } else if (!second ||
-                           dm_hwmon_candidate_preferred(driver_rank, label_rank,
-                                                        second_driver,
-                                                        second_label)) {
-                    g_free(second);
-                    second = g_build_filename(child, file, NULL);
-                    second_driver = driver_rank;
-                    second_label = label_rank;
-                }
-                g_free(label_path);
-                g_free(label);
-            }
-            g_dir_close(hdir);
-        }
-        g_free(name_path);
-        g_free(hwmon_name);
-        g_free(child);
-    }
-    g_dir_close(dir);
-    if (secondary)
-        *secondary = second;
-    else
-        g_free(second);
-    return best;
-}
-
 static void dm_hddtemp_thread(GTask *task, gpointer source,
                               gpointer task_data, GCancellable *cancellable)
 {
@@ -348,7 +262,8 @@ static void dm_sample(PrivData *priv)
         g_clear_pointer(&device->temp_path, g_free);
         g_clear_pointer(&device->temp_path_secondary, g_free);
         device->secondary_milli = G_MININT;
-        temp_path = device->temp_path = dm_find_hwmon_temp(device,
+        temp_path = device->temp_path = dm_find_hwmon_temp(DM_BLOCK_CLASS_ROOT,
+                                                          device->device_name,
                                                           &device->temp_path_secondary);
     }
     if (temp_path && g_file_get_contents(temp_path, &text, NULL, NULL)) {
@@ -1177,7 +1092,7 @@ static void dm_add_separator(GtkWidget *page)
     gtk_box_pack_start(GTK_BOX(page), separator, FALSE, TRUE, 0);
 }
 
-static void dm_add_series_block(GtkWidget *page, DmDialogContext *ctx,
+static void dm_add_series_block(PrivData *priv, GtkWidget *page, DmDialogContext *ctx,
                                 const char *title, const char *font_key,
                                 const char *text_color_key, const char *x_key,
                                 const char *y_key, const char *history_key,
@@ -1191,7 +1106,9 @@ static void dm_add_series_block(GtkWidget *page, DmDialogContext *ctx,
 
     if (!dm_series_block_spec(title, font_key, text_color_key, x_key, y_key,
                               history_key, font, history_label,
-                              text_color, history_color, x, y, &spec))
+                              text_color, history_color, x, y,
+                              priv->design_width - 1, priv->design_height - 1,
+                              &spec))
         return;
     block = dm_series_block_widget(&spec, &content);
     if (!block)
@@ -1253,22 +1170,22 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     dm_add_separator(page);
     /* No history row: the label draws no fill, so the block must not offer a
      * second colour button for one. */
-    dm_add_series_block(page,ctx,"Graph label","label_font","text_color",
+    dm_add_series_block(priv,page,ctx,"Graph label","label_font","text_color",
                         "label_x","label_y",NULL,NULL,
                         priv->label_font,priv->text_color,priv->text_color,
                         priv->label_x,priv->label_y);
     dm_add_separator(page);
-    dm_add_series_block(page,ctx,"Read text","read_font","read_text_color",
+    dm_add_series_block(priv,page,ctx,"Read text","read_font","read_text_color",
                         "read_x","read_y","read_color","Read history",
                         priv->read_font,priv->read_text_color,priv->read_color,
                         priv->read_x,priv->read_y);
     dm_add_separator(page);
-    dm_add_series_block(page,ctx,"Write text","write_font","write_text_color",
+    dm_add_series_block(priv,page,ctx,"Write text","write_font","write_text_color",
                         "write_x","write_y","write_color","Write history",
                         priv->write_font,priv->write_text_color,priv->write_color,
                         priv->write_x,priv->write_y);
     dm_add_separator(page);
-    dm_add_series_block(page,ctx,"Temperature text","temp_font","temp_text_color",
+    dm_add_series_block(priv,page,ctx,"Temperature text","temp_font","temp_text_color",
                         "temp_x","temp_y","temp_color","Temperature history",
                         priv->temp_font,priv->temp_text_color,priv->temp_color,
                         priv->temp_x,priv->temp_y);
