@@ -18,6 +18,7 @@ TARGET_FL_PLUGIN = $(BUILD_DIR)/frame_launcher.so
 TARGET_RSS_PLUGIN = $(BUILD_DIR)/clearrss.so
 TARGET_CPU_PLUGIN = $(BUILD_DIR)/cpu_monitor.so
 TARGET_MEMORY_PLUGIN = $(BUILD_DIR)/memory_monitor.so
+TARGET_DISK_PLUGIN = $(BUILD_DIR)/disk_monitor.so
 TARGET_PROCESS_PLUGIN = $(BUILD_DIR)/process_list.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
@@ -44,7 +45,7 @@ OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_DISK_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -79,6 +80,15 @@ $(BUILD_DIR)/memory_monitor.o: src/widgets/memory_monitor.c src/widgets/memory_m
 $(TARGET_MEMORY_PLUGIN): $(BUILD_DIR) build/memory_monitor.o build/memory_monitor_core.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/memory_monitor.o build/memory_monitor_core.o $(LDFLAGS_PLUGIN)
 
+$(BUILD_DIR)/disk_monitor_core.o: src/widgets/disk_monitor_core.c src/widgets/disk_monitor_core.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+
+$(BUILD_DIR)/disk_monitor.o: src/widgets/disk_monitor.c src/widgets/disk_monitor_core.h include/xs_api.h src/core/common.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+
+$(TARGET_DISK_PLUGIN): $(BUILD_DIR) build/disk_monitor.o build/disk_monitor_core.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/disk_monitor.o build/disk_monitor_core.o $(LDFLAGS_PLUGIN)
+
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
@@ -94,8 +104,12 @@ $(BUILD_DIR)/%.o: src/widgets/%.c include/xs_api.h src/core/common.h
 $(BUILD_DIR)/test_memory_monitor: tests/test_memory_monitor.c src/widgets/memory_monitor_core.c src/widgets/memory_monitor_core.h
 	$(CC) $(CFLAGS) -o $@ tests/test_memory_monitor.c src/widgets/memory_monitor_core.c $(LDFLAGS_PLUGIN)
 
-test: $(BUILD_DIR)/test_memory_monitor
+$(BUILD_DIR)/test_disk_monitor: tests/test_disk_monitor.c src/widgets/disk_monitor_core.c src/widgets/disk_monitor_core.h
+	$(CC) $(CFLAGS) -o $@ tests/test_disk_monitor.c src/widgets/disk_monitor_core.c $(LDFLAGS_PLUGIN)
+
+test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor
 	$(BUILD_DIR)/test_memory_monitor
+	$(BUILD_DIR)/test_disk_monitor
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -111,11 +125,13 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_RSS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/clearrss.so
 	$(INSTALL) -m 0755 $(TARGET_CPU_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/cpu_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_MEMORY_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/memory_monitor.so
+	$(INSTALL) -m 0755 $(TARGET_DISK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/disk_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_PROCESS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/process_list.so
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
 	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg
 	$(INSTALL) -m 0644 icons/cpu_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/cpu_monitor.svg
 	$(INSTALL) -m 0644 icons/memory_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/memory_monitor.svg
+	$(INSTALL) -m 0644 icons/disk_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/disk_monitor.svg
 	$(INSTALL) -m 0644 icons/process_list.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/process_list.svg
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple
