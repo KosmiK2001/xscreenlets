@@ -34,7 +34,7 @@ typedef struct {
     int read_x, read_y, write_x, write_y, temp_x, temp_y;
     int label_x, label_y;
     gboolean show_temperature_history;
-    gdouble bg[4], graph_bg[4], border[4], text_color[4];
+    gdouble graph_bg[4], border[4], text_color[4];
     gdouble read_color[4], write_color[4], temp_color[4];
     gdouble read_text_color[4], write_text_color[4], temp_text_color[4];
     /* The monitored device and all of its sampled state live in ONE struct so
@@ -47,7 +47,6 @@ typedef struct {
     GCancellable *hddtemp_cancellable;
 } PrivData;
 
-static const gdouble dm_bg_default[4] = {0.04, 0.05, 0.07, 0.88};
 static const gdouble dm_graph_bg_default[4] = {0.02, 0.03, 0.05, 1.0};
 static const gdouble dm_border_default[4] = {0.55, 0.58, 0.62, 1.0};
 static const gdouble dm_text_default[4] = {1, 1, 1, 1};
@@ -478,8 +477,11 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     double temp_span;
 
     pango_layout_set_font_description(layout, NULL);
+    /* No separate base layer: the graph covers the whole window, so a second
+     * background behind it could only show up where the graph does not reach
+     * and was a source of a stray colour nobody could configure any more. */
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-    cairo_set_source_rgba(cr, priv->bg[0], priv->bg[1], priv->bg[2], priv->bg[3]);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
@@ -731,7 +733,7 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     priv->read_font=xs_host_api()->conf_str(kf,p->name,"read_font",priv->font);
     priv->write_font=xs_host_api()->conf_str(kf,p->name,"write_font",priv->font);
     priv->temp_font=xs_host_api()->conf_str(kf,p->name,"temp_font",priv->font);
-    dm_read_color(priv,"background_color",dm_bg_default,priv->bg); dm_read_color(priv,"graph_background_color",dm_graph_bg_default,priv->graph_bg); dm_read_color(priv,"border_color",dm_border_default,priv->border);
+    dm_read_color(priv,"graph_background_color",dm_graph_bg_default,priv->graph_bg); dm_read_color(priv,"border_color",dm_border_default,priv->border);
     dm_read_color(priv,"text_color",dm_text_default,priv->text_color); dm_read_color(priv,"read_color",dm_read_default,priv->read_color);
     dm_read_color(priv,"write_color",dm_write_default,priv->write_color); dm_read_color(priv,"temp_color",dm_temp_default,priv->temp_color);
     dm_read_color(priv,"read_text_color",priv->read_color,priv->read_text_color);
@@ -927,8 +929,7 @@ static void dm_color_set(GtkColorButton *button, gpointer data)
     if (!priv) return;
     p = priv->plugin;
     key = g_object_get_data(G_OBJECT(button), "xs-key");
-    if (!strcmp(key, "background_color")) target = priv->bg;
-    else if (!strcmp(key, "graph_background_color")) target = priv->graph_bg;
+    if (!strcmp(key, "graph_background_color")) target = priv->graph_bg;
     else if (!strcmp(key, "border_color")) target = priv->border;
     else if (!strcmp(key, "text_color")) target = priv->text_color;
     else if (!strcmp(key, "read_color")) target = priv->read_color;
@@ -949,8 +950,7 @@ static void dm_color_set(GtkColorButton *button, gpointer data)
      * Background and border keep a real alpha scale (they come from the shared
      * core row builder, which enables it), so for those the picker's alpha is
      * the user's actual choice and must be stored. */
-    if (!strcmp(key, "background_color") || !strcmp(key, "graph_background_color") ||
-        !strcmp(key, "border_color"))
+    if (!strcmp(key, "graph_background_color") || !strcmp(key, "border_color"))
         target[3] = color.alpha;
     value = dm_format_rgba(target);
     g_key_file_set_string(priv->kf, p->name, key, value);
@@ -1133,10 +1133,8 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
                         "temp_x","temp_y","temp_color","Temperature history",
                         priv->temp_font,priv->temp_text_color,priv->temp_color,
                         priv->temp_x,priv->temp_y);
-    /* No "Background" row: since DM_GRAPH_TOP became 0 the graph fills the whole
-     * window, so priv->bg is painted as the base layer and is never visible on
-     * its own — a control for it would be a lie. The key is still read from the
-     * config (and kept up to date there) so an existing setup keeps working. */
+    /* No "Background" row: since DM_GRAPH_TOP became 0 the graph covers the whole
+     * window, so there is no separate base layer to configure any more. */
     dm_add_color(page,ctx,"graph_background_color","Graph background",priv->graph_bg);
     dm_add_color(page,ctx,"text_color","Text",priv->text_color);
     dm_add_color(page,ctx,"border_color","Graph border",priv->border);
