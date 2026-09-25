@@ -9,6 +9,34 @@ static int close_enough(double a, double b)
     return fabs(a - b) < 0.000001;
 }
 
+static void test_colors(void)
+{
+    gdouble color[4] = {0.0, 0.0, 0.0, 0.0};
+
+    assert(mm_parse_color("0,0,0,0.1", color));
+    assert(close_enough(color[0], 0.0));
+    assert(close_enough(color[1], 0.0));
+    assert(close_enough(color[2], 0.0));
+    assert(close_enough(color[3], 0.1));
+    assert(mm_parse_color("0.1,0.2,0.3,1", color));
+    {
+        char *value = mm_format_color(color);
+        const char *p;
+        int separators = 0;
+
+        assert(value != NULL);
+        for (p = value; *p; p++)
+            if (*p == ',')
+                separators++;
+        assert(separators == 3);
+        assert(mm_parse_color(value, color));
+        g_free(value);
+    }
+    assert(!mm_parse_color("0,0,0,0,2", color));
+    assert(!mm_parse_color("0,0,0", color));
+    assert(!mm_parse_color("garbage", color));
+}
+
 static void test_section_values_text(void)
 {
     char *text = mm_section_values_text(1536, 4096);
@@ -85,6 +113,7 @@ int main(void)
     assert(close_enough(mm_ram_fraction(&sample), 0.0));
     assert(close_enough(mm_swap_fraction(&sample), 0.0));
 
+    test_colors();
     test_section_values_text();
     test_responsive_graph_width();
     puts("memory_monitor parser tests: OK");

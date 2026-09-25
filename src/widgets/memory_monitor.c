@@ -25,6 +25,7 @@ typedef struct {
     int window_height;
     char *font;
     gdouble background_color[4];
+    gdouble graph_background_color[4];
     gdouble text_color[4];
     gdouble border_color[4];
     gdouble ram_color[4];
@@ -42,43 +43,17 @@ typedef struct {
 } PrivData;
 
 static const gdouble mm_default_background[4] = {0.098, 0.098, 0.098, 0.75};
+static const gdouble mm_default_graph_background[4] = {0.04, 0.05, 0.07, 0.92};
 static const gdouble mm_default_text[4] = {1.0, 1.0, 1.0, 1.0};
 static const gdouble mm_default_border[4] = {0.451, 0.451, 0.451, 1.0};
 static const gdouble mm_default_ram[4] = {0.325, 0.510, 0.729, 1.0};
 static const gdouble mm_default_swap[4] = {1.0, 0.647, 0.0, 1.0};
 
-static gboolean mm_parse_color(const char *text, gdouble out[4])
-{
-    const char *p = text;
-    int i;
-
-    if (!text || !text[0])
-        return FALSE;
-    for (i = 0; i < 4; i++) {
-        char *end = NULL;
-        gdouble value = g_ascii_strtod(p, &end);
-
-        if (end == p || !isfinite(value))
-            return FALSE;
-        out[i] = CLAMP(value, 0.0, 1.0);
-        p = end;
-        while (g_ascii_isspace(*p))
-            p++;
-        if (i < 3) {
-            if (*p != ',')
-                return FALSE;
-            p++;
-        } else if (*p != '\0') {
-            return FALSE;
-        }
-    }
-    return TRUE;
-}
-
 static char *mm_color_string(const GdkRGBA *color)
 {
-    return g_strdup_printf("%.9g,%.9g,%.9g,%.9g", color->red, color->green,
-                           color->blue, color->alpha);
+    const gdouble rgba[4] = {color->red, color->green, color->blue,
+                             color->alpha};
+    return mm_format_color(rgba);
 }
 
 static void mm_read_color(PrivData *priv, const char *key,
@@ -97,6 +72,14 @@ static void mm_read_color(PrivData *priv, const char *key,
     } else if (!mm_parse_color(text, out)) {
         priv->plugin->host->log("memory_monitor %s: invalid %s, using defaults",
                                 priv->plugin->name, key);
+        if (strcmp(key, "graph_background_color") == 0) {
+            GdkRGBA color = {fallback[0], fallback[1], fallback[2], fallback[3]};
+            char *default_text = mm_color_string(&color);
+
+            g_key_file_set_string(priv->kf, priv->plugin->name, key,
+                                  default_text);
+            g_free(default_text);
+        }
     }
     g_free(text);
 }
@@ -123,13 +106,15 @@ static void mm_push(gdouble *history, guint *head, guint *count, gdouble value)
 static void mm_draw_graph(cairo_t *cr, double x, double y, int width,
                           int height, const gdouble *history, guint head,
                           guint count, const gdouble color[4],
+                          const gdouble background[4],
                           const gdouble border[4])
 {
     guint visible = MIN(count, (guint)width);
     guint start = (head + MM_HISTORY_MAX - visible) % MM_HISTORY_MAX;
     guint i;
 
-    cairo_set_source_rgba(cr, 0.04, 0.05, 0.07, 0.92);
+    cairo_set_source_rgba(cr, background[0], background[1], background[2],
+                          background[3]);
     cairo_rectangle(cr, x, y, width, height);
     cairo_fill(cr);
     cairo_save(cr);
@@ -271,10 +256,12 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     /* Both histories use the same responsive width and height. */
     mm_draw_graph(cr, ram_x, ram_y, graph_width, graph_height,
                   priv->ram_history, priv->ram_head,
-                  priv->ram_count, priv->ram_color, priv->border_color);
+                  priv->ram_count, priv->ram_color,
+                  priv->graph_background_color, priv->border_color);
     mm_draw_graph(cr, ram_x, swap_y, graph_width, graph_height,
                   priv->swap_history, priv->swap_head,
-                  priv->swap_count, priv->swap_color, priv->border_color);
+                  priv->swap_count, priv->swap_color,
+                  priv->graph_background_color, priv->border_color);
 
     pango_layout_set_width(layout, header_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
@@ -394,6 +381,8 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_remove_key(priv->kf, p->name, "ram_graph_height", NULL);
     g_key_file_remove_key(priv->kf, p->name, "swap_graph_height", NULL);
     mm_read_color(priv, "background_color", mm_default_background, priv->background_color);
+    mm_read_color(priv, "graph_background_color", mm_default_graph_background,
+                  priv->graph_background_color);
     mm_read_color(priv, "text_color", mm_default_text, priv->text_color);
     mm_read_color(priv, "border_color", mm_default_border, priv->border_color);
     mm_read_color(priv, "ram_color", mm_default_ram, priv->ram_color);
@@ -539,6 +528,8 @@ static void mm_color_set(GtkColorButton *button, gpointer data)
     key = g_object_get_data(G_OBJECT(button), "xs-key");
     if (strcmp(key, "background_color") == 0)
         target = priv->background_color;
+    else if (strcmp(key, "graph_background_color") == 0)
+        target = priv->graph_background_color;
     else if (strcmp(key, "text_color") == 0)
         target = priv->text_color;
     else if (strcmp(key, "border_color") == 0)
@@ -598,6 +589,8 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
     font = xs_prop_add_font(GTK_BOX(page), "Font", "Monitor text font", priv->font);
     g_signal_connect(font, "font-set", G_CALLBACK(mm_font_set), p);
     mm_add_color(page, p, "background_color", "Background", priv->background_color);
+    mm_add_color(page, p, "graph_background_color", "Graph background",
+                 priv->graph_background_color);
     mm_add_color(page, p, "text_color", "Text", priv->text_color);
     mm_add_color(page, p, "border_color", "Graph border", priv->border_color);
     mm_add_color(page, p, "ram_color", "RAM history", priv->ram_color);

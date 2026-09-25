@@ -1,7 +1,37 @@
 /* memory_monitor_core.c — deterministic /proc/meminfo value calculations. */
 #include "memory_monitor_core.h"
 #include <ctype.h>
+#include <math.h>
 #include <string.h>
+
+gboolean mm_parse_color(const char *text, gdouble out[4])
+{
+    const char *p = text;
+    int i;
+
+    g_return_val_if_fail(out != NULL, FALSE);
+    if (!text || !text[0])
+        return FALSE;
+    for (i = 0; i < 4; i++) {
+        char *end = NULL;
+        gdouble value = g_ascii_strtod(p, &end);
+
+        if (end == p || !isfinite(value))
+            return FALSE;
+        out[i] = CLAMP(value, 0.0, 1.0);
+        p = end;
+        while (g_ascii_isspace(*p))
+            p++;
+        if (i < 3) {
+            if (*p != ',')
+                return FALSE;
+            p++;
+        } else if (*p != '\0') {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
 
 static gboolean mm_parse_line(const char *line, const char *key, guint64 *value)
 {
@@ -16,6 +46,25 @@ static gboolean mm_parse_line(const char *line, const char *key, guint64 *value)
         return FALSE;
     *value = parsed;
     return TRUE;
+}
+
+char *mm_format_color(const gdouble color[4])
+{
+    char *values[5] = {NULL, NULL, NULL, NULL, NULL};
+    char *result;
+    int i;
+
+    g_return_val_if_fail(color != NULL, NULL);
+    for (i = 0; i < 4; i++) {
+        gchar buffer[G_ASCII_DTOSTR_BUF_SIZE];
+
+        values[i] = g_strdup(g_ascii_formatd(buffer, sizeof(buffer), "%.9g",
+                                             CLAMP(color[i], 0.0, 1.0)));
+    }
+    result = g_strjoinv(",", values);
+    for (i = 0; i < 4; i++)
+        g_free(values[i]);
+    return result;
 }
 
 gboolean mm_parse_meminfo(const char *text, MemorySample *sample)

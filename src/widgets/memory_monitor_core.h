@@ -11,6 +11,8 @@ typedef struct {
     gboolean valid;
 } MemorySample;
 
+gboolean mm_parse_color(const char *text, gdouble out[4]);
+char *mm_format_color(const gdouble color[4]);
 gboolean mm_parse_meminfo(const char *text, MemorySample *sample);
 gdouble mm_ram_fraction(const MemorySample *sample);
 gdouble mm_swap_fraction(const MemorySample *sample);
