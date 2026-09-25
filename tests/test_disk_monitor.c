@@ -1248,6 +1248,82 @@ static void test_format_temperature(void)
     g_free(text);
 }
 
+static void test_rounded_region(void)
+{
+    cairo_region_t *r;
+
+    /* radius 0 / negative -> no region at all; the caller clears the shape */
+    assert(dm_rounded_region(300, 200, 0) == NULL);
+    assert(dm_rounded_region(300, 200, -5) == NULL);
+    /* degenerate sizes must not build a region */
+    assert(dm_rounded_region(0, 200, 10) == NULL);
+    assert(dm_rounded_region(300, 0, 10) == NULL);
+
+    r = dm_rounded_region(300, 200, 24);
+    assert(r != NULL);
+    /* the four extreme corners are cut away */
+    assert(!cairo_region_contains_point(r, 0, 0));
+    assert(!cairo_region_contains_point(r, 299, 0));
+    assert(!cairo_region_contains_point(r, 0, 199));
+    assert(!cairo_region_contains_point(r, 299, 199));
+    /* the middle of every edge is still part of the window */
+    assert(cairo_region_contains_point(r, 150, 0));
+    assert(cairo_region_contains_point(r, 150, 199));
+    assert(cairo_region_contains_point(r, 0, 100));
+    assert(cairo_region_contains_point(r, 299, 100));
+    /* and so is the centre */
+    assert(cairo_region_contains_point(r, 150, 100));
+    cairo_region_destroy(r);
+
+    /* a radius larger than half the short side is clamped, not rejected */
+    r = dm_rounded_region(100, 60, 999);
+    assert(r != NULL);
+    assert(cairo_region_contains_point(r, 50, 30));
+    cairo_region_destroy(r);
+
+    /* a window smaller than its radius still yields a usable region */
+    r = dm_rounded_region(20, 20, 24);
+    assert(r != NULL);
+    cairo_region_destroy(r);
+}
+
+/* The mask cut must be DEEPEST at the corner column and vanish by the time it
+ * reaches the radius. The bug this guards against computed it the other way
+ * round (0 at the corner, radius at the edge), which made the mask bite
+ * hardest exactly where the border arc is drawn — the border then disappeared
+ * as soon as the shape was applied. */
+static void test_rounded_region_cut_profile(void)
+{
+    cairo_region_t *r = dm_rounded_region(300, 200, 24);
+    int i;
+
+    assert(r != NULL);
+    /* Column 0 is the corner itself: everything above the radius is cut. */
+    assert(!cairo_region_contains_point(r, 0, 23));
+    /* The cut shrinks as the column approaches the radius, so by column 24 the
+     * top edge is visible again. */
+    assert(cairo_region_contains_point(r, 24, 0));
+    assert(!cairo_region_contains_point(r, 0, 0));
+
+    /* Monotonic: the first visible row never moves back down as x increases. */
+    {
+        int prev = -1;
+
+        for (i = 0; i <= 24; i++) {
+            int y;
+
+            for (y = 0; y < 200; y++)
+                if (cairo_region_contains_point(r, i, y))
+                    break;
+            assert(y <= 200);
+            if (prev >= 0)
+                assert(y <= prev);
+            prev = y;
+        }
+    }
+    cairo_region_destroy(r);
+}
+
 static void test_corner_radius(void)
 {
     /* Zero and negatives mean square corners — no clip path at all. */
@@ -1382,6 +1458,8 @@ int main(void)
     test_scale_position_design_coords();
     test_fit_text_coordinate();
     test_series_color_picker_is_rgb_only();
+    test_rounded_region();
+    test_rounded_region_cut_profile();
     test_corner_radius();
     test_disk_selector_and_properties_size();
     puts("disk_monitor core tests: OK");

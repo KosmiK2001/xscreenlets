@@ -3,6 +3,7 @@
 
 #include <glib.h>
 #include <gio/gio.h>
+#include <cairo.h>
 
 typedef struct _GtkWidget GtkWidget;
 
@@ -155,6 +156,15 @@ int dm_fit_text_coordinate(int anchor, int text_extent, int limit);
  * A radius of 0 means "square corners" and is returned as such. */
 double dm_corner_radius_value(int value);
 gboolean dm_corner_radius_is_rounded(double radius);
+
+/* Build the rounded window outline as a cairo region. The plugin needs this
+ * twice: once to clip its own drawing, and once to hand the SAME outline to
+ * the X server as the window's visible shape. A cairo clip alone is invisible
+ * — it only limits what the plugin paints and does not make the rectangular X
+ * window transparent at the corners. Returns a region the caller owns, or
+ * NULL when the radius is 0 (square corners; the caller must then clear any
+ * shape it set earlier). */
+cairo_region_t *dm_rounded_region(int width, int height, int radius);
 void dm_device_state_secondary_reset(DmDeviceState *state);
 void dm_device_state_clear(DmDeviceState *state);
 void dm_device_state_replace_owned(DmDeviceState *state,

@@ -16,6 +16,8 @@
 /* The graph fills the whole window: the label and the current values are
  * drawn on top of it, so nothing is reserved for them. */
 #define DM_GRAPH_TOP 0
+/* how far the border arc is pulled inside the quantised X shape cut */
+#define DM_BORDER_PATH_INSET 1.5
 #define DM_DISKSTATS "/proc/diskstats"
 #define DM_CTX_KEY "xs-disk-monitor-ctx"
 
@@ -28,6 +30,9 @@ typedef struct {
     char *read_font, *write_font, *temp_font;
     int width, height;
     int corner_radius;
+    /* last (radius,w,h) pushed to the X server as the window shape; the
+     * shape call is not free, so skip it when nothing changed */
+    int shape_radius, shape_w, shape_h;
     /* The window size the text anchors were laid out for: anchors are stored
      * against it and mapped to the live size on every frame. */
     int design_width, design_height;
@@ -461,6 +466,46 @@ static void dm_draw_series(cairo_t *cr, const guint64 *history, guint head,
     cairo_fill(cr);
 }
 
+/* Build the rounded outline of the window into cr as a path (not filled).
+ * The X window itself is already cut to this shape by the shape mask, so this
+ * path is only what makes the CUT look deliberate: the graph background and the
+ * border are painted along the arc instead of being sliced off square. */
+static void dm_rounded_path(cairo_t *cr, int width, int height, int radius,
+                          double border_inset)
+{
+    /* Inset by one pixel: the shape mask cuts exactly at the window edge, so a
+     * path drawn ON the edge loses half its stroke to the cut and the border
+     * comes out half as thick as the one-pixel line we ask for. */
+    const double inset = 1.0;
+    double w = width - 2 * inset, h = height - 2 * inset;
+    double r = dm_corner_radius_value(radius);
+
+    if (w <= 0 || h <= 0) {
+        cairo_rectangle(cr, 0, 0, width, height);
+        return;
+    }
+    if (!dm_corner_radius_is_rounded(r)) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    r = MIN(r, MIN(w, h) / 2.0);
+    /* The border must sit BETWEEN the window corner and the shape cut, not
+     * outside it. Measured: at 45 deg the cut is 9.94 px from the corner while
+     * an arc of r-1.5 lands 10.73 px out, i.e. under the cut and therefore
+     * invisible. A smaller radius pulls the arc towards the corner, into the
+     * band the X server actually shows. */
+    if (r > border_inset)
+        r -= border_inset;
+    else
+        r = 0.0;
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+    cairo_close_path(cr);
+}
+
 static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
 {
     DmDeviceState *device = &priv->device;
@@ -530,10 +575,21 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
 
     cairo_set_source_rgba(cr, priv->graph_bg[0], priv->graph_bg[1], priv->graph_bg[2],
                           priv->graph_bg[3]);
-    cairo_rectangle(cr, 1, graph_y, width - 2, graph_h);
+    /* Fill inside the rounded outline, so the cut corners show the graph
+     * background reaching the arc rather than a raw square slice. */
+    cairo_save(cr);
+    dm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
+    cairo_set_source_rgba(cr, priv->graph_bg[0], priv->graph_bg[1], priv->graph_bg[2],
+                          priv->graph_bg[3]);
     cairo_fill(cr);
+    cairo_restore(cr);
     cairo_save(cr);
     cairo_rectangle(cr, 2, graph_y + 1, width - 4, graph_h - 2);
+    cairo_clip(cr);
+    /* Intersect with the rounded outline: without this the series are painted
+     * right up to the window edge and stick out over the cut corners as square
+     * blocks, which is exactly the leftover "raw transparency" artefact. */
+    dm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
     cairo_clip(cr);
     dm_draw_series(cr, device->history.write, device->history.write_head,
                    device->history.write_count, columns, width - 4, scale_max,
@@ -571,8 +627,10 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     cairo_restore(cr);
     cairo_set_source_rgba(cr, priv->border[0], priv->border[1], priv->border[2], priv->border[3]);
     cairo_set_line_width(cr, 1.0);
-    cairo_rectangle(cr, 1.5, graph_y + 0.5, width - 3, graph_h - 1);
+    cairo_save(cr);
+    dm_rounded_path(cr, width, height, priv->corner_radius, DM_BORDER_PATH_INSET);
     cairo_stroke(cr);
+    cairo_restore(cr);
 
     /* Label and the three current values, drawn ON the graph. The anchors are
      * design coordinates mapped to the live window, so a resize keeps every
@@ -772,7 +830,8 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     p->win=xs_host_api()->make_window(p,x,y,priv->width,priv->height);
     if (!p->win) { p->host->log("disk_monitor: failed to create window"); dm_shutdown(p); return -1; }
     priv->cache_width=priv->width; priv->cache_height=priv->height; dm_sample(priv); priv->cache=dm_render(priv,priv->width,priv->height);
-    xs_host_api()->set_opacity(p,CLAMP(opacity,0.1,1.0)); xs_host_api()->set_tick(p,priv->update_ms); return 0;
+    xs_host_api()->set_opacity(p,CLAMP(opacity,0.1,1.0));
+    xs_host_api()->set_tick(p,priv->update_ms); return 0;
 }
 
 static guint dm_tick(XsPlugin *p)
@@ -785,11 +844,42 @@ static guint dm_tick(XsPlugin *p)
     dm_rebuild(priv); xs_host_api()->invalidate(p); gtk_widget_queue_draw(p->win); return priv->update_ms;
 }
 
+/* Push the rounded outline to the X server as the window's VISIBLE shape.
+ * The cairo clip in dm_render() only limits what the plugin paints; the X
+ * window itself stays a full rectangle unless a shape is set, which is why the
+ * corners were square on screen. gdk_window_shape_combine_region() (as opposed
+ * to its input_shape_ twin, which core already uses) is what makes the corner
+ * pixels genuinely not exist. Passing NULL clears the shape again, which is
+ * what corner_radius=0 needs. */
+static void dm_apply_shape(XsPlugin *p, int w, int h)
+{
+    PrivData *priv = p ? p->priv : NULL;
+    GdkWindow *window;
+    cairo_region_t *region;
+
+    if (!priv || !p->win || w <= 0 || h <= 0)
+        return;
+    if (priv->shape_radius == priv->corner_radius &&
+        priv->shape_w == w && priv->shape_h == h)
+        return;
+    window = gtk_widget_get_window(p->win);
+    if (!window)
+        return;
+    region = dm_rounded_region(w, h, priv->corner_radius);
+    gdk_window_shape_combine_region(window, region, 0, 0);
+    if (region)
+        cairo_region_destroy(region);
+    priv->shape_radius = priv->corner_radius;
+    priv->shape_w = w;
+    priv->shape_h = h;
+}
+
 static void dm_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
     PrivData *priv=p?p->priv:NULL;
     if (!priv || !priv->cache) return;
     if (w!=priv->cache_width || h!=priv->cache_height) { priv->cache_width=w; priv->cache_height=h; dm_rebuild(priv); }
+    dm_apply_shape(p, w, h);
     cairo_set_source_surface(cr,priv->cache,0,0); cairo_paint(cr);
 }
 
@@ -804,7 +894,14 @@ static void dm_shutdown(XsPlugin *p)
         g_object_unref(task);
         g_clear_object(&priv->hddtemp_cancellable);
     }
-    if (priv->cache) cairo_surface_destroy(priv->cache);
+        /* Drop the shape we installed, otherwise a later plugin reusing this
+     * window would inherit our rounded outline. */
+    if (p->win) {
+        GdkWindow *win = gtk_widget_get_window(p->win);
+        if (win)
+            gdk_window_shape_combine_region(win, NULL, 0, 0);
+    }
+if (priv->cache) cairo_surface_destroy(priv->cache);
     dm_device_state_clear(&priv->device);
     g_free(priv->graph_label); g_free(priv->font); g_free(priv->label_font);
     g_free(priv->read_font); g_free(priv->write_font); g_free(priv->temp_font);

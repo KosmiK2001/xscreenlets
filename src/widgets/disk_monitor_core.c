@@ -582,6 +582,66 @@ double dm_corner_radius_value(int value)
     return value > 0 ? (double)value : 0.0;
 }
 
+cairo_region_t *dm_rounded_region(int width, int height, int radius)
+{
+    const double r = dm_corner_radius_value(radius);
+    cairo_region_t *region;
+    cairo_rectangle_int_t box;
+    double scaled;
+
+    if (width <= 0 || height <= 0)
+        return NULL;
+    if (!dm_corner_radius_is_rounded(r))
+        return NULL;
+
+    /* cairo_region only holds integer rectangles, so a rounded outline has to
+     * be approximated by one vertical slice per column. Each slice spans from
+     * the top arc down to the bottom arc, which is exactly what the X server
+     * needs for a shape mask. */
+    scaled = MIN(r, MIN(width, height) / 2.0);
+    region = cairo_region_create();
+    if (!region)
+        return NULL;
+
+    for (int i = 0; i <= (int) ceil(scaled); i++) {
+        /* How far this column is cut back from the top edge. The circle is
+         * centred at (scaled, scaled) with radius `scaled`, so column i meets
+         * it at y = scaled - sqrt(scaled^2 - (i-scaled)^2): the cut is DEEPEST
+         * at the corner column (i=0) and vanishes at i=scaled. The earlier form
+         * computed this the other way round, which made the mask bite hardest
+         * near the corner and swallowed the border's own arc. */
+        double d = fabs(i - scaled);
+        int cut = 0;
+
+        if (d <= scaled)
+            cut = (int) ceil(scaled - sqrt(scaled * scaled - d * d));
+        box.x = i;
+        box.y = cut;
+        box.width = 1;
+        box.height = height - 2 * cut;
+        if (box.height > 0)
+            cairo_region_union_rectangle(region, &box);
+        /* mirrored on the right edge */
+        box.x = width - 1 - i;
+        if (box.height > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+
+    /* the middle band between the two corner arcs is a full-height slice */
+    {
+        int mid = (int) ceil(scaled);
+
+        box.x = mid;
+        box.y = 0;
+        box.width = width - 2 * mid;
+        box.height = height;
+        if (box.width > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+
+    return region;
+}
+
 gboolean dm_corner_radius_is_rounded(double radius)
 {
     return radius > 0.5;
