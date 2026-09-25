@@ -9,6 +9,11 @@ typedef struct _GtkWidget GtkWidget;
 
 #define DM_HISTORY_MAX 4096U
 #define DM_DEFAULT_HEIGHT 220
+/* Smallest usable applet. Below ~60 px of height the two temperature lines
+ * overlap each other, and below ~80 px of width the graph has no room left for
+ * columns, so this is the floor rather than an arbitrary number. */
+#define DM_MIN_WINDOW_WIDTH 80
+#define DM_MIN_WINDOW_HEIGHT 60
 
 typedef struct {
     guint64 read_bytes;

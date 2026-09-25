@@ -702,8 +702,12 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
             g_object_unref(pctx);
             for (li = 0; li < lines; li++) {
                 int line_y = temp_y + (int)li * step;
+
+                /* A line that does not fit is skipped, not clamped: clamping
+                 * piled every line onto the bottom edge, so on a short applet
+                 * the two temperature values landed on top of each other. */
                 if (line_y > height - 1)
-                    line_y = height - 1;
+                    break;
                 dm_show_text(cr, layout, priv->temp_font, temp_x, line_y,
                              temp_lines[li], priv->temp_text_color, width, height);
             }
@@ -780,8 +784,8 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     /* g_new0 would leave secondary_milli at 0, which is a valid temperature. */
     priv->device.secondary_milli = G_MININT;
     priv->generation = (guint64)g_get_monotonic_time() ^ (guint64)(guintptr)p;
-    priv->width = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_width",DM_DEFAULT_WIDTH),160,1600);
-    priv->height = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_height",DM_DEFAULT_HEIGHT),120,1200);
+    priv->width = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_width",DM_DEFAULT_WIDTH),DM_MIN_WINDOW_WIDTH,1600);
+    priv->height = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_height",DM_DEFAULT_HEIGHT),DM_MIN_WINDOW_HEIGHT,1200);
     priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf,p->name,"corner_radius",0),0,200);
     priv->design_width = priv->width;
     priv->design_height = priv->height;
@@ -1245,7 +1249,7 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     dm_bind(entry, ctx, "toggled", G_CALLBACK(dm_temperature_history_toggled));
     entry=xs_prop_add_string(GTK_BOX(page),"Graph label","Text shown over the graph",priv->graph_label);
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
-    dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"corner_radius","Corner radius",priv->corner_radius,0,200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
+    dm_add_int(page,ctx,"window_width","Window width",priv->width,DM_MIN_WINDOW_WIDTH,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,DM_MIN_WINDOW_HEIGHT,1200); dm_add_int(page,ctx,"corner_radius","Corner radius",priv->corner_radius,0,200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
     dm_add_separator(page);
     /* No history row: the label draws no fill, so the block must not offer a
      * second colour button for one. */
