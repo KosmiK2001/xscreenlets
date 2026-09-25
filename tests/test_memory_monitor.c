@@ -14,6 +14,12 @@ static void test_responsive_graph_width(void)
     assert(mm_graph_width(320, 112, 4, 6) == 194);
     assert(mm_graph_width(200, 112, 4, 6) == 74);
     assert(mm_graph_width(80, 200, 4, 6) == 20);
+    assert(mm_graph_height(100) == 12);
+    assert(mm_graph_height(120) == 22);
+    assert(mm_graph_height(240) == 88);
+    assert(mm_graph_height(320) == 128);
+    assert(mm_graph_height(344) == 140);
+    assert(mm_graph_height(600) == 268);
 }
 
 int main(void)

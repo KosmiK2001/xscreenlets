@@ -81,3 +81,10 @@ int mm_graph_width(int window_width, int text_width, int margin, int gap)
 
     return MAX(20, available);
 }
+
+int mm_graph_height(int window_height)
+{
+    if (window_height < 200)
+        return MAX(12, (window_height - 76) / 2);
+    return MAX(40, (window_height - 64) / 2);
+}

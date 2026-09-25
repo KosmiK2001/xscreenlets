@@ -13,8 +13,6 @@
 
 #define MM_DEFAULT_WINDOW_WIDTH 320
 #define MM_DEFAULT_WINDOW_HEIGHT 344
-#define MM_DEFAULT_RAM_HEIGHT 140
-#define MM_DEFAULT_SWAP_HEIGHT 140
 #define MM_HISTORY_MAX 4096
 #define MM_DEFAULT_FONT "Ubuntu 8"
 #define MM_PAD 4.0
@@ -25,8 +23,6 @@ typedef struct {
     guint update_ms;
     int window_width;
     int window_height;
-    int ram_graph_height;
-    int swap_graph_height;
     char *font;
     gdouble background_color[4];
     gdouble text_color[4];
@@ -191,11 +187,12 @@ static void mm_draw_stippled_hr(cairo_t *cr, double x, double y, double width,
     cairo_fill(cr);
 }
 
-static char *mm_section_text(guint64 used, guint64 total)
+static char *mm_section_text(guint64 used, guint64 total, gboolean compact)
 {
     char *used_text = mm_format_kib(used);
     char *total_text = mm_format_kib(total);
-    char *result = g_strdup_printf("%s\n%s", used_text, total_text);
+    char *result = g_strdup_printf(compact ? "%s / %s" : "%s\n%s",
+                                   used_text, total_text);
 
     g_free(total_text);
     g_free(used_text);
@@ -215,7 +212,14 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     char *text;
     int detail_width = 0;
     int graph_width;
+    int graph_height;
     double ram_x = MM_PAD;
+    double ram_y = 22.0;
+    double swap_y;
+    double swap_label_y;
+    double swap_text_y;
+    double section_hr_y;
+    gboolean compact;
     double text_x;
     int text_width;
 
@@ -228,6 +232,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     layout = pango_cairo_create_layout(cr);
     pango_layout_set_font_description(layout, font);
     pango_font_description_free(font);
+    compact = height < 200;
 
     if (priv->sample.valid) {
         int max_text_width;
@@ -239,8 +244,9 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
             swap_used = priv->sample.swap_total_kib -
                         MIN(priv->sample.swap_free_kib,
                             priv->sample.swap_total_kib);
-        ram_section = mm_section_text(ram_used, priv->sample.total_kib);
-        swap_section = mm_section_text(swap_used, priv->sample.swap_total_kib);
+        ram_section = mm_section_text(ram_used, priv->sample.total_kib, compact);
+        swap_section = mm_section_text(swap_used, priv->sample.swap_total_kib,
+                                      compact);
         max_text_width = MAX(1, width - 2 * (int)MM_PAD - 20 - 6);
         pango_layout_set_width(layout, max_text_width * PANGO_SCALE);
         pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
@@ -252,6 +258,13 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         detail_width = MAX(detail_width, measured_width);
     }
     graph_width = mm_graph_width(width, detail_width, (int)MM_PAD, 6);
+    graph_height = mm_graph_height(height);
+    compact = height < 200;
+    ram_y = compact ? 14.0 : 22.0;
+    swap_y = compact ? 48.0 : ram_y + graph_height + 32.0;
+    section_hr_y = compact ? 42.0 : ram_y + graph_height + 6.0;
+    swap_label_y = compact ? 28.0 : ram_y + graph_height + 10.0;
+    swap_text_y = compact ? 52.0 : swap_y + 4.0;
     text_x = ram_x + graph_width + 6.0;
     text_width = MAX(1, width - (int)text_x - (int)MM_PAD);
 
@@ -271,14 +284,14 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         swap_used = priv->sample.swap_total_kib -
                     MIN(priv->sample.swap_free_kib, priv->sample.swap_total_kib);
 
-    /* Both histories use all horizontal space left after the measured text. */
-    mm_draw_graph(cr, ram_x, 22.0, graph_width,
-                  priv->ram_graph_height, priv->ram_history, priv->ram_head,
+    /* Both histories use the same responsive width and height. */
+    mm_draw_graph(cr, ram_x, ram_y, graph_width, graph_height,
+                  priv->ram_history, priv->ram_head,
                   priv->ram_count, priv->ram_color, priv->border_color);
-    mm_draw_graph(cr, ram_x, 194.0, graph_width,
-                  priv->swap_graph_height, priv->swap_history, priv->swap_head,
+    mm_draw_graph(cr, ram_x, swap_y, graph_width, graph_height,
+                  priv->swap_history, priv->swap_head,
                   priv->swap_count, priv->swap_color, priv->border_color);
-    mm_draw_stippled_hr(cr, MM_PAD, 168.0,
+    mm_draw_stippled_hr(cr, MM_PAD, section_hr_y,
                         width - 2 * MM_PAD, priv->text_color);
 
     pango_layout_set_width(layout, width * PANGO_SCALE);
@@ -300,9 +313,9 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, ram_section, -1);
     mm_set_text_color(cr, priv->text_color);
-    cairo_move_to(cr, text_x, 26.0);
+    cairo_move_to(cr, text_x, compact ? 16.0 : 26.0);
     pango_cairo_show_layout(cr, layout);
-    {
+    if (!compact) {
         int layout_height = 0;
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
@@ -317,13 +330,13 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, "Swap:", -1);
     mm_set_text_color(cr, priv->text_color);
-    cairo_move_to(cr, MM_PAD, 174.0);
+    cairo_move_to(cr, MM_PAD, swap_label_y);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_swap_fraction(&priv->sample) * 100.0);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->swap_color);
     pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, 0.0, 174.0);
+    cairo_move_to(cr, 0.0, swap_label_y);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
@@ -332,15 +345,15 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, swap_section, -1);
     mm_set_text_color(cr, priv->text_color);
-    cairo_move_to(cr, text_x, 198.0);
+    cairo_move_to(cr, text_x, swap_text_y);
     pango_cairo_show_layout(cr, layout);
-    {
+    if (!compact) {
         int layout_height = 0;
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
         pango_layout_get_pixel_size(layout, NULL, &layout_height);
         line_height = MAX(layout_height / line_count, 1);
-        mm_draw_stippled_hr(cr, text_x, 198.0 + line_height - 1.0,
+        mm_draw_stippled_hr(cr, text_x, swap_text_y + line_height - 1.0,
                             text_width, priv->text_color);
     }
 
@@ -378,17 +391,13 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
                                        "update_ms", 1000), 100, 60000);
     priv->window_width = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                        "window_width", MM_DEFAULT_WINDOW_WIDTH),
-                               120, 1600);
+                               100, 1600);
     priv->window_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                         "window_height", MM_DEFAULT_WINDOW_HEIGHT),
-                                320, 1200);
-    priv->ram_graph_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
-                                           "ram_graph_height", MM_DEFAULT_RAM_HEIGHT),
-                                   40, 140);
-    priv->swap_graph_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
-                                            "swap_graph_height", MM_DEFAULT_SWAP_HEIGHT),
-                                    40, 140);
+                                100, 1200);
     priv->font = xs_host_api()->conf_str(kf, p->name, "font", MM_DEFAULT_FONT);
+    g_key_file_remove_key(priv->kf, p->name, "ram_graph_height", NULL);
+    g_key_file_remove_key(priv->kf, p->name, "swap_graph_height", NULL);
     mm_read_color(priv, "background_color", mm_default_background, priv->background_color);
     mm_read_color(priv, "text_color", mm_default_text, priv->text_color);
     mm_read_color(priv, "border_color", mm_default_border, priv->border_color);
@@ -398,8 +407,6 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
     g_key_file_set_integer(kf, p->name, "window_width", priv->window_width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->window_height);
-    g_key_file_set_integer(kf, p->name, "ram_graph_height", priv->ram_graph_height);
-    g_key_file_set_integer(kf, p->name, "swap_graph_height", priv->swap_graph_height);
     if (!g_key_file_has_key(kf, p->name, "font", NULL))
         g_key_file_set_string(kf, p->name, "font", priv->font);
     xs_core_plugin_conf_flush(p->name);
@@ -491,13 +498,9 @@ static void mm_int_changed(GtkSpinButton *spin, gpointer data)
         priv->update_ms = (guint)CLAMP(value, 100, 60000);
         xs_host_api()->set_tick(p, priv->update_ms);
     } else if (strcmp(key, "window_width") == 0)
-        priv->window_width = CLAMP(value, 120, 1600);
+        priv->window_width = CLAMP(value, 100, 1600);
     else if (strcmp(key, "window_height") == 0)
-        priv->window_height = CLAMP(value, 320, 1200);
-    else if (strcmp(key, "ram_graph_height") == 0)
-        priv->ram_graph_height = CLAMP(value, 40, 140);
-    else
-        priv->swap_graph_height = CLAMP(value, 40, 140);
+        priv->window_height = CLAMP(value, 100, 1200);
     g_key_file_set_integer(priv->kf, p->name, key, value);
     xs_host_api()->resize(p, priv->window_width, priv->window_height);
     priv->cache_width = priv->window_width;
@@ -595,10 +598,8 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
     xs_prop_add_group_header(GTK_BOX(page),
                              "RAM and swap histories are sampled from /proc/meminfo; each tick scrolls both graphs right-to-left.");
     mm_add_int(page, p, "update_ms", "Update (ms)", priv->update_ms, 100, 60000);
-    mm_add_int(page, p, "window_width", "Window width", priv->window_width, 120, 1600);
-    mm_add_int(page, p, "window_height", "Window height", priv->window_height, 320, 1200);
-    mm_add_int(page, p, "ram_graph_height", "RAM graph height", priv->ram_graph_height, 40, 140);
-    mm_add_int(page, p, "swap_graph_height", "Swap graph height", priv->swap_graph_height, 40, 140);
+    mm_add_int(page, p, "window_width", "Window width", priv->window_width, 100, 1600);
+    mm_add_int(page, p, "window_height", "Window height", priv->window_height, 100, 1200);
     font = xs_prop_add_font(GTK_BOX(page), "Font", "Monitor text font", priv->font);
     g_signal_connect(font, "font-set", G_CALLBACK(mm_font_set), p);
     mm_add_color(page, p, "background_color", "Background", priv->background_color);
