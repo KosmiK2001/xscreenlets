@@ -302,13 +302,15 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_cairo_show_layout(cr, layout);
     {
         int layout_height = 0;
+        int values_width = 0;
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
-        pango_layout_get_pixel_size(layout, NULL, &layout_height);
+        pango_layout_get_pixel_size(layout, &values_width, &layout_height);
         line_height = MAX(layout_height / line_count, 1);
         mm_draw_stippled_hr(cr, text_x,
                             (compact ? 16.0 : 26.0) + line_height - 1.0,
-                            text_width, priv->text_color);
+                            mm_stippled_width(values_width, text_width),
+                            priv->text_color);
     }
 
     pango_layout_set_width(layout, header_width * PANGO_SCALE);
@@ -335,12 +337,14 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_cairo_show_layout(cr, layout);
     {
         int layout_height = 0;
+        int values_width = 0;
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
-        pango_layout_get_pixel_size(layout, NULL, &layout_height);
+        pango_layout_get_pixel_size(layout, &values_width, &layout_height);
         line_height = MAX(layout_height / line_count, 1);
         mm_draw_stippled_hr(cr, text_x, swap_text_y + line_height - 1.0,
-                            text_width, priv->text_color);
+                            mm_stippled_width(values_width, text_width),
+                            priv->text_color);
     }
 
 done:

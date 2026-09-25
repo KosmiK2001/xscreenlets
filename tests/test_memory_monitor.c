@@ -37,6 +37,9 @@ static void test_responsive_graph_width(void)
     assert(mm_compact_hr_y(180) == 88);
     assert(mm_compact_content_width(100) == 92);
     assert(mm_compact_content_width(320) == 312);
+    assert(mm_stippled_width(80, 200) == 80);
+    assert(mm_stippled_width(240, 200) == 200);
+    assert(mm_stippled_width(0, 200) == 0);
 }
 
 int main(void)
