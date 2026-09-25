@@ -1647,6 +1647,67 @@ static void test_diskstats_write_column(void)
     assert(write == 7);
 }
 
+/* dm_rate_bytes_per_second() can legitimately return G_MAXINT64 on a huge
+ * delta, so averaging a full window of such values overflowed a signed
+ * gint64. Signed overflow is undefined behaviour, not a large number. */
+static void test_rate_smooth_saturation(void)
+{
+    DmHistoryState h;
+    guint i;
+
+    memset(&h, 0, sizeof(h));
+    dm_rate_smooth_reset(&h);
+    for (i = 0; i < DM_RATE_SMOOTH_MAX; i++)
+        dm_rate_smooth_push(&h, G_MAXINT64, G_MAXINT64);
+    /* The sum saturates instead of wrapping, so the mean stays positive and
+     * finite. The exact value is the saturated sum divided by the count, not
+     * G_MAXINT64 itself -- what matters is that it did not overflow. */
+    g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, FALSE), >, 0);
+    g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, FALSE), ==,
+                    G_MAXINT64 / (gint64)DM_RATE_SMOOTH_MAX);
+    g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, TRUE), >, 0);
+
+    /* A single huge value next to normal ones must not poison the sum. */
+    dm_rate_smooth_reset(&h);
+    dm_rate_smooth_push(&h, G_MAXINT64, G_MAXINT64);
+    dm_rate_smooth_push(&h, 100, 100);
+    dm_rate_smooth_push(&h, 100, 100);
+    g_assert_cmpint(dm_rate_smoothed(&h, 3, FALSE), >, 0);
+}
+
+/* A failed diskstats read breaks the time series: rates from before the gap
+ * must not be averaged together with rates from after it. */
+static void test_diskstats_failure_clears_rate_ring(void)
+{
+    DmHistoryState h;
+
+    memset(&h, 0, sizeof(h));
+    dm_rate_smooth_reset(&h);
+    dm_rate_smooth_push(&h, 1000000, 1000000);
+    dm_rate_smooth_push(&h, 1000000, 1000000);
+    g_assert_cmpint(dm_rate_smoothed(&h, 2, FALSE), ==, 1000000);
+
+    dm_diskstats_sample_failed(&h, 0);
+    g_assert_cmpint(h.previous_valid, ==, FALSE);
+    g_assert_cmpint(h.rate_count, ==, 0);
+    g_assert_cmpint(dm_rate_smoothed(&h, 2, FALSE), ==, 0);
+}
+
+/* dm_parse_u64() dereferences its out pointer, so a NULL destination must be
+ * rejected rather than crash. It is static, so the guard is exercised through
+ * the public parser that calls it. */
+static void test_parse_null_inputs_rejected(void)
+{
+    guint64 read = 0, write = 0;
+
+    /* NULL device name and NULL text must both be refused, not dereferenced. */
+    g_assert_false(dm_parse_diskstats_named(NULL, "sda", &read, &write));
+    g_assert_false(dm_parse_diskstats_named("garbage", NULL, &read, &write));
+    /* A line that is not all digits must not be coerced into a value. */
+    g_assert_false(dm_parse_diskstats_named("   8 0 sda x y 1 2 3 4 5 6 7 8",
+                                           "sda", &read, &write));
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1694,6 +1755,9 @@ int main(void)
     test_find_hwmon_temp_layouts();
     test_sector_units_independent_of_logical_block_size();
     test_rate_smoothing();
+    test_rate_smooth_saturation();
+    test_diskstats_failure_clears_rate_ring();
+    test_parse_null_inputs_rejected();
     test_series_color_picker_is_rgb_only();
     test_rounded_region();
     test_rounded_region_cut_profile();

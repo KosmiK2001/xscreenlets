@@ -172,8 +172,17 @@ static void dm_hddtemp_done(GObject *source, GAsyncResult *result,
     /* A cancelled task returns an error and g_task_propagate_int() then yields
      * 0, which is a VALID temperature. Treat any error as "no reading" so a
      * shutdown cannot flash 0 C over the real value. */
-    if (g_task_is_valid(result, NULL) && !g_task_propagate_int(G_TASK(result), &error))
-        temperature = error ? G_MININT : temperature;
+    if (g_task_is_valid(result, NULL)) {
+        /* g_task_propagate_int() returns the task's int VALUE, not a boolean,
+         * so testing it for truthiness threw away every valid reading above 0
+         * and only a literal 0 C was applied. Take the value and treat a set
+         * error as "no reading". */
+        temperature = g_task_propagate_int(G_TASK(result), &error);
+        if (error) {
+            temperature = G_MININT;
+            g_clear_error(&error);
+        }
+    }
     g_clear_error(&error);
 
     live = request->instance_name ? xs_core_find_instance(request->instance_name) : NULL;
@@ -263,7 +272,11 @@ static void dm_sample(PrivData *priv)
                 device->sample.write_bytes = (guint64)write_rate;
             device->sample.io_valid = TRUE;
         }
-        dm_rate_smooth_push(&device->history, read_rate, write_rate);
+        /* Only a real rate may enter the ring: the very first diskstats read
+         * only establishes the base counters, and pushing 0/0 for it would
+         * halve the first genuine reading under a window of 2. */
+        if (have_rates)
+            dm_rate_smooth_push(&device->history, read_rate, write_rate);
         if (priv->rate_smooth > 1 && device->sample.io_valid) {
             gint64 sr = dm_rate_smoothed(&device->history, priv->rate_smooth, FALSE);
             gint64 sw = dm_rate_smoothed(&device->history, priv->rate_smooth, TRUE);
@@ -319,11 +332,16 @@ static void dm_sample(PrivData *priv)
     else
         device->secondary_milli = G_MININT;
     g_clear_pointer(&text, g_free);
-    if (!device->sample.temperature_valid)
-        dm_start_hddtemp(priv, now);
-    else if (device->cached_hddtemp_valid) {
-        device->sample.temperature_valid = TRUE;
-        device->sample.temperature_milli = device->cached_hddtemp_milli;
+    if (!device->sample.temperature_valid) {
+        /* hddtemp is only a fallback: a cached value must never overwrite a
+         * valid hwmon reading, or the primary source would be masked by the
+         * fallback that only exists because hwmon was missing earlier. */
+        if (device->cached_hddtemp_valid) {
+            device->sample.temperature_valid = TRUE;
+            device->sample.temperature_milli = device->cached_hddtemp_milli;
+        } else {
+            dm_start_hddtemp(priv, now);
+        }
     }
     if (diskstats_sampled)
         device->history.previous_time_us = now;
@@ -804,7 +822,7 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     if (!g_key_file_has_key(kf, p->name, "write_font", NULL)) g_key_file_set_string(kf,p->name,"write_font",priv->write_font);
     if (!g_key_file_has_key(kf, p->name, "temp_font", NULL)) g_key_file_set_string(kf,p->name,"temp_font",priv->temp_font);
     g_key_file_set_boolean(kf,p->name,"show_temperature_history",priv->show_temperature_history);
-    g_key_file_set_integer(kf,p->name,"window_width",priv->width); g_key_file_set_integer(kf,p->name,"window_height",priv->height); g_key_file_set_integer(kf,p->name,"update_ms",priv->update_ms);
+    g_key_file_set_integer(kf,p->name,"window_width",priv->width); g_key_file_set_integer(kf,p->name,"window_height",priv->height); g_key_file_set_integer(kf,p->name,"update_ms",priv->update_ms); g_key_file_set_integer(kf,p->name,"rate_smooth",priv->rate_smooth);
     g_key_file_set_integer(kf,p->name,"corner_radius",priv->corner_radius);
     xs_core_plugin_conf_flush(p->name); g_ptr_array_free(disks,TRUE);
     x=xs_host_api()->conf_int(kf,p->name,"x",80); y=xs_host_api()->conf_int(kf,p->name,"y",80); opacity=xs_host_api()->conf_dbl(kf,p->name,"opacity",1.0);
@@ -933,7 +951,11 @@ static void dm_position_changed(GtkSpinButton *spin, gpointer data)
     else if (!strcmp(key,"label_x")) priv->label_x=value; else if (!strcmp(key,"label_y")) priv->label_y=value;
     else if (!strcmp(key,"window_width")) priv->width=value; else if (!strcmp(key,"window_height")) priv->height=value;
     else if (!strcmp(key,"corner_radius")) priv->corner_radius=value;
-    else if (!strcmp(key,"update_ms")) { priv->update_ms=value; xs_host_api()->set_tick(p,value); }
+    else if (!strcmp(key,"rate_smooth")) {
+            priv->rate_smooth = CLAMP(value, DM_RATE_SMOOTH_MIN, DM_RATE_SMOOTH_MAX);
+            value = priv->rate_smooth;
+        }
+        else if (!strcmp(key,"update_ms")) { priv->update_ms=value; xs_host_api()->set_tick(p,value); }
     g_key_file_set_integer(priv->kf,p->name,key,value); xs_core_plugin_conf_flush(p->name);
     xs_host_api()->resize(p,priv->width,priv->height); priv->cache_width=priv->width; priv->cache_height=priv->height; dm_rebuild(priv); gtk_widget_queue_draw(p->win);
 }

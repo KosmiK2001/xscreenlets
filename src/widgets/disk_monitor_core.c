@@ -781,7 +781,7 @@ static gboolean dm_parse_u64(const char *text, guint64 *out)
 
     /* Only the leading integer matters: /proc/diskstats fields are followed by
      * more " key=" pairs, and the temperature file ends with a newline. */
-    if (!text || !g_ascii_isdigit(*text))
+    if (!text || !out || !g_ascii_isdigit(*text))
         return FALSE;
     errno = 0;
     value = g_ascii_strtoull(text, &end, 10);
@@ -877,6 +877,9 @@ void dm_diskstats_sample_failed(DmHistoryState *history, gint64 now_us)
     history->previous_write = 0;
     history->previous_time_us = 0;
     history->previous_valid = FALSE;
+    /* A failed read breaks the time series, so rates from before the gap
+     * must not be averaged together with rates from after it. */
+    dm_rate_smooth_reset(history);
 }
 
 gint dm_parse_temperature(const char *text)
@@ -1441,10 +1444,17 @@ gint64 dm_rate_smoothed(const DmHistoryState *history, int window, gboolean writ
     if (count == 0)
         return 0;
     /* Walk BACKWARDS from the newest entry so the most recent samples are
-     * always the ones counted when the window is shorter than the history. */
+     * always the ones counted when the window is shorter than the history.
+     * The running sum saturates: dm_rate_bytes_per_second() can legitimately
+     * return G_MAXINT64, and adding fourteen of those overflows a signed
+     * gint64, which is undefined behaviour rather than a large number. */
     for (i = 0; i < count; i++) {
         guint idx = (history->rate_head + DM_RATE_SMOOTH_MAX - 1 - i) %
                     DM_RATE_SMOOTH_MAX;
+        if (sum > G_MAXINT64 - ring[idx]) {
+            sum = G_MAXINT64;
+            break;
+        }
         sum += ring[idx];
     }
     return sum / (gint64)count;
