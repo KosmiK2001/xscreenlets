@@ -131,7 +131,11 @@ static GPtrArray *dm_discover_disks(void)
         g_free(full);
     }
     g_dir_close(dir);
-    g_ptr_array_sort(names, (GCompareFunc)g_strcmp0);
+    /* g_ptr_array_sort() passes each element as gpointer*, but g_strcmp0()
+     * expects the char* itself, so casting it straight to GCompareFunc
+     * compares the ADDRESSES of the strings and leaves the list in
+     * directory order. The wrapper dereferences first. */
+    g_ptr_array_sort(names, dm_compare_disk_names);
     for (i = 0; i < names->len; i++) {
         char *full = g_build_filename(DM_BY_ID_DIR, g_ptr_array_index(names, i), NULL);
         char *real = realpath(full, NULL);
@@ -153,9 +157,10 @@ static void dm_hddtemp_thread(GTask *task, gpointer source,
     gint result = G_MININT;
     (void)source;
     (void)cancellable;
-    if (!g_task_return_error_if_cancelled(task))
-        result = dm_hddtemp_query("127.0.0.1", 7634,
-                                  request->device_path, 500);
+    if (g_task_return_error_if_cancelled(task))
+        return;   /* already completed with an error; do not return twice */
+    result = dm_hddtemp_query("127.0.0.1", 7634,
+                              request->device_path, 500);
     g_task_return_int(task, result);
 }
 
@@ -1036,7 +1041,17 @@ static void dm_disk_changed(GtkComboBox *combo, gpointer data)
         return;
     }
     /* Atomic commit: prepared state replaces the live state in one step, and
-     * the config is written only for the state that actually took effect. */
+     * the config is written only for the state that actually took effect.
+     * A hddtemp request for the previous disk must be cancelled first: while
+     * it is still in flight dm_hddtemp_start_allowed() refuses to start the
+     * new disk's request, so the fallback temperature would be delayed by a
+     * query for a device that is no longer shown. */
+    if (priv->hddtemp_task) {
+        g_cancellable_cancel(priv->hddtemp_cancellable);
+        g_clear_object(&priv->hddtemp_task);
+        g_clear_object(&priv->hddtemp_cancellable);
+    }
+    priv->generation++;
     dm_device_state_clear(&priv->device);
     priv->device = prepared;
     memset(&prepared, 0, sizeof(prepared));

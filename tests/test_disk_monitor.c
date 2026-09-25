@@ -1708,6 +1708,36 @@ static void test_parse_null_inputs_rejected(void)
                                            "sda", &read, &write));
 }
 
+/* g_ptr_array_sort() passes each element as gpointer*. Casting g_strcmp0
+ * straight to GCompareFunc therefore compares the ADDRESSES of the strings.
+ * Two elements can coincide by luck; six fresh allocations cannot, so the
+ * disk list silently stayed in directory order. */
+static void test_disk_name_comparator(void)
+{
+    static const char *const input[] = {
+        "wwn-0x5000cca8c8ca0460",
+        "ata-HGST_HTS721010A9E630_JR1020D30R13TF",
+        "wwn-0x5000cca8bcc7a947",
+        "ata-Samsung_SSD_870_EVO",
+        "nvme-eui.0025385a01b0a1f2",
+        "wwn-0x5002538f92321692",
+    };
+    GPtrArray *arr = g_ptr_array_new();
+    guint i;
+
+    /* Fresh allocations so the addresses are not in string order. */
+    for (i = 0; i < G_N_ELEMENTS(input); i++)
+        g_ptr_array_add(arr, g_strdup(input[i]));
+    g_ptr_array_sort(arr, dm_compare_disk_names);
+    for (i = 1; i < arr->len; i++)
+        g_assert_cmpint(strcmp((char *)g_ptr_array_index(arr, i - 1),
+                               (char *)g_ptr_array_index(arr, i)), <, 0);
+    g_ptr_array_free(arr, TRUE);
+
+    /* NULL elements must not crash the comparator. */
+    g_assert_cmpint(dm_compare_disk_names(NULL, NULL), ==, 0);
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1755,6 +1785,7 @@ int main(void)
     test_find_hwmon_temp_layouts();
     test_sector_units_independent_of_logical_block_size();
     test_rate_smoothing();
+    test_disk_name_comparator();
     test_rate_smooth_saturation();
     test_diskstats_failure_clears_rate_ring();
     test_parse_null_inputs_rejected();

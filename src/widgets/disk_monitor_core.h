@@ -272,6 +272,7 @@ guint dm_history_columns(int width, guint available);
 gboolean dm_by_id_link_name_is_candidate(const char *link_name);
 char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
                          char **secondary);
+gint dm_compare_disk_names(gconstpointer a, gconstpointer b);
 void dm_rate_smooth_reset(DmHistoryState *history);
 void dm_rate_smooth_push(DmHistoryState *history, gint64 read_rate,
                          gint64 write_rate);

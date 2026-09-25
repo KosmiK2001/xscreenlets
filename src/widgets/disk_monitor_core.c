@@ -959,7 +959,12 @@ gint dm_hddtemp_query(const char *host, guint16 port,
         return G_MININT;
     deadline_us = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
     client = g_socket_client_new();
-    g_socket_client_set_timeout(client, timeout_ms);
+    /* g_socket_client_set_timeout() takes SECONDS, not milliseconds. Passing
+     * timeout_ms straight through meant a "500 ms" budget was in fact 500 s
+     * for the connect alone, so a hung endpoint could pin the worker thread
+     * far past the deadline the rest of this function enforces. The explicit
+     * deadline_us below still governs send/receive. */
+    g_socket_client_set_timeout(client, MAX(1u, (timeout_ms + 999u) / 1000u));
     connection = g_socket_client_connect_to_host(client, host, port, NULL, &error);
     if (!connection) {
         g_clear_error(&error);
@@ -1403,6 +1408,19 @@ int dm_disk_logical_sector_size(const char *device_name)
  * per-tick rates and report their mean. The ring is fixed-capacity and only
  * the window length changes, so resize and Properties cannot reallocate it
  * while tick/draw are running. */
+gint dm_compare_disk_names(gconstpointer a, gconstpointer b)
+{
+    /* g_ptr_array_sort() hands the comparator each element as gpointer*, so a
+     * bare g_strcmp0 cast compares the string ADDRESSES. With six or more
+     * fresh allocations that visibly leaves the list unsorted.
+     * The guards matter: g_strcmp0() tolerates NULL strings, but only if the
+     * pointers are already unpacked -- dereferencing first would crash. */
+    const char *left = a ? *(const char *const *)a : NULL;
+    const char *right = b ? *(const char *const *)b : NULL;
+
+    return g_strcmp0(left, right);
+}
+
 void dm_rate_smooth_reset(DmHistoryState *history)
 {
     guint i;
