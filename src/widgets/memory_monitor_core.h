@@ -19,5 +19,6 @@ int mm_graph_height(int window_height);
 int mm_compact_graph_height(int window_height);
 int mm_compact_hr_y(int window_height);
 int mm_compact_content_width(int window_width);
+char *mm_section_values_text(guint64 used_kib, guint64 total_kib);
 
 #endif

@@ -113,22 +113,6 @@ static gboolean mm_read_meminfo(MemorySample *sample)
     return valid;
 }
 
-static char *mm_format_kib(guint64 kib)
-{
-    static const char *units[] = {"KiB", "MiB", "GiB", "TiB", "PiB"};
-    gdouble value = kib;
-    guint i = 0;
-
-    while (value >= 1024.0 && i + 1 < G_N_ELEMENTS(units)) {
-        value /= 1024.0;
-        i++;
-    }
-    if (i == 0)
-        return g_strdup_printf("%.0f %s", value, units[i]);
-    return g_strdup_printf(value < 10.0 ? "%.2f %s" : "%.1f %s",
-                           value, units[i]);
-}
-
 static void mm_push(gdouble *history, guint *head, guint *count, gdouble value)
 {
     history[*head] = CLAMP(value, 0.0, 1.0);
@@ -187,18 +171,6 @@ static void mm_draw_stippled_hr(cairo_t *cr, double x, double y, double width,
     cairo_fill(cr);
 }
 
-static char *mm_section_text(guint64 used, guint64 total, gboolean compact)
-{
-    char *used_text = mm_format_kib(used);
-    char *total_text = mm_format_kib(total);
-    char *result = g_strdup_printf(compact ? "%s / %s" : "%s\n%s",
-                                   used_text, total_text);
-
-    g_free(total_text);
-    g_free(used_text);
-    return result;
-}
-
 static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
 {
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
@@ -245,9 +217,9 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
             swap_used = priv->sample.swap_total_kib -
                         MIN(priv->sample.swap_free_kib,
                             priv->sample.swap_total_kib);
-        ram_section = mm_section_text(ram_used, priv->sample.total_kib, compact);
-        swap_section = mm_section_text(swap_used, priv->sample.swap_total_kib,
-                                      compact);
+        ram_section = mm_section_values_text(ram_used, priv->sample.total_kib);
+        swap_section = mm_section_values_text(swap_used,
+                                              priv->sample.swap_total_kib);
         max_text_width = MAX(1, width - 2 * (int)MM_PAD - 20 - 6);
         pango_layout_set_width(layout, max_text_width * PANGO_SCALE);
         pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
@@ -328,13 +300,14 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     mm_set_text_color(cr, priv->text_color);
     cairo_move_to(cr, text_x, compact ? 16.0 : 26.0);
     pango_cairo_show_layout(cr, layout);
-    if (!compact) {
+    {
         int layout_height = 0;
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
         pango_layout_get_pixel_size(layout, NULL, &layout_height);
         line_height = MAX(layout_height / line_count, 1);
-        mm_draw_stippled_hr(cr, text_x, 26.0 + line_height - 1.0,
+        mm_draw_stippled_hr(cr, text_x,
+                            (compact ? 16.0 : 26.0) + line_height - 1.0,
                             text_width, priv->text_color);
     }
 
@@ -360,7 +333,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     mm_set_text_color(cr, priv->text_color);
     cairo_move_to(cr, text_x, swap_text_y);
     pango_cairo_show_layout(cr, layout);
-    if (!compact) {
+    {
         int layout_height = 0;
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;

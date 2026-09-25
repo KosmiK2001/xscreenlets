@@ -75,6 +75,33 @@ gdouble mm_swap_fraction(const MemorySample *sample)
                  (gdouble)sample->swap_total_kib, 0.0, 1.0);
 }
 
+static char *mm_format_kib_full(guint64 kib)
+{
+    static const char *units[] = {"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+    gdouble value = kib;
+    guint i = 0;
+
+    while (value >= 1024.0 && i + 1 < G_N_ELEMENTS(units)) {
+        value /= 1024.0;
+        i++;
+    }
+    if (i == 0)
+        return g_strdup_printf("%.0f %s", value, units[i]);
+    return g_strdup_printf(value < 10.0 ? "%.2f %s" : "%.1f %s",
+                           value, units[i]);
+}
+
+char *mm_section_values_text(guint64 used_kib, guint64 total_kib)
+{
+    char *used_text = mm_format_kib_full(used_kib);
+    char *total_text = mm_format_kib_full(total_kib);
+    char *result = g_strdup_printf("%s\n%s", used_text, total_text);
+
+    g_free(total_text);
+    g_free(used_text);
+    return result;
+}
+
 int mm_graph_width(int window_width, int text_width, int margin, int gap)
 {
     int available = window_width - MAX(text_width, 0) - 2 * margin - gap;

@@ -9,6 +9,15 @@ static int close_enough(double a, double b)
     return fabs(a - b) < 0.000001;
 }
 
+static void test_section_values_text(void)
+{
+    char *text = mm_section_values_text(1536, 4096);
+
+    assert(strchr(text, '\n') != NULL);
+    assert(strchr(text, '/') == NULL);
+    g_free(text);
+}
+
 static void test_responsive_graph_width(void)
 {
     assert(mm_graph_width(320, 112, 4, 6) == 194);
@@ -66,6 +75,7 @@ int main(void)
     assert(close_enough(mm_ram_fraction(&sample), 0.0));
     assert(close_enough(mm_swap_fraction(&sample), 0.0));
 
+    test_section_values_text();
     test_responsive_graph_width();
     puts("memory_monitor parser tests: OK");
     return 0;
