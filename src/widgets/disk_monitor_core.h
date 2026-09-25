@@ -32,6 +32,10 @@ typedef struct {
     char *device_name;
     char *device_path;
     char *temp_path;
+    /* Some NVMe drives expose a composite sensor plus a second one; both are
+     * shown. The graph still uses the primary temp_path sensor. */
+    char *temp_path_secondary;
+    gint secondary_milli;
     gboolean resolved;
     DiskSample sample;
     DmHistoryState history;
@@ -108,6 +112,12 @@ gboolean dm_series_block_spec(const char *title,
                                DmSeriesBlockSpec *out);
 GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
                                   GtkWidget **content);
+GtkWidget *dm_disk_selector_widget(GtkWidget *combo);
+char *dm_format_temperature(const gint *milli, guint count);
+char **dm_format_temperature_lines(const gint *milli, guint count,
+                                   guint *out_lines);
+GtkWidget *dm_properties_scroller(GtkWidget *page, int width, int height);
+void dm_properties_size(const char *plugin_type, int *width, int *height);
 
 DmDialogContext *dm_dialog_context_new(const char *instance_name);
 DmDialogContext *dm_dialog_context_ref(DmDialogContext *ctx);
@@ -139,6 +149,9 @@ gboolean dm_temperature_completion_apply(DiskSample *sample,
                                         gboolean resolved);
 void dm_temperature_request_clear(DmTemperatureRequest *request);
 
+int dm_scale_position(int value, int design_size, int live_size, int max);
+int dm_fit_text_coordinate(int anchor, int text_extent, int limit);
+void dm_device_state_secondary_reset(DmDeviceState *state);
 void dm_device_state_clear(DmDeviceState *state);
 void dm_device_state_replace_owned(DmDeviceState *state,
                                    const char *by_id,

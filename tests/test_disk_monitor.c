@@ -3,6 +3,7 @@
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -864,32 +865,54 @@ static void test_series_block_widget(void)
     assert(GTK_IS_BOX(content));
     assert(g_strcmp0(gtk_frame_get_label(GTK_FRAME(block)), "Read text") == 0);
     rows = gtk_container_get_children(GTK_CONTAINER(content));
-    assert(g_list_length(rows) == 4);
-    for (guint row = 0; row < 4; row++)
+    assert(g_list_length(rows) == 3);
+    for (guint row = 0; row < 3; row++)
         assert(GTK_IS_BOX(g_list_nth_data(rows, row)));
     {
-        GtkWidget *font_row = g_list_nth_data(rows, 0);
-        GtkWidget *text_color_row = g_list_nth_data(rows, 1);
-        GtkWidget *position_row = g_list_nth_data(rows, 2);
-        GtkWidget *history_row = g_list_nth_data(rows, 3);
-        GtkWidget *font = g_list_nth_data(
-            gtk_container_get_children(GTK_CONTAINER(font_row)), 1);
-        GtkWidget *text_color = g_list_nth_data(
-            gtk_container_get_children(GTK_CONTAINER(text_color_row)), 1);
-        GtkWidget *history_color = g_list_nth_data(
-            gtk_container_get_children(GTK_CONTAINER(history_row)), 1);
-        const char *labels[4] = {"Font", "Color", "Position", "Read history"};
-        for (guint row = 0; row < 4; row++) {
+        GtkWidget *appearance_row = g_list_nth_data(rows, 0);
+        GtkWidget *position_row = g_list_nth_data(rows, 1);
+        GtkWidget *history_row = g_list_nth_data(rows, 2);
+        GList *appearance = gtk_container_get_children(
+            GTK_CONTAINER(appearance_row));
+        GList *history_children = gtk_container_get_children(
+            GTK_CONTAINER(history_row));
+        GtkWidget *font_holder = g_list_nth_data(appearance, 0);
+        GtkWidget *text_color = g_list_nth_data(appearance, 1);
+        GList *font_holder_children = gtk_container_get_children(
+            GTK_CONTAINER(font_holder));
+        GtkWidget *font = g_list_nth_data(font_holder_children, 0);
+        GtkWidget *history_color = g_list_nth_data(history_children, 1);
+        const char *labels[3] = {NULL, "Position", "Read history"};
+
+        assert(g_list_length(appearance) == 2);
+        assert(g_list_length(history_children) == 2);
+        assert(GTK_IS_FIXED(font_holder));
+        assert(g_list_length(font_holder_children) == 1);
+        assert(GTK_IS_FONT_BUTTON(font));
+        assert(GTK_IS_COLOR_BUTTON(text_color));
+        {
+            GtkRequisition minimum, natural;
+            gtk_widget_show_all(block);
+            gtk_widget_get_preferred_size(font_holder, &minimum, &natural);
+            assert(minimum.width == 180);
+            assert(natural.width == 180);
+            gtk_widget_get_preferred_size(font, &minimum, &natural);
+            assert(minimum.width == 180);
+            assert(natural.width == 180);
+        }
+        for (guint row = 1; row < 3; row++) {
             GList *children = gtk_container_get_children(
                 GTK_CONTAINER(g_list_nth_data(rows, row)));
             GtkWidget *label = g_list_nth_data(children, 0);
             assert(GTK_IS_LABEL(label));
             assert(g_strcmp0(gtk_label_get_text(GTK_LABEL(label)),
                              labels[row]) == 0);
+            gint width = -1, height = -1;
+            gtk_widget_get_size_request(label, &width, &height);
+            assert(width < 0);
+            assert(height < 0);
             g_list_free(children);
         }
-        assert(GTK_IS_FONT_BUTTON(font));
-        assert(GTK_IS_COLOR_BUTTON(text_color));
         assert(GTK_IS_BOX(position_row));
         assert(GTK_IS_COLOR_BUTTON(history_color));
         assert(g_strcmp0(g_object_get_data(G_OBJECT(font), "xs-key"),
@@ -898,10 +921,396 @@ static void test_series_block_widget(void)
                          "read_text_color") == 0);
         assert(g_strcmp0(g_object_get_data(G_OBJECT(history_color), "xs-key"),
                          "read_color") == 0);
+        g_list_free(appearance);
+        g_list_free(font_holder_children);
+        g_list_free(history_children);
     }
     g_list_free(rows);
     g_object_ref_sink(block);
     g_object_unref(block);
+}
+
+static void test_color_buttons_are_rgb_only(void)
+{
+    DmSeriesBlockSpec spec = {0};
+    GtkWidget *block, *content = NULL;
+    GList *rows, *children;
+    GdkRGBA rgba;
+    guint colors = 0;
+
+    spec.title = "Read";
+    spec.font = "Sans 8";
+    spec.font_key = "read_font";
+    spec.text_color_key = "read_text_color";
+    spec.x_key = "read_x";
+    spec.y_key = "read_y";
+    spec.x = 8;
+    spec.y = 52;
+    spec.history_label = "Read history";
+    spec.history_color_key = "read_color";
+    block = dm_series_block_widget(&spec, &content);
+    assert(block);
+    gtk_widget_show_all(block);
+    rows = gtk_container_get_children(GTK_CONTAINER(content));
+    /* Row 0: font + text colour. Row 2: history colour. The picker is
+     * RGB-only, but the alpha it was given must survive an RGB edit: that
+     * alpha is what the fill and the text are actually drawn with. */
+    children = gtk_container_get_children(GTK_CONTAINER(g_list_nth_data(rows, 2)));
+    rgba.red = 0.2; rgba.green = 0.4; rgba.blue = 0.6; rgba.alpha = 0.55;
+    gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(g_list_nth_data(children, 1)),
+                                &rgba);
+    assert(gtk_color_chooser_get_use_alpha(
+               GTK_COLOR_CHOOSER(g_list_nth_data(children, 1))) == FALSE);
+    {
+        GdkRGBA read_back;
+        gtk_color_chooser_get_rgba(
+            GTK_COLOR_CHOOSER(g_list_nth_data(children, 1)), &read_back);
+        assert(fabs(read_back.alpha - 0.55) < 0.01);
+    }
+    g_list_free(children);
+    children = gtk_container_get_children(GTK_CONTAINER(g_list_nth_data(rows, 0)));
+    for (GList *l = children; l; l = l->next)
+        if (GTK_IS_COLOR_BUTTON(l->data)) {
+            assert(gtk_color_chooser_get_use_alpha(
+                       GTK_COLOR_CHOOSER(l->data)) == FALSE);
+            colors++;
+        }
+    assert(colors == 1);
+    g_list_free(children);
+    g_list_free(rows);
+    g_object_ref_sink(block);
+    g_object_unref(block);
+}
+
+static void test_scale_position_design_coords(void)
+{
+    /* The stored value never changes, so scaling is a pure function: the same
+     * design coordinate always maps to the same live pixel, and forty 1 px
+     * resizes can never drift. */
+    assert(dm_scale_position(8, 420, 210, 209) == 4);
+    assert(dm_scale_position(150, 420, 210, 209) == 75);
+    assert(dm_scale_position(310, 420, 210, 209) == 155);
+    assert(dm_scale_position(12, 220, 110, 109) == 6);
+    /* Identity when the window has not changed. */
+    assert(dm_scale_position(150, 420, 420, 419) == 150);
+    assert(dm_scale_position(12, 220, 220, 219) == 12);
+    /* Growth scales up. */
+    assert(dm_scale_position(100, 420, 840, 839) == 200);
+    /* 400 * 200/420 = 190, which still fits, so no clamp is needed. */
+    assert(dm_scale_position(400, 420, 200, 199) == 190);
+    /* A coordinate that really would overshoot is pulled back to the edge. */
+    assert(dm_scale_position(419, 420, 200, 199) == 199);
+    /* Degenerate sizes must not divide by zero. */
+    assert(dm_scale_position(8, 0, 200, 199) == 8);
+    assert(dm_scale_position(8, 420, 0, 199) == 8);
+    /* Negative input is clamped to zero. */
+    assert(dm_scale_position(-20, 420, 420, 419) == 0);
+    /* The exact end-to-end case: a 420->380 window maps 100 to ~90. */
+    assert(dm_scale_position(100, 420, 380, 379) == 90);
+}
+
+static void test_series_color_picker_is_rgb_only(void)
+{
+    DmSeriesBlockSpec spec = {0};
+    GtkWidget *block, *content = NULL;
+    GList *rows, *appearance, *kids;
+    GtkWidget *text_color = NULL, *history_color = NULL;
+
+    spec.title = "Color";
+    spec.font_key = "f"; spec.text_color_key = "tc";
+    spec.text_color[0] = 1; spec.text_color[1] = 1;
+    spec.text_color[2] = 1; spec.text_color[3] = 1;
+    spec.x_key = "x"; spec.y_key = "y";
+    spec.history_label = "History";
+    spec.history_color_key = "hc";
+    spec.history_color[0] = 1; spec.history_color[1] = 0;
+    spec.history_color[2] = 0; spec.history_color[3] = 0.55;
+    spec.font = "Sans 8"; spec.x = 0; spec.y = 0;
+
+    block = dm_series_block_widget(&spec, &content);
+    g_assert_nonnull(block);
+    rows = gtk_container_get_children(GTK_CONTAINER(content));
+    appearance = gtk_container_get_children(
+        GTK_CONTAINER(g_list_nth_data(rows, 0)));
+    for (kids = appearance; kids; kids = kids->next) {
+        GtkWidget *w = GTK_WIDGET(kids->data);
+        if (GTK_IS_COLOR_BUTTON(w) &&
+            !strcmp(g_object_get_data(G_OBJECT(w), "xs-key"), "tc"))
+            text_color = w;
+    }
+    /* The history color button lives in the third row, next to its label. */
+    kids = gtk_container_get_children(
+        GTK_CONTAINER(g_list_nth_data(rows, 2)));
+    for (; kids; kids = kids->next) {
+        GtkWidget *w = GTK_WIDGET(kids->data);
+        if (GTK_IS_COLOR_BUTTON(w) &&
+            !strcmp(g_object_get_data(G_OBJECT(w), "xs-key"), "hc"))
+            history_color = w;
+    }
+    g_assert_nonnull(text_color);
+    g_assert_nonnull(history_color);
+    /* The user asked for an RGB-only picker: no transparency scale. */
+    g_assert_false(gtk_color_chooser_get_use_alpha(
+        GTK_COLOR_CHOOSER(text_color)));
+    g_assert_false(gtk_color_chooser_get_use_alpha(
+        GTK_COLOR_CHOOSER(history_color)));
+    /* The stored alpha must survive an RGB-only edit. */
+    {
+        GdkRGBA got;
+        gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(history_color), &got);
+        g_assert_cmpfloat(got.alpha, ==, 0.55);
+    }
+    /* A real palette pick with use_alpha FALSE: GTK hands back alpha 1.0, so
+     * reading it from the picker would silently destroy the configured alpha.
+     * This mirrors what dm_color_set() does. */
+    {
+        GdkRGBA picked = {0.2, 0.4, 0.6, 1.0};
+        GdkRGBA back;
+        double target[4] = {1.0, 0.0, 0.0, 0.55};
+
+        gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(history_color), &picked);
+        gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(history_color), &back);
+        target[0] = back.red; target[1] = back.green; target[2] = back.blue;
+        /* The alpha MUST come from the stored config, never from the picker. */
+        g_assert_cmpfloat(target[3], ==, 0.55);
+    }
+    g_object_ref_sink(block);
+    g_object_unref(block);
+}
+
+static void test_fit_text_coordinate(void)
+{
+    /* A short string at a legal anchor stays put. */
+    assert(dm_fit_text_coordinate(8, 40, 419) == 8);
+    /* A long string at a legal anchor is pulled left so it ends at the edge. */
+    assert(dm_fit_text_coordinate(380, 60, 419) == 359);
+    /* A negative anchor is clamped to zero. */
+    assert(dm_fit_text_coordinate(-5, 40, 419) == 0);
+    /* Text wider than the whole window still starts at zero, never negative. */
+    assert(dm_fit_text_coordinate(10, 500, 100) == 0);
+    /* A non-positive limit disables the fit. */
+    assert(dm_fit_text_coordinate(380, 60, 0) == 380);
+}
+
+static void test_graph_label_settings_block(void)
+{
+    DmSeriesBlockSpec spec = {0};
+    GtkWidget *block, *content = NULL;
+    GList *rows, *children;
+    guint labels = 0;
+
+    /* The graph label gets the same three-row block as Read/Write/Temp:
+     * font + text colour, Position X/Y, and its own history/colour row. */
+    spec.title = "Graph label";
+    spec.font = "Sans 8";
+    spec.font_key = "label_font";
+    spec.text_color_key = "label_text_color";
+    spec.x_key = "label_x";
+    spec.y_key = "label_y";
+    spec.x = 4;
+    spec.y = 3;
+    spec.history_label = "Graph label history";
+    spec.history_color_key = "label_color";
+    block = dm_series_block_widget(&spec, &content);
+    assert(block);
+    gtk_widget_show_all(block);
+    rows = gtk_container_get_children(GTK_CONTAINER(content));
+    /* Three rows, exactly like Read/Write/Temp: appearance, Position, history. */
+    assert(g_list_length(rows) == 3);
+    children = gtk_container_get_children(GTK_CONTAINER(g_list_nth_data(rows, 2)));
+    assert(GTK_IS_LABEL(g_list_nth_data(children, 0)));
+    assert(g_strcmp0(gtk_label_get_text(GTK_LABEL(g_list_nth_data(children, 0))),
+                     "Graph label history") == 0);
+    labels++;
+    g_list_free(children);
+    assert(labels == 1);
+    g_list_free(rows);
+    g_object_ref_sink(block);
+    g_object_unref(block);
+}
+
+static void test_format_temperature_lines(void)
+{
+    char **lines;
+    guint count = 0;
+
+    /* One sensor stays a single line. */
+    {
+        gint one[1] = {45500};
+        lines = dm_format_temperature_lines(one, 1, &count);
+        assert(count == 1);
+        assert(g_strcmp0(lines[0], "45.5 C") == 0);
+        g_strfreev(lines);
+    }
+    /* Two sensors are stacked one under the other, not run together. */
+    {
+        gint two[2] = {45500, 38000};
+        lines = dm_format_temperature_lines(two, 2, &count);
+        assert(count == 2);
+        assert(g_strcmp0(lines[0], "45.5 C") == 0);
+        assert(g_strcmp0(lines[1], "38.0 C") == 0);
+        g_strfreev(lines);
+    }
+    /* A missing reading leaves no blank line. */
+    {
+        gint gap[2] = {G_MININT, 38000};
+        lines = dm_format_temperature_lines(gap, 2, &count);
+        assert(count == 1);
+        assert(g_strcmp0(lines[0], "38.0 C") == 0);
+        g_strfreev(lines);
+    }
+    {
+        gint none[2] = {G_MININT, G_MININT};
+        lines = dm_format_temperature_lines(none, 2, &count);
+        assert(count == 1);
+        assert(g_strcmp0(lines[0], "N/A") == 0);
+        g_strfreev(lines);
+    }
+    lines = dm_format_temperature_lines(NULL, 0, &count);
+    assert(count == 1);
+    assert(g_strcmp0(lines[0], "N/A") == 0);
+    g_strfreev(lines);
+}
+
+static void test_secondary_temperature_sentinel(void)
+{
+    DmDeviceState state;
+
+    /* A device that never resolved must never look like a 0.0 C reading: the
+     * second sensor's sentinel is G_MININT, and 0 is a valid temperature. */
+    memset(&state, 0, sizeof(state));
+    dm_device_state_secondary_reset(&state);
+    assert(state.secondary_milli == G_MININT);
+    assert(state.temp_path_secondary == NULL);
+
+    /* Losing the target must clear the second sensor exactly like the first. */
+    state.temp_path = g_strdup("/sys/class/block/nvme0n1/device/hwmon0/temp1_input");
+    state.temp_path_secondary = g_strdup("/sys/class/block/nvme0n1/device/hwmon0/temp2_input");
+    state.secondary_milli = 38000;
+    dm_device_state_secondary_reset(&state);
+    assert(state.secondary_milli == G_MININT);
+    assert(state.temp_path_secondary == NULL);
+    /* The primary sensor path is owned by the state, so clear() must handle it,
+     * and it must leave the second sensor marked as "no reading" rather than
+     * a valid-looking 0.0 C. */
+    assert(state.temp_path != NULL);
+    dm_device_state_clear(&state);
+    assert(state.temp_path == NULL);
+    assert(state.temp_path_secondary == NULL);
+    assert(state.secondary_milli == G_MININT);
+}
+
+static void test_format_temperature(void)
+{
+    char *text;
+
+    /* A single sensor keeps the plain one-value display. */
+    {
+        gint one[1] = {45500};
+        text = dm_format_temperature(one, 1);
+        assert(g_strcmp0(text, "45.5 C") == 0);
+        g_free(text);
+    }
+    /* NVMe composite + sensor expose two readings: both are shown, separated
+     * by a space, so neither sensor is silently dropped. */
+    {
+        gint two[2] = {45500, 38000};
+        text = dm_format_temperature(two, 2);
+        assert(g_strcmp0(text, "45.5 C 38.0 C") == 0);
+        g_free(text);
+    }
+    /* Only valid readings are shown; a gap in the middle is not printed. */
+    {
+        gint gap[2] = {G_MININT, 38000};
+        text = dm_format_temperature(gap, 2);
+        assert(g_strcmp0(text, "38.0 C") == 0);
+        g_free(text);
+    }
+    /* No usable reading at all keeps the previous N/A contract. */
+    {
+        gint none[2] = {G_MININT, G_MININT};
+        text = dm_format_temperature(none, 2);
+        assert(g_strcmp0(text, "N/A") == 0);
+        g_free(text);
+    }
+    text = dm_format_temperature(NULL, 0);
+    assert(g_strcmp0(text, "N/A") == 0);
+    g_free(text);
+}
+
+static void test_disk_selector_and_properties_size(void)
+{
+    GtkWidget *selector, *combo, *label, *combo_row;
+    GList *rows, *combo_row_children;
+    int width = -1, height = -1;
+    GtkRequisition combo_min, combo_nat;
+    const char *names[3] = {"/dev/disk/by-id/nvme-eui.6479a78dd000044c",
+                            "/dev/disk/by-id/ata-HGST_HTS721010A9E630_JR1020D30R13TF",
+                            "/dev/disk/by-id/sda"};
+
+    gtk_init_check(NULL, NULL);
+    combo = gtk_combo_box_text_new();
+    for (guint i = 0; i < G_N_ELEMENTS(names); i++)
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), names[i]);
+    selector = dm_disk_selector_widget(combo);
+    assert(GTK_IS_BOX(selector));
+    rows = gtk_container_get_children(GTK_CONTAINER(selector));
+    assert(g_list_length(rows) == 2);
+    assert(GTK_IS_LABEL(g_list_nth_data(rows, 0)));
+    label = g_list_nth_data(rows, 0);
+    assert(g_strcmp0(gtk_label_get_text(GTK_LABEL(label)), "Disk") == 0);
+    assert(GTK_IS_BOX(g_list_nth_data(rows, 1)));
+    combo_row = g_list_nth_data(rows, 1);
+    combo_row_children = gtk_container_get_children(GTK_CONTAINER(combo_row));
+    assert(g_list_length(combo_row_children) == 1);
+    assert(g_list_nth_data(combo_row_children, 0) == combo);
+    g_list_free(combo_row_children);
+
+    /* No manual size request: GTK sizes the combo to its longest entry, and
+     * the control keeps a normal single-row height. */
+    gtk_widget_get_size_request(combo, &width, &height);
+    assert(width < 0);
+    assert(height < 0);
+    gtk_widget_show_all(selector);
+    gtk_widget_get_preferred_size(combo, &combo_min, &combo_nat);
+    assert(combo_nat.height > 0);
+    assert(combo_nat.height <= 48);
+    assert(combo_nat.width < 620);
+    g_list_free(rows);
+    g_object_ref_sink(selector);
+    g_object_unref(selector);
+
+    dm_properties_size("disk_monitor", &width, &height);
+    assert(width == 620 && height == 780);
+    width = height = -1;
+    dm_properties_size("clock", &width, &height);
+    assert(width == 0 && height == 0);
+
+    /* The scroller caps the page's NATURAL size, so the dialog window
+     * actually shrinks instead of growing to fit the whole content. */
+    {
+        GtkWidget *page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        GtkWidget *scroller;
+            GtkRequisition page_nat, scroll_min, scroll_nat;
+
+            dm_properties_size("disk_monitor", &width, &height);
+            scroller = dm_properties_scroller(page, width, height);
+            for (guint i = 0; i < 80; i++)
+                gtk_box_pack_start(GTK_BOX(page), gtk_label_new("row"), FALSE, FALSE, 0);
+            gtk_widget_show_all(scroller);
+            gtk_widget_get_preferred_size(page, NULL, &page_nat);
+            gtk_widget_get_preferred_size(scroller, &scroll_min, &scroll_nat);
+            assert(page_nat.height > 780);
+            /* The scroller never grows past the requested height, so the dialog
+             * window stays small and scrolls instead of fitting every row. */
+            assert(scroll_nat.height <= height);
+            assert(scroll_min.height >= height);
+            assert(scroll_min.width >= width);
+            assert(gtk_bin_get_child(GTK_BIN(
+                       gtk_bin_get_child(GTK_BIN(scroller)))) == page);
+            g_object_ref_sink(scroller);
+            g_object_unref(scroller);
+    }
 }
 
 int main(void)
@@ -939,6 +1348,15 @@ int main(void)
     test_render_style_contract();
     test_position_pair_spec();
     test_series_block_widget();
+    test_color_buttons_are_rgb_only();
+    test_secondary_temperature_sentinel();
+    test_format_temperature();
+    test_format_temperature_lines();
+    test_graph_label_settings_block();
+    test_scale_position_design_coords();
+    test_fit_text_coordinate();
+    test_series_color_picker_is_rgb_only();
+    test_disk_selector_and_properties_size();
     puts("disk_monitor core tests: OK");
     return 0;
 }

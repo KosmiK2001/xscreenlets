@@ -100,13 +100,13 @@ gboolean dm_series_block_spec(const char *title,
     return TRUE;
 }
 
-static GtkWidget *dm_series_row(GtkWidget *content, const char *label,
-                                GtkWidget *control)
+static GtkWidget *dm_series_compact_row(GtkWidget *content,
+                                        const char *label,
+                                        GtkWidget *control)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     GtkWidget *text = gtk_label_new(label);
 
-    gtk_widget_set_size_request(text, 130, 28);
     gtk_widget_set_halign(text, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(row), text, FALSE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(row), control, FALSE, TRUE, 0);
@@ -117,7 +117,8 @@ static GtkWidget *dm_series_row(GtkWidget *content, const char *label,
 GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
                                   GtkWidget **content)
 {
-    GtkWidget *frame, *box, *font, *text_color, *history_color;
+    GtkWidget *frame, *box, *appearance, *font_holder, *font, *text_color;
+    GtkWidget *history_color;
     GtkWidget *position, *x_spin, *y_spin;
     GdkRGBA rgba;
 
@@ -130,31 +131,156 @@ GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
     *content = box;
 
     font = gtk_font_button_new_with_font(spec->font);
+    gtk_widget_set_size_request(font, 180, -1);
+    font_holder = gtk_fixed_new();
+    gtk_widget_set_size_request(font_holder, 180, -1);
+    gtk_widget_set_hexpand(font_holder, FALSE);
+    gtk_fixed_put(GTK_FIXED(font_holder), font, 0, 0);
     g_object_set_data_full(G_OBJECT(font), "xs-key",
                            g_strdup(spec->font_key), g_free);
-    dm_series_row(box, "Font", font);
-
     text_color = gtk_color_button_new_with_rgba(
         &(GdkRGBA){spec->text_color[0], spec->text_color[1],
                    spec->text_color[2], spec->text_color[3]});
+    /* The user asked for an RGB-only picker: no transparency scale. The
+     * configured alpha is still passed in and still drives the drawing. */
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(text_color), FALSE);
     g_object_set_data_full(G_OBJECT(text_color), "xs-key",
                            g_strdup(spec->text_color_key), g_free);
-    dm_series_row(box, "Color", text_color);
+    appearance = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(appearance), font_holder, FALSE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(appearance), text_color, FALSE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(box), appearance, FALSE, TRUE, 0);
 
     position = dm_position_pair_widget("Position", spec->x_key, spec->y_key,
                                        spec->x, spec->y, 1599, 1199,
                                        &x_spin, &y_spin);
-    dm_series_row(box, "Position", position);
+    dm_series_compact_row(box, "Position", position);
 
     rgba.red = spec->history_color[0];
     rgba.green = spec->history_color[1];
     rgba.blue = spec->history_color[2];
     rgba.alpha = spec->history_color[3];
+    /* RGB-only, like the text color button above: the stored alpha still
+     * drives the fill, it is just not editable in the picker. */
     history_color = gtk_color_button_new_with_rgba(&rgba);
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(history_color), FALSE);
     g_object_set_data_full(G_OBJECT(history_color), "xs-key",
                            g_strdup(spec->history_color_key), g_free);
-    dm_series_row(box, spec->history_label, history_color);
+    dm_series_compact_row(box, spec->history_label, history_color);
     return frame;
+}
+
+GtkWidget *dm_disk_selector_widget(GtkWidget *combo)
+{
+    GtkWidget *selector, *label, *combo_row;
+
+    g_return_val_if_fail(GTK_IS_COMBO_BOX(combo), NULL);
+    selector = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    label = gtk_label_new("Disk");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    /* The combo keeps its own natural width — GTK already sizes it to the
+     * longest entry in the list — and never expands or stretches. */
+    gtk_widget_set_hexpand(combo, FALSE);
+    gtk_widget_set_valign(combo, GTK_ALIGN_START);
+    combo_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_pack_start(GTK_BOX(combo_row), combo, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(selector), label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(selector), combo_row, FALSE, FALSE, 0);
+    return selector;
+}
+
+char *dm_format_temperature(const gint *milli, guint count)
+{
+    GString *out;
+    guint i;
+    gboolean any = FALSE;
+
+    if (!milli || !count)
+        return g_strdup("N/A");
+    out = g_string_new(NULL);
+    for (i = 0; i < count; i++) {
+        char buf[G_ASCII_DTOSTR_BUF_SIZE];
+        if (milli[i] == G_MININT)
+            continue;
+        if (any)
+            g_string_append(out, " ");
+        /* ASCII decimals: a comma decimal separator must never reach the UI. */
+        g_ascii_formatd(buf, sizeof(buf), "%.1f", milli[i] / 1000.0);
+        g_string_append(out, buf);
+        g_string_append(out, " C");
+        any = TRUE;
+    }
+    if (!any) {
+        g_string_free(out, TRUE);
+        return g_strdup("N/A");
+    }
+    return g_string_free(out, FALSE);
+}
+
+char **dm_format_temperature_lines(const gint *milli, guint count,
+                                   guint *out_lines)
+{
+    GPtrArray *lines = g_ptr_array_new();
+    guint i;
+
+    for (i = 0; i < count; i++) {
+        char buf[G_ASCII_DTOSTR_BUF_SIZE];
+        if (!milli || milli[i] == G_MININT)
+            continue;
+        /* ASCII decimals: a comma decimal separator must never reach the UI. */
+        g_ascii_formatd(buf, sizeof(buf), "%.1f", milli[i] / 1000.0);
+        g_ptr_array_add(lines, g_strconcat(buf, " C", NULL));
+    }
+    if (lines->len == 0)
+        g_ptr_array_add(lines, g_strdup("N/A"));
+    if (out_lines)
+        *out_lines = lines->len;
+    /* NULL-terminate: the caller frees the result with g_strfreev(). */
+    g_ptr_array_add(lines, NULL);
+    return (char **)g_ptr_array_free(lines, FALSE);
+}
+
+GtkWidget *dm_properties_scroller(GtkWidget *page, int width, int height)
+{
+    GtkWidget *scroller, *viewport;
+
+    if (!GTK_IS_WIDGET(page))
+        return NULL;
+    scroller = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    /* Without this the scroller still reports the page's full natural size and
+     * the Properties window grows to fit every row instead of scrolling. */
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(scroller),
+                                                    FALSE);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroller),
+                                                     FALSE);
+    /* One call: a second set_size_request would reset the first dimension. */
+    if (width > 0 && height > 0)
+        gtk_widget_set_size_request(scroller, width, height);
+    else if (width > 0)
+        gtk_widget_set_size_request(scroller, width, -1);
+    else if (height > 0)
+        gtk_widget_set_size_request(scroller, -1, height);
+    viewport = gtk_viewport_new(NULL, NULL);
+    gtk_container_add(GTK_CONTAINER(viewport), page);
+    gtk_container_add(GTK_CONTAINER(scroller), viewport);
+    return scroller;
+}
+
+void dm_properties_size(const char *plugin_type, int *width, int *height)
+{
+    if (plugin_type && strcmp(plugin_type, "disk_monitor") == 0) {
+        if (width)
+            *width = 620;
+        if (height)
+            *height = 780;
+    } else {
+        if (width)
+            *width = 0;
+        if (height)
+            *height = 0;
+    }
 }
 
 DmDialogContext *dm_dialog_context_new(const char *instance_name)
@@ -399,6 +525,52 @@ gboolean dm_temp_history_observes(const gint *ring, guint head, guint count,
 
 /* ---- Blocker 7: temporary device state, atomic commit -------------------- */
 
+/* Text anchors are stored in DESIGN coordinates, tied to the window size they
+ * were laid out for. The renderer maps them to the live window every frame,
+ * so repeated resizes can never accumulate a rounding drift — mutating the
+ * stored value on each resize would (100 * 419/420 rounds back to 100, and
+ * forty 1 px steps would drift ten pixels). */
+int dm_scale_position(int value, int design_size, int live_size, int max)
+{
+    gint64 scaled;
+
+    if (design_size <= 0 || live_size <= 0)
+        return CLAMP(value, 0, MAX(0, max));
+    scaled = ((gint64)value * live_size + (gint64)design_size / 2) /
+             (gint64)design_size;
+    if (max > 0 && scaled > max)
+        scaled = max;
+    if (scaled < 0)
+        scaled = 0;
+    return (int)scaled;
+}
+
+/* Keep a drawn string inside the frame: the scaled anchor alone is not enough,
+ * because a long value at a legal x still runs off the right edge. */
+int dm_fit_text_coordinate(int anchor, int text_extent, int limit)
+{
+    int x = anchor;
+
+    if (x < 0)
+        x = 0;
+    if (limit > 0 && x + text_extent > limit)
+        x = limit - text_extent;
+    if (x < 0)
+        x = 0;
+    return x;
+}
+
+/* The second sensor has no place in DiskSample, so its own reset is explicit:
+ * the G_MININT sentinel must always be set, because g_new0 leaves 0 there and
+ * 0 is a perfectly valid temperature. */
+void dm_device_state_secondary_reset(DmDeviceState *state)
+{
+    if (!state)
+        return;
+    g_clear_pointer(&state->temp_path_secondary, g_free);
+    state->secondary_milli = G_MININT;
+}
+
 void dm_device_state_clear(DmDeviceState *state)
 {
     if (!state)
@@ -407,7 +579,11 @@ void dm_device_state_clear(DmDeviceState *state)
     g_free(state->device_name);
     g_free(state->device_path);
     g_free(state->temp_path);
+    g_free(state->temp_path_secondary);
     memset(state, 0, sizeof(*state));
+    /* memset leaves 0 in secondary_milli, and 0 is a perfectly valid
+     * temperature — a cleared state must read as "no reading", not 0.0 C. */
+    state->secondary_milli = G_MININT;
 }
 
 void dm_device_state_replace_owned(DmDeviceState *state,
@@ -422,6 +598,7 @@ void dm_device_state_replace_owned(DmDeviceState *state,
     char *old_device_name;
     char *old_device_path;
     char *old_temp_path;
+    char *old_temp_path_secondary;
 
     if (!state)
         return;
@@ -433,10 +610,13 @@ void dm_device_state_replace_owned(DmDeviceState *state,
     old_device_name = state->device_name;
     old_device_path = state->device_path;
     old_temp_path = state->temp_path;
+    old_temp_path_secondary = state->temp_path_secondary;
     state->by_id = new_by_id;
     state->device_name = new_device_name;
     state->device_path = new_device_path;
     state->temp_path = NULL;
+    state->temp_path_secondary = NULL;
+    state->secondary_milli = G_MININT;
     state->resolved = new_by_id && new_device_name && new_device_path;
     if (device_name != old_device_name)
         g_free(device_name);
@@ -446,6 +626,7 @@ void dm_device_state_replace_owned(DmDeviceState *state,
     g_free(old_device_name);
     g_free(old_device_path);
     g_free(old_temp_path);
+    g_free(old_temp_path_secondary);
 }
 
 gboolean dm_device_state_prepare(DmDeviceState *out, const char *by_id)

@@ -13,7 +13,9 @@
 #define DM_DEFAULT_WIDTH 420
 #define DM_DEFAULT_FONT "Sans 8"
 #define DM_BY_ID_DIR "/dev/disk/by-id"
-#define DM_GRAPH_TOP 44
+/* The graph fills the whole window: the label and the current values are
+ * drawn on top of it, so nothing is reserved for them. */
+#define DM_GRAPH_TOP 0
 #define DM_DISKSTATS "/proc/diskstats"
 #define DM_CTX_KEY "xs-disk-monitor-ctx"
 
@@ -22,10 +24,15 @@ typedef struct {
     GKeyFile *kf;
     char *graph_label;
     char *font;
+    char *label_font;
     char *read_font, *write_font, *temp_font;
     int width, height;
+    /* The window size the text anchors were laid out for: anchors are stored
+     * against it and mapped to the live size on every frame. */
+    int design_width, design_height;
     guint update_ms;
     int read_x, read_y, write_x, write_y, temp_x, temp_y;
+    int label_x, label_y;
     gboolean show_temperature_history;
     gdouble bg[4], graph_bg[4], border[4], text_color[4];
     gdouble read_color[4], write_color[4], temp_color[4];
@@ -47,6 +54,10 @@ static const gdouble dm_text_default[4] = {1, 1, 1, 1};
 static const gdouble dm_read_default[4] = {0.20, 0.75, 1.0, 1.0};
 static const gdouble dm_write_default[4] = {0.25, 0.85, 0.35, 1.0};
 static const gdouble dm_temp_default[4] = {1.0, 0.35, 0.12, 1.0};
+
+/* Text values are drawn over the history fill, so they carry a dark shadow. */
+#define DM_TEXT_SHADOW_RADIUS 3
+#define DM_TEXT_SHADOW_ALPHA 0.9
 
 static void dm_shutdown(XsPlugin *p);
 static void dm_rebuild(PrivData *priv);
@@ -128,13 +139,16 @@ static GPtrArray *dm_discover_disks(void)
 
 /* Blocker 1: order-independent selection by the (driver rank, label rank)
  * tuple — directory order can never make Sensor 1 beat NVMe Composite. */
-static char *dm_find_hwmon_temp(DmDeviceState *device)
+static char *dm_find_hwmon_temp(DmDeviceState *device, char **secondary)
 {
     GDir *dir;
     const char *entry;
-    char *device_dir, *best = NULL;
+    char *device_dir, *best = NULL, *second = NULL;
     int best_driver = 9, best_label = 9;
+    int second_driver = 9, second_label = 9;
 
+    if (secondary)
+        *secondary = NULL;
     if (!device->device_name)
         return NULL;
     device_dir = g_strdup_printf("/sys/class/block/%s/device", device->device_name);
@@ -174,10 +188,23 @@ static char *dm_find_hwmon_temp(DmDeviceState *device)
                 label_rank = dm_hwmon_temp_priority(hwmon_name, label);
                 if (dm_hwmon_candidate_preferred(driver_rank, label_rank,
                                                  best_driver, best_label)) {
-                    g_free(best);
+                    /* The previous best becomes the second reading, so a drive
+                     * with a composite and a second sensor reports both. */
+                    g_free(second);
+                    second = best;
+                    second_driver = best_driver;
+                    second_label = best_label;
                     best = g_build_filename(child, file, NULL);
                     best_driver = driver_rank;
                     best_label = label_rank;
+                } else if (!second ||
+                           dm_hwmon_candidate_preferred(driver_rank, label_rank,
+                                                        second_driver,
+                                                        second_label)) {
+                    g_free(second);
+                    second = g_build_filename(child, file, NULL);
+                    second_driver = driver_rank;
+                    second_label = label_rank;
                 }
                 g_free(label_path);
                 g_free(label);
@@ -189,6 +216,10 @@ static char *dm_find_hwmon_temp(DmDeviceState *device)
         g_free(child);
     }
     g_dir_close(dir);
+    if (secondary)
+        *secondary = second;
+    else
+        g_free(second);
     return best;
 }
 
@@ -278,8 +309,12 @@ static void dm_sample(PrivData *priv)
     /* Blocker 3: an unusable sample starts from a clean slate, so a failed
      * read shows N/A instead of the previous tick's rate. */
     dm_sample_mark_invalid(&device->sample);
-    if (!device->resolved)
+    if (!device->resolved) {
+        /* Symmetric with temp_path: the second sensor must not outlive an
+         * unusable sample, otherwise a vanished disk keeps a stale reading. */
+        dm_device_state_secondary_reset(device);
         goto histories;
+    }
     if (g_file_get_contents(DM_DISKSTATS, &text, NULL, NULL) &&
         dm_parse_diskstats_named(text, device->device_name, &read, &write)) {
         read = dm_sectors_to_bytes(read);
@@ -306,12 +341,21 @@ static void dm_sample(PrivData *priv)
     temp_path = device->temp_path;
     if (!temp_path || !g_file_test(temp_path, G_FILE_TEST_EXISTS)) {
         g_clear_pointer(&device->temp_path, g_free);
-        temp_path = device->temp_path = dm_find_hwmon_temp(device);
+        g_clear_pointer(&device->temp_path_secondary, g_free);
+        device->secondary_milli = G_MININT;
+        temp_path = device->temp_path = dm_find_hwmon_temp(device,
+                                                          &device->temp_path_secondary);
     }
     if (temp_path && g_file_get_contents(temp_path, &text, NULL, NULL)) {
         device->sample.temperature_milli = dm_parse_temperature(text);
         device->sample.temperature_valid = device->sample.temperature_milli != G_MININT;
     }
+    g_clear_pointer(&text, g_free);
+    if (device->temp_path_secondary &&
+        g_file_get_contents(device->temp_path_secondary, &text, NULL, NULL))
+        device->secondary_milli = dm_parse_temperature(text);
+    else
+        device->secondary_milli = G_MININT;
     g_clear_pointer(&text, g_free);
     if (!device->sample.temperature_valid)
         dm_start_hddtemp(priv, now);
@@ -338,13 +382,41 @@ histories:
 
 static void dm_show_text(cairo_t *cr, PangoLayout *layout,
                          const char *font_name, int x, int y,
-                         const char *text, const gdouble color[4])
+                         const char *text, const gdouble color[4],
+                         int width, int height)
 {
     PangoFontDescription *font = pango_font_description_from_string(font_name);
+    int text_w = 0;
 
     pango_layout_set_font_description(layout, font);
     pango_font_description_free(font);
     pango_layout_set_text(layout, text, -1);
+    pango_layout_get_pixel_size(layout, &text_w, NULL);
+    /* Rescaling the anchor keeps the value in the same relative spot, but a
+     * long string at a legal x can still run past the edge: fit it by its own
+     * measured width. The two axes clamp independently — sharing one limit
+     * would leave the vertical guard dead on any window taller than it is
+     * wide. */
+    x = dm_fit_text_coordinate(x, text_w, width);
+    if (height > 0 && y > height - 1)
+        y = height - 1;
+    if (y < 0)
+        y = 0;
+    /* The history fill can sit right behind the values, so a dark shadow is
+     * laid down first in eight directions and the value is drawn on top. A
+     * cairo_stroke over the glyph path would only put half its width inside
+     * the glyph — invisible at 8 pt, and it would hollow the letter out. */
+    {
+        static const int offsets[8][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
+                                          {1, 0}, {-1, 1}, {0, 1}, {1, 1}};
+        int i;
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, DM_TEXT_SHADOW_ALPHA);
+        for (i = 0; i < 8; i++) {
+            cairo_move_to(cr, x + offsets[i][0] * DM_TEXT_SHADOW_RADIUS,
+                          y + offsets[i][1] * DM_TEXT_SHADOW_RADIUS);
+            pango_cairo_show_layout(cr, layout);
+        }
+    }
     cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
     cairo_move_to(cr, x, y);
     pango_cairo_show_layout(cr, layout);
@@ -360,20 +432,32 @@ static void dm_draw_series(cairo_t *cr, const guint64 *history, guint head,
     double baseline = y + height;
     gdouble fill[4];
 
-    dm_fill_rgba(color, 0.55, fill);
+    /* The user's own alpha is honoured: the colour button exposes an alpha
+     * scale, so a fixed 0.55 here would make that control a lie. */
+    dm_fill_rgba(color, color[3], fill);
     cairo_set_source_rgba(cr, fill[0], fill[1], fill[2], fill[3]);
     if (columns == 0)
         return;
-    cairo_move_to(cr, origin, baseline);
-    for (i = 0; i < columns; i++) {
-        guint64 value = dm_history_value(history, head, count, i);
-        double point_x = origin + (double)(columns - 1 - i);
-        double point_y = y + height - height * (double)MIN(value, scale_max) / (double)scale_max;
+    /* The area must be closed by two verticals and a baseline. cairo_close_path
+     * alone would join the last point straight back to the first, drawing a
+     * diagonal across the plot — and where the polyline crosses it, the
+     * winding rule punches black holes through the fill. */
+    {
+        double right_x = origin + (double)(columns - 1);
+        double first_y = y + height - height * (double)MIN(dm_history_value(history, head, count, 0), scale_max) / (double)scale_max;
+        cairo_new_sub_path(cr);
+        cairo_move_to(cr, right_x, baseline);
+        cairo_line_to(cr, right_x, first_y);
+        for (i = 0; i < columns; i++) {
+            guint64 value = dm_history_value(history, head, count, i);
+            double point_x = origin + (double)(columns - 1 - i);
+            double point_y = y + height - height * (double)MIN(value, scale_max) / (double)scale_max;
 
-        cairo_line_to(cr, point_x, point_y);
+            cairo_line_to(cr, point_x, point_y);
+        }
+        cairo_line_to(cr, origin, baseline);
+        cairo_close_path(cr);
     }
-    cairo_line_to(cr, origin + columns - 1, baseline);
-    cairo_close_path(cr);
     cairo_fill(cr);
 }
 
@@ -389,7 +473,7 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     gint min_temp = G_MAXINT, max_temp = G_MININT, t_lo = 0, t_hi = 0;
     guint64 scale_max = 1;
     guint i;
-    char *read_text, *write_text, *temp_text;
+    char *read_text, *write_text;
     int graph_y, graph_h, relative_y, relative_h;
     double temp_span;
 
@@ -444,7 +528,7 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
         gboolean started = FALSE;
         temp_span = (double)(t_hi - t_lo);
         cairo_set_source_rgba(cr, priv->temp_color[0], priv->temp_color[1],
-                              priv->temp_color[2], 0.9);
+                              priv->temp_color[2], priv->temp_color[3]);
         cairo_set_line_width(cr, 1.0);
         for (i = 0; i < columns; i++) {
             gint t;
@@ -470,26 +554,75 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     cairo_rectangle(cr, 1.5, graph_y + 0.5, width - 3, graph_h - 1);
     cairo_stroke(cr);
 
-    /* Label and the three current values, each at its configured position.
-     * An invalid sample shows N/A — never a stale rate. */
-    dm_show_text(cr, layout, priv->font, 4, 3, priv->graph_label,
-                 priv->text_color);
-    read_text = priv->device.sample.io_valid
-                    ? dm_format_rate(priv->device.sample.read_bytes)
-                    : g_strdup("N/A");
-    write_text = priv->device.sample.io_valid
-                     ? dm_format_rate(priv->device.sample.write_bytes)
-                     : g_strdup("N/A");
-    temp_text = priv->device.sample.temperature_valid
-                    ? g_strdup_printf("%.1f C", priv->device.sample.temperature_milli / 1000.0)
-                    : g_strdup("N/A");
-    dm_show_text(cr, layout, priv->read_font, priv->read_x, priv->read_y,
-                 read_text, priv->read_text_color);
-    dm_show_text(cr, layout, priv->write_font, priv->write_x, priv->write_y,
-                 write_text, priv->write_text_color);
-    dm_show_text(cr, layout, priv->temp_font, priv->temp_x, priv->temp_y,
-                 temp_text, priv->temp_text_color);
-    g_free(read_text); g_free(write_text); g_free(temp_text);
+    /* Label and the three current values, drawn ON the graph. The anchors are
+     * design coordinates mapped to the live window, so a resize keeps every
+     * value in the same relative spot instead of pushing it out of frame. */
+    {
+        const int dw = priv->design_width > 0 ? priv->design_width : width;
+        const int dh = priv->design_height > 0 ? priv->design_height : height;
+        const int label_x = dm_scale_position(priv->label_x, dw, width,
+                                                width - 1);
+        const int label_y = dm_scale_position(priv->label_y, dh, height,
+                                                height - 1);
+        const int read_x = dm_scale_position(priv->read_x, dw, width,
+                                               width - 1);
+        const int read_y = dm_scale_position(priv->read_y, dh, height,
+                                               height - 1);
+        const int write_x = dm_scale_position(priv->write_x, dw, width,
+                                                 width - 1);
+        const int write_y = dm_scale_position(priv->write_y, dh, height,
+                                                 height - 1);
+        const int temp_x = dm_scale_position(priv->temp_x, dw, width,
+                                                width - 1);
+        const int temp_y = dm_scale_position(priv->temp_y, dh, height,
+                                                height - 1);
+        read_text = priv->device.sample.io_valid
+                        ? dm_format_rate(priv->device.sample.read_bytes)
+                        : g_strdup("N/A");
+        write_text = priv->device.sample.io_valid
+                         ? dm_format_rate(priv->device.sample.write_bytes)
+                         : g_strdup("N/A");
+        /* Two sensors stack one under the other at the same anchor, so the
+         * value column never grows sideways. */
+        {
+            gint readings[2] = {priv->device.sample.temperature_valid
+                                    ? priv->device.sample.temperature_milli
+                                    : G_MININT,
+                                priv->device.secondary_milli};
+            guint lines = 0, li;
+            char **temp_lines = dm_format_temperature_lines(readings, 2, &lines);
+            PangoContext *pctx = pango_cairo_create_context(cr);
+            PangoLayout *probe = pango_layout_new(pctx);
+            PangoFontDescription *font_desc =
+                pango_font_description_from_string(priv->temp_font);
+            int step;
+            int th = 0;
+
+            pango_layout_set_font_description(probe, font_desc);
+            pango_layout_set_text(probe, "0", -1);
+            pango_layout_get_pixel_size(probe, NULL, &th);
+            /* Stack by the real font height, with a floor for tiny sizes. */
+            step = MAX(11, th);
+            pango_font_description_free(font_desc);
+            g_object_unref(probe);
+            g_object_unref(pctx);
+            for (li = 0; li < lines; li++) {
+                int line_y = temp_y + (int)li * step;
+                if (line_y > height - 1)
+                    line_y = height - 1;
+                dm_show_text(cr, layout, priv->temp_font, temp_x, line_y,
+                             temp_lines[li], priv->temp_text_color, width, height);
+            }
+            g_strfreev(temp_lines);
+        }
+        dm_show_text(cr, layout, priv->label_font, label_x, label_y,
+                     priv->graph_label, priv->text_color, width, height);
+        dm_show_text(cr, layout, priv->read_font, read_x, read_y,
+                     read_text, priv->read_text_color, width, height);
+        dm_show_text(cr, layout, priv->write_font, write_x, write_y,
+                     write_text, priv->write_text_color, width, height);
+        g_free(read_text); g_free(write_text);
+    }
     g_object_unref(layout); cairo_destroy(cr); cairo_surface_mark_dirty(surface);
     return surface;
 }
@@ -525,6 +658,7 @@ static void dm_try_resolve(PrivData *priv, gboolean force)
         g_clear_pointer(&device->device_name, g_free);
         g_clear_pointer(&device->device_path, g_free);
         g_clear_pointer(&device->temp_path, g_free);
+        dm_device_state_secondary_reset(device);
         dm_sample_mark_invalid(&device->sample);
         dm_history_clear(&device->history);
     }
@@ -548,13 +682,19 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     int x, y; gdouble opacity;
     char *label;
     p->priv = priv; priv->plugin = p; priv->kf = kf;
+    /* g_new0 would leave secondary_milli at 0, which is a valid temperature. */
+    priv->device.secondary_milli = G_MININT;
     priv->generation = (guint64)g_get_monotonic_time() ^ (guint64)(guintptr)p;
     priv->width = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_width",DM_DEFAULT_WIDTH),160,1600);
     priv->height = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_height",DM_DEFAULT_HEIGHT),120,1200);
+    priv->design_width = priv->width;
+    priv->design_height = priv->height;
     priv->update_ms = CLAMP(xs_host_api()->conf_int(kf,p->name,"update_ms",1000),100,60000);
-    priv->read_x=xs_host_api()->conf_int(kf,p->name,"read_x",8); priv->read_y=xs_host_api()->conf_int(kf,p->name,"read_y",52);
-    priv->write_x=xs_host_api()->conf_int(kf,p->name,"write_x",150); priv->write_y=xs_host_api()->conf_int(kf,p->name,"write_y",52);
-    priv->temp_x=xs_host_api()->conf_int(kf,p->name,"temp_x",310); priv->temp_y=xs_host_api()->conf_int(kf,p->name,"temp_y",52);
+    priv->read_x=xs_host_api()->conf_int(kf,p->name,"read_x",8); priv->read_y=xs_host_api()->conf_int(kf,p->name,"read_y",12);
+    priv->write_x=xs_host_api()->conf_int(kf,p->name,"write_x",150); priv->write_y=xs_host_api()->conf_int(kf,p->name,"write_y",12);
+    priv->temp_x=xs_host_api()->conf_int(kf,p->name,"temp_x",310); priv->temp_y=xs_host_api()->conf_int(kf,p->name,"temp_y",12);
+    /* The label sits inside the graph now, so its default Y moved up too. */
+    priv->label_x=xs_host_api()->conf_int(kf,p->name,"label_x",4); priv->label_y=xs_host_api()->conf_int(kf,p->name,"label_y",3);
     {
         char *show_temp = xs_host_api()->conf_str(kf, p->name,
                                                  "show_temperature_history", NULL);
@@ -586,6 +726,8 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     priv->graph_label=xs_host_api()->conf_str(kf,p->name,"graph_label",label);
     g_free(label);
     priv->font=xs_host_api()->conf_str(kf,p->name,"font",DM_DEFAULT_FONT);
+    /* An old config keeps the shared "font" for the graph label. */
+    priv->label_font=xs_host_api()->conf_str(kf,p->name,"label_font",priv->font);
     priv->read_font=xs_host_api()->conf_str(kf,p->name,"read_font",priv->font);
     priv->write_font=xs_host_api()->conf_str(kf,p->name,"write_font",priv->font);
     priv->temp_font=xs_host_api()->conf_str(kf,p->name,"temp_font",priv->font);
@@ -597,6 +739,7 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     dm_read_color(priv,"temp_text_color",priv->temp_color,priv->temp_text_color);
     /* by_id identity and all defaults are persisted for the new instance. */
     g_key_file_set_string(kf,p->name,"by_id",priv->device.by_id); g_key_file_set_string(kf,p->name,"graph_label",priv->graph_label); g_key_file_set_string(kf,p->name,"font",priv->font);
+    if (!g_key_file_has_key(kf, p->name, "label_font", NULL)) g_key_file_set_string(kf,p->name,"label_font",priv->label_font);
     if (!g_key_file_has_key(kf, p->name, "read_font", NULL)) g_key_file_set_string(kf,p->name,"read_font",priv->read_font);
     if (!g_key_file_has_key(kf, p->name, "write_font", NULL)) g_key_file_set_string(kf,p->name,"write_font",priv->write_font);
     if (!g_key_file_has_key(kf, p->name, "temp_font", NULL)) g_key_file_set_string(kf,p->name,"temp_font",priv->temp_font);
@@ -641,7 +784,7 @@ static void dm_shutdown(XsPlugin *p)
     }
     if (priv->cache) cairo_surface_destroy(priv->cache);
     dm_device_state_clear(&priv->device);
-    g_free(priv->graph_label); g_free(priv->font);
+    g_free(priv->graph_label); g_free(priv->font); g_free(priv->label_font);
     g_free(priv->read_font); g_free(priv->write_font); g_free(priv->temp_font);
     g_free(priv); p->priv=NULL;
 }
@@ -687,6 +830,7 @@ static void dm_position_changed(GtkSpinButton *spin, gpointer data)
     if (!strcmp(key,"read_x")) priv->read_x=value; else if (!strcmp(key,"read_y")) priv->read_y=value;
     else if (!strcmp(key,"write_x")) priv->write_x=value; else if (!strcmp(key,"write_y")) priv->write_y=value;
     else if (!strcmp(key,"temp_x")) priv->temp_x=value; else if (!strcmp(key,"temp_y")) priv->temp_y=value;
+    else if (!strcmp(key,"label_x")) priv->label_x=value; else if (!strcmp(key,"label_y")) priv->label_y=value;
     else if (!strcmp(key,"window_width")) priv->width=value; else if (!strcmp(key,"window_height")) priv->height=value;
     else if (!strcmp(key,"update_ms")) { priv->update_ms=value; xs_host_api()->set_tick(p,value); }
     g_key_file_set_integer(priv->kf,p->name,key,value); xs_core_plugin_conf_flush(p->name);
@@ -795,7 +939,13 @@ static void dm_color_set(GtkColorButton *button, gpointer data)
     else if (!strcmp(key, "temp_text_color")) target = priv->temp_text_color;
     else return;
     gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(button), &color);
-    target[0] = color.red; target[1] = color.green; target[2] = color.blue; target[3] = color.alpha;
+    target[0] = color.red; target[1] = color.green; target[2] = color.blue;
+    /* The series pickers are RGB-only by user request, so GTK drops the alpha
+     * channel on any pick and hands back 1.0. Writing that back would destroy
+     * the configured transparency the first time the user touches a colour —
+     * and that alpha is exactly what the fill is drawn with. The pickers are
+     * built with the stored value, so the safe source is the current target. */
+    (void)color.alpha;
     value = dm_format_rgba(target);
     g_key_file_set_string(priv->kf, p->name, key, value);
     g_free(value);
@@ -844,7 +994,8 @@ static void dm_series_font_set(GtkFontButton *button, gpointer data)
 #pragma GCC diagnostic pop
     if (!key || !value || !*value)
         return;
-    if (!strcmp(key, "read_font")) target = &priv->read_font;
+    if (!strcmp(key, "label_font")) target = &priv->label_font;
+    else if (!strcmp(key, "read_font")) target = &priv->read_font;
     else if (!strcmp(key, "write_font")) target = &priv->write_font;
     else if (!strcmp(key, "temp_font")) target = &priv->temp_font;
     else return;
@@ -910,15 +1061,15 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
 {
     PrivData *priv=p?p->priv:NULL;
     DmDialogContext *ctx;
-    GtkWidget *page,*combo,*entry; GPtrArray *disks; guint i;
+    GtkWidget *page,*combo,*entry,*selector; GPtrArray *disks; guint i;
     if (!priv)
         return;
     ctx = dm_dialog_context_new(p->name);
-    page = gtk_box_new(GTK_ORIENTATION_VERTICAL,4); gtk_container_set_border_width(GTK_CONTAINER(page),10);
+    page = gtk_box_new(GTK_ORIENTATION_VERTICAL,4);
+    gtk_container_set_border_width(GTK_CONTAINER(page),10);
     /* The page owns the last reference: destroying the dialog frees it. */
     g_object_set_data_full(G_OBJECT(page), DM_CTX_KEY, ctx,
                            (GDestroyNotify)dm_dialog_context_unref);
-    xs_prop_add_group_header(GTK_BOX(page),"One applet monitors one stable whole-disk /dev/disk/by-id path. I/O and temperatures are sampled only by the core timer.");
     disks=dm_discover_disks(); combo=gtk_combo_box_text_new();
     for(i=0;i<disks->len;i++) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),g_ptr_array_index(disks,i));
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo),0);
@@ -944,13 +1095,22 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
         if (current >= 0)
             gtk_combo_box_set_active(GTK_COMBO_BOX(combo), current);
     }
-    xs_prop_add_row(GTK_BOX(page),"Disk (whole disk only)","Stable by-id path",combo);
+    if (combo) {
+        selector = dm_disk_selector_widget(combo);
+        gtk_box_pack_start(GTK_BOX(page), selector, FALSE, FALSE, 0);
+    }
     dm_bind(combo, ctx, "changed", G_CALLBACK(dm_disk_changed));
     entry=xs_prop_add_bool(GTK_BOX(page),"Show temperature graph","Show the temperature line in the disk graph",priv->show_temperature_history);
     dm_bind(entry, ctx, "toggled", G_CALLBACK(dm_temperature_history_toggled));
     entry=xs_prop_add_string(GTK_BOX(page),"Graph label","Text shown over the graph",priv->graph_label);
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
     dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
+    dm_add_separator(page);
+    dm_add_series_block(page,ctx,"Graph label","label_font","text_color",
+                        "label_x","label_y","text_color","Graph label text",
+                        priv->label_font,priv->text_color,priv->text_color,
+                        priv->label_x,priv->label_y);
+    dm_add_separator(page);
     dm_add_series_block(page,ctx,"Read text","read_font","read_text_color",
                         "read_x","read_y","read_color","Read history",
                         priv->read_font,priv->read_text_color,priv->read_color,
@@ -969,7 +1129,19 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     dm_add_color(page,ctx,"graph_background_color","Graph background",priv->graph_bg);
     dm_add_color(page,ctx,"text_color","Text",priv->text_color);
     dm_add_color(page,ctx,"border_color","Graph border",priv->border);
-    g_ptr_array_free(disks,TRUE); gtk_notebook_append_page(notebook,page,gtk_label_new("Disk Monitor")); gtk_widget_show_all(page);
+    {
+        GtkWidget *tab = page;
+        int width, height;
+        dm_properties_size(p->type, &width, &height);
+        if (width > 0 && height > 0) {
+            GtkWidget *scroller = dm_properties_scroller(page, width, height);
+            if (scroller)
+                tab = scroller;
+        }
+        g_ptr_array_free(disks,TRUE);
+        gtk_notebook_append_page(notebook, tab, gtk_label_new("Disk Monitor"));
+        gtk_widget_show_all(tab);
+    }
 }
 
 static const XsPluginOps dm_ops={.init=dm_init,.draw=dm_draw,.tick=dm_tick,.shutdown=dm_shutdown,.properties=dm_properties};
