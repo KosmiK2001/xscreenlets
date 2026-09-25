@@ -151,6 +151,10 @@ void dm_temperature_request_clear(DmTemperatureRequest *request);
 
 int dm_scale_position(int value, int design_size, int live_size, int max);
 int dm_fit_text_coordinate(int anchor, int text_extent, int limit);
+/* Normalise a corner-radius setting and report the shape to clip with.
+ * A radius of 0 means "square corners" and is returned as such. */
+double dm_corner_radius_value(int value);
+gboolean dm_corner_radius_is_rounded(double radius);
 void dm_device_state_secondary_reset(DmDeviceState *state);
 void dm_device_state_clear(DmDeviceState *state);
 void dm_device_state_replace_owned(DmDeviceState *state,

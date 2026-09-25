@@ -1248,6 +1248,22 @@ static void test_format_temperature(void)
     g_free(text);
 }
 
+static void test_corner_radius(void)
+{
+    /* Zero and negatives mean square corners — no clip path at all. */
+    assert(dm_corner_radius_value(0) == 0.0);
+    assert(dm_corner_radius_value(-8) == 0.0);
+    assert(dm_corner_radius_is_rounded(dm_corner_radius_value(0)) == FALSE);
+    assert(dm_corner_radius_is_rounded(dm_corner_radius_value(-8)) == FALSE);
+    /* A real radius is passed through and reported as rounded. */
+    assert(dm_corner_radius_value(12) == 12.0);
+    assert(dm_corner_radius_is_rounded(dm_corner_radius_value(12)) == TRUE);
+    /* Fractional-pixel radii below half a pixel are not worth a clip. */
+    assert(dm_corner_radius_is_rounded(0.4) == FALSE);
+    assert(dm_corner_radius_is_rounded(0.5) == FALSE);
+    assert(dm_corner_radius_is_rounded(0.6) == TRUE);
+}
+
 static void test_disk_selector_and_properties_size(void)
 {
     GtkWidget *selector, *combo, *label, *combo_row;
@@ -1366,6 +1382,7 @@ int main(void)
     test_scale_position_design_coords();
     test_fit_text_coordinate();
     test_series_color_picker_is_rgb_only();
+    test_corner_radius();
     test_disk_selector_and_properties_size();
     puts("disk_monitor core tests: OK");
     return 0;

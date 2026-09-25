@@ -27,6 +27,7 @@ typedef struct {
     char *label_font;
     char *read_font, *write_font, *temp_font;
     int width, height;
+    int corner_radius;
     /* The window size the text anchors were laid out for: anchors are stored
      * against it and mapped to the live size on every frame. */
     int design_width, design_height;
@@ -477,6 +478,23 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
     double temp_span;
 
     pango_layout_set_font_description(layout, NULL);
+    /* Rounded corners: clip the whole window, so the base fill, the graph and
+     * the border all stop at the rounded outline instead of the fill spilling
+     * into square corners. A radius of 0 leaves the path unclipped. */
+    {
+        const double radius = dm_corner_radius_value(priv->corner_radius);
+
+        if (dm_corner_radius_is_rounded(radius)) {
+            double r = MIN(radius, MIN(width, height) / 2.0);
+            cairo_new_sub_path(cr);
+            cairo_arc(cr, width - r, r, r, -G_PI / 2.0, 0.0);
+            cairo_arc(cr, width - r, height - r, r, 0.0, G_PI / 2.0);
+            cairo_arc(cr, r, height - r, r, G_PI / 2.0, G_PI);
+            cairo_arc(cr, r, r, r, G_PI, 1.5 * G_PI);
+            cairo_close_path(cr);
+            cairo_clip(cr);
+        }
+    }
     /* No separate base layer: the graph covers the whole window, so a second
      * background behind it could only show up where the graph does not reach
      * and was a source of a stray colour nobody could configure any more. */
@@ -689,6 +707,7 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     priv->generation = (guint64)g_get_monotonic_time() ^ (guint64)(guintptr)p;
     priv->width = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_width",DM_DEFAULT_WIDTH),160,1600);
     priv->height = CLAMP(xs_host_api()->conf_int(kf,p->name,"window_height",DM_DEFAULT_HEIGHT),120,1200);
+    priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf,p->name,"corner_radius",0),0,200);
     priv->design_width = priv->width;
     priv->design_height = priv->height;
     priv->update_ms = CLAMP(xs_host_api()->conf_int(kf,p->name,"update_ms",1000),100,60000);
@@ -747,6 +766,7 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     if (!g_key_file_has_key(kf, p->name, "temp_font", NULL)) g_key_file_set_string(kf,p->name,"temp_font",priv->temp_font);
     g_key_file_set_boolean(kf,p->name,"show_temperature_history",priv->show_temperature_history);
     g_key_file_set_integer(kf,p->name,"window_width",priv->width); g_key_file_set_integer(kf,p->name,"window_height",priv->height); g_key_file_set_integer(kf,p->name,"update_ms",priv->update_ms);
+    g_key_file_set_integer(kf,p->name,"corner_radius",priv->corner_radius);
     xs_core_plugin_conf_flush(p->name); g_ptr_array_free(disks,TRUE);
     x=xs_host_api()->conf_int(kf,p->name,"x",80); y=xs_host_api()->conf_int(kf,p->name,"y",80); opacity=xs_host_api()->conf_dbl(kf,p->name,"opacity",1.0);
     p->win=xs_host_api()->make_window(p,x,y,priv->width,priv->height);
@@ -834,6 +854,7 @@ static void dm_position_changed(GtkSpinButton *spin, gpointer data)
     else if (!strcmp(key,"temp_x")) priv->temp_x=value; else if (!strcmp(key,"temp_y")) priv->temp_y=value;
     else if (!strcmp(key,"label_x")) priv->label_x=value; else if (!strcmp(key,"label_y")) priv->label_y=value;
     else if (!strcmp(key,"window_width")) priv->width=value; else if (!strcmp(key,"window_height")) priv->height=value;
+    else if (!strcmp(key,"corner_radius")) priv->corner_radius=value;
     else if (!strcmp(key,"update_ms")) { priv->update_ms=value; xs_host_api()->set_tick(p,value); }
     g_key_file_set_integer(priv->kf,p->name,key,value); xs_core_plugin_conf_flush(p->name);
     xs_host_api()->resize(p,priv->width,priv->height); priv->cache_width=priv->width; priv->cache_height=priv->height; dm_rebuild(priv); gtk_widget_queue_draw(p->win);
@@ -1110,7 +1131,7 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     dm_bind(entry, ctx, "toggled", G_CALLBACK(dm_temperature_history_toggled));
     entry=xs_prop_add_string(GTK_BOX(page),"Graph label","Text shown over the graph",priv->graph_label);
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
-    dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
+    dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"corner_radius","Corner radius",priv->corner_radius,0,200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
     dm_add_separator(page);
     /* No history row: the label draws no fill, so the block must not offer a
      * second colour button for one. */

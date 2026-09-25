@@ -574,6 +574,19 @@ int dm_fit_text_coordinate(int anchor, int text_extent, int limit)
     return x;
 }
 
+/* Corner radius: negative input and 0 both mean "square corners". cairo cannot
+ * draw an arc larger than half the side, so a radius past that must be clamped
+ * or it silently produces a malformed path. */
+double dm_corner_radius_value(int value)
+{
+    return value > 0 ? (double)value : 0.0;
+}
+
+gboolean dm_corner_radius_is_rounded(double radius)
+{
+    return radius > 0.5;
+}
+
 /* The second sensor has no place in DiskSample, so its own reset is explicit:
  * the G_MININT sentinel must always be set, because g_new0 leaves 0 there and
  * 0 is a perfectly valid temperature. */
