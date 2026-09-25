@@ -278,7 +278,8 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     mm_draw_graph(cr, ram_x, 194.0, graph_width,
                   priv->swap_graph_height, priv->swap_history, priv->swap_head,
                   priv->swap_count, priv->swap_color, priv->border_color);
-    mm_draw_stippled_hr(cr, ram_x, 168.0, graph_width, priv->text_color);
+    mm_draw_stippled_hr(cr, MM_PAD, 168.0,
+                        width - 2 * MM_PAD, priv->text_color);
 
     pango_layout_set_width(layout, width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
