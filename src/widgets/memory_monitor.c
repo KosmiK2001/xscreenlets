@@ -13,8 +13,8 @@
 
 #define MM_DEFAULT_WINDOW_WIDTH 320
 #define MM_DEFAULT_WINDOW_HEIGHT 344
-#define MM_DEFAULT_RAM_HEIGHT 148
-#define MM_DEFAULT_SWAP_HEIGHT 148
+#define MM_DEFAULT_RAM_HEIGHT 140
+#define MM_DEFAULT_SWAP_HEIGHT 140
 #define MM_HISTORY_MAX 4096
 #define MM_DEFAULT_FONT "Ubuntu 8"
 #define MM_PAD 4.0
@@ -310,17 +310,18 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
                             text_width, priv->text_color);
     }
 
-    pango_layout_set_width(layout, width * PANGO_SCALE);
+    pango_layout_set_width(layout, text_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, "Swap:", -1);
     mm_set_text_color(cr, priv->text_color);
-    cairo_move_to(cr, MM_PAD, 168.0);
+    cairo_move_to(cr, text_x, 174.0);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_swap_fraction(&priv->sample) * 100.0);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->swap_color);
     pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, 0.0, 168.0);
+    cairo_move_to(cr, text_x, 174.0);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
@@ -381,10 +382,10 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
                                 320, 1200);
     priv->ram_graph_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                            "ram_graph_height", MM_DEFAULT_RAM_HEIGHT),
-                                   40, 1000);
+                                   40, 140);
     priv->swap_graph_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
-                                           "swap_graph_height", MM_DEFAULT_SWAP_HEIGHT),
-                                    40, 1000);
+                                            "swap_graph_height", MM_DEFAULT_SWAP_HEIGHT),
+                                    40, 140);
     priv->font = xs_host_api()->conf_str(kf, p->name, "font", MM_DEFAULT_FONT);
     mm_read_color(priv, "background_color", mm_default_background, priv->background_color);
     mm_read_color(priv, "text_color", mm_default_text, priv->text_color);
@@ -492,9 +493,9 @@ static void mm_int_changed(GtkSpinButton *spin, gpointer data)
     else if (strcmp(key, "window_height") == 0)
         priv->window_height = CLAMP(value, 320, 1200);
     else if (strcmp(key, "ram_graph_height") == 0)
-        priv->ram_graph_height = CLAMP(value, 40, 1000);
+        priv->ram_graph_height = CLAMP(value, 40, 140);
     else
-        priv->swap_graph_height = CLAMP(value, 40, 1000);
+        priv->swap_graph_height = CLAMP(value, 40, 140);
     g_key_file_set_integer(priv->kf, p->name, key, value);
     xs_host_api()->resize(p, priv->window_width, priv->window_height);
     priv->cache_width = priv->window_width;
@@ -594,8 +595,8 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
     mm_add_int(page, p, "update_ms", "Update (ms)", priv->update_ms, 100, 60000);
     mm_add_int(page, p, "window_width", "Window width", priv->window_width, 120, 1600);
     mm_add_int(page, p, "window_height", "Window height", priv->window_height, 320, 1200);
-    mm_add_int(page, p, "ram_graph_height", "RAM graph height", priv->ram_graph_height, 40, 1000);
-    mm_add_int(page, p, "swap_graph_height", "Swap graph height", priv->swap_graph_height, 40, 1000);
+    mm_add_int(page, p, "ram_graph_height", "RAM graph height", priv->ram_graph_height, 40, 140);
+    mm_add_int(page, p, "swap_graph_height", "Swap graph height", priv->swap_graph_height, 40, 140);
     font = xs_prop_add_font(GTK_BOX(page), "Font", "Monitor text font", priv->font);
     g_signal_connect(font, "font-set", G_CALLBACK(mm_font_set), p);
     mm_add_color(page, p, "background_color", "Background", priv->background_color);
