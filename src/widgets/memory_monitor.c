@@ -310,18 +310,18 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
                             text_width, priv->text_color);
     }
 
-    pango_layout_set_width(layout, text_width * PANGO_SCALE);
+    pango_layout_set_width(layout, width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, "Swap:", -1);
     mm_set_text_color(cr, priv->text_color);
-    cairo_move_to(cr, text_x, 174.0);
+    cairo_move_to(cr, MM_PAD, 174.0);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_swap_fraction(&priv->sample) * 100.0);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->swap_color);
     pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, text_x, 174.0);
+    cairo_move_to(cr, 0.0, 174.0);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
