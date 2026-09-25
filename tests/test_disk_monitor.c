@@ -1088,6 +1088,28 @@ static void test_series_color_picker_is_rgb_only(void)
     g_object_unref(block);
 }
 
+/* The value is drawn with a dark outline DM_TEXT_SHADOW_RADIUS px beyond the
+ * glyphs in all eight directions, so the fit must be computed against the
+ * inflated extent. Fitting on text_w alone let a value sit at a legal x while
+ * its halo already crossed the frame. */
+static void test_fit_text_coordinate_with_shadow(void)
+{
+    const int w = 311, r = 3;
+    /* glyphs 40 px wide -> 46 px of drawn footprint with the outline */
+    const int glyph = 40;
+    const int drawn = glyph + 2 * r;
+
+    /* Anchored at the right edge, the whole footprint must land inside. */
+    int x = dm_fit_text_coordinate(w - drawn, drawn, w);
+    assert(x == w - drawn);
+    assert(x + drawn <= w);
+    /* Pushed one px further than legal, the fit pulls it back inside. */
+    x = dm_fit_text_coordinate(w - drawn + 1, drawn, w);
+    assert(x == w - drawn);
+    /* A short string is not moved when it already fits. */
+    assert(dm_fit_text_coordinate(5, drawn, w) == 5);
+}
+
 static void test_fit_text_coordinate(void)
 {
     /* A short string at a legal anchor stays put. */
@@ -1457,6 +1479,7 @@ int main(void)
     test_graph_label_settings_block();
     test_scale_position_design_coords();
     test_fit_text_coordinate();
+    test_fit_text_coordinate_with_shadow();
     test_series_color_picker_is_rgb_only();
     test_rounded_region();
     test_rounded_region_cut_profile();

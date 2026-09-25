@@ -402,11 +402,21 @@ static void dm_show_text(cairo_t *cr, PangoLayout *layout,
      * measured width. The two axes clamp independently — sharing one limit
      * would leave the vertical guard dead on any window taller than it is
      * wide. */
-    x = dm_fit_text_coordinate(x, text_w, width);
-    if (height > 0 && y > height - 1)
-        y = height - 1;
-    if (y < 0)
-        y = 0;
+    /* Fit against the SHADOW extent, not the glyph box: the outline is drawn
+     * DM_TEXT_SHADOW_RADIUS px beyond the glyphs in all eight directions, so a
+     * fit computed on text_w alone lets the value sit legally inside the window
+     * while its halo already reaches the frame. Inflating the extent by the
+     * radius twice on each side makes the configured anchor the last legal
+     * position, and the rounded clip still eats anything the user forced past
+     * it by hand. */
+    x = dm_fit_text_coordinate(x, text_w + 2 * DM_TEXT_SHADOW_RADIUS, width);
+    /* Same shadow margin on the vertical axis, and the two axes are clamped
+     * independently (sharing one limit would leave the vertical guard dead on
+     * any window taller than it is wide). */
+    if (height > 0 && y > height - 1 - DM_TEXT_SHADOW_RADIUS)
+        y = height - 1 - DM_TEXT_SHADOW_RADIUS;
+    if (y < DM_TEXT_SHADOW_RADIUS)
+        y = DM_TEXT_SHADOW_RADIUS;
     /* The history fill can sit right behind the values, so a dark shadow is
      * laid down first in eight directions and the value is drawn on top. A
      * cairo_stroke over the glyph path would only put half its width inside
