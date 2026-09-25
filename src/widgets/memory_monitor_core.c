@@ -91,6 +91,18 @@ static char *mm_format_kib_full(guint64 kib)
                            value, units[i]);
 }
 
+int mm_compact_graph_width(int window_width, int text_width)
+{
+    int content_width = MAX(window_width - 2 * (int)4, 1);
+    int available = content_width - MAX(text_width, 0) - 6;
+    return CLAMP(available, 20, content_width);
+}
+
+int mm_percent_anchor_x(int window_width)
+{
+    return window_width > 0 ? 4 : 0;
+}
+
 char *mm_section_values_text(guint64 used_kib, guint64 total_kib)
 {
     char *used_text = mm_format_kib_full(used_kib);
@@ -107,22 +119,9 @@ int mm_stippled_width(int text_width, int available_width)
     return CLAMP(text_width, 0, MAX(available_width, 0));
 }
 
-int mm_percent_column_x(int window_width)
+int mm_section_hr_width(int available_width)
 {
-    (void)window_width;
-    return 36;
-}
-
-int mm_percent_column_width(void)
-{
-    return 28;
-}
-
-int mm_section_hr_width(int graph_width, int gap, int text_width,
-                       int available_width)
-{
-    int content_width = MAX(graph_width, 0) + MAX(gap, 0) + MAX(text_width, 0);
-    return mm_stippled_width(content_width, available_width);
+    return MAX(available_width, 0);
 }
 
 int mm_graph_width(int window_width, int text_width, int margin, int gap)

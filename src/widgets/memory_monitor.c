@@ -183,8 +183,6 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     char *swap_section = NULL;
     char *text;
     int detail_width = 0;
-    int ram_values_width = 0;
-    int swap_values_width = 0;
     int graph_width;
     int graph_height;
     int header_width;
@@ -233,9 +231,8 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         detail_width = MAX(detail_width, measured_width);
     }
     if (compact) {
-        int row_width = MAX(1, width - 2 * (int)MM_PAD);
         header_width = mm_compact_content_width(width);
-        graph_width = MAX(20, row_width * 45 / 100);
+        graph_width = mm_compact_graph_width(width, detail_width);
         graph_height = mm_compact_graph_height(height);
         ram_y = 18.0;
         swap_y = graph_height + 37.0;
@@ -286,12 +283,12 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     cairo_move_to(cr, MM_PAD, 4.0);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_ram_fraction(&priv->sample) * 100.0);
-    pango_layout_set_width(layout, mm_percent_column_width() * PANGO_SCALE);
+    pango_layout_set_width(layout, header_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->ram_color);
-    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
-    cairo_move_to(cr, mm_percent_column_x(width), 4.0);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    cairo_move_to(cr, compact ? mm_percent_anchor_x(width) : 0.0, 4.0);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
@@ -308,7 +305,6 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
         pango_layout_get_pixel_size(layout, &values_width, &layout_height);
-        ram_values_width = values_width;
         line_height = MAX(layout_height / line_count, 1);
         mm_draw_stippled_hr(cr, text_x,
                             (compact ? 16.0 : 26.0) + line_height - 1.0,
@@ -324,12 +320,13 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     cairo_move_to(cr, MM_PAD, swap_label_y);
     pango_cairo_show_layout(cr, layout);
     text = g_strdup_printf("%.0f%%", mm_swap_fraction(&priv->sample) * 100.0);
-    pango_layout_set_width(layout, mm_percent_column_width() * PANGO_SCALE);
+    pango_layout_set_width(layout, header_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->swap_color);
-    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
-    cairo_move_to(cr, mm_percent_column_x(width), swap_label_y);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
+    cairo_move_to(cr, compact ? mm_percent_anchor_x(width) : 0.0,
+                  swap_label_y);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
@@ -346,17 +343,13 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         int line_count = MAX(pango_layout_get_line_count(layout), 1);
         int line_height;
         pango_layout_get_pixel_size(layout, &values_width, &layout_height);
-        swap_values_width = values_width;
         line_height = MAX(layout_height / line_count, 1);
         mm_draw_stippled_hr(cr, text_x, swap_text_y + line_height - 1.0,
                             mm_stippled_width(values_width, text_width),
                             priv->text_color);
     }
     mm_draw_stippled_hr(cr, MM_PAD, section_hr_y,
-                        mm_section_hr_width(graph_width, 6,
-                                            MAX(ram_values_width,
-                                                swap_values_width),
-                                            width - 2 * (int)MM_PAD),
+                        mm_section_hr_width(width - 2 * (int)MM_PAD),
                         priv->text_color);
 
 done:

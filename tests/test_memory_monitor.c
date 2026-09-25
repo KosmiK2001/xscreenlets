@@ -37,15 +37,16 @@ static void test_responsive_graph_width(void)
     assert(mm_compact_hr_y(180) == 88);
     assert(mm_compact_content_width(100) == 92);
     assert(mm_compact_content_width(320) == 312);
+    assert(mm_percent_anchor_x(1) == 4);
+    assert(mm_percent_anchor_x(0) == 0);
     assert(mm_stippled_width(80, 200) == 80);
     assert(mm_stippled_width(240, 200) == 200);
     assert(mm_stippled_width(0, 200) == 0);
-    assert(mm_percent_column_x(259) == 36);
-    assert(mm_percent_column_x(100) == 36);
-    assert(mm_percent_column_width() == 28);
-    assert(mm_section_hr_width(120, 6, 41, 200) == 167);
-    assert(mm_section_hr_width(180, 6, 80, 200) == 200);
-    assert(mm_section_hr_width(0, 0, 0, 0) == 0);
+    assert(mm_compact_graph_width(259, 80) == 165);
+    assert(mm_compact_graph_width(100, 80) == 20);
+    assert(mm_section_hr_width(251) == 251);
+    assert(mm_section_hr_width(92) == 92);
+    assert(mm_section_hr_width(0) == 0);
 }
 
 int main(void)
