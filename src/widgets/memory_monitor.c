@@ -29,12 +29,15 @@ typedef struct {
     gdouble text_color[4];
     gdouble border_color[4];
     gdouble ram_color[4];
+    gdouble shared_color[4];
+    gdouble buffers_color[4];
+    gdouble cache_color[4];
     gdouble swap_color[4];
-    gdouble ram_history[MM_HISTORY_MAX];
+    gdouble ram_history[MM_RAM_COMPONENTS][MM_HISTORY_MAX];
     gdouble swap_history[MM_HISTORY_MAX];
-    guint ram_head;
+    guint ram_head[MM_RAM_COMPONENTS];
     guint swap_head;
-    guint ram_count;
+    guint ram_count[MM_RAM_COMPONENTS];
     guint swap_count;
     cairo_surface_t *cache;
     int cache_width;
@@ -47,6 +50,9 @@ static const gdouble mm_default_graph_background[4] = {0.04, 0.05, 0.07, 0.92};
 static const gdouble mm_default_text[4] = {1.0, 1.0, 1.0, 1.0};
 static const gdouble mm_default_border[4] = {0.451, 0.451, 0.451, 1.0};
 static const gdouble mm_default_ram[4] = {0.325, 0.510, 0.729, 1.0};
+static const gdouble mm_default_shared[4] = {0.95, 0.35, 0.55, 1.0};
+static const gdouble mm_default_buffers[4] = {0.95, 0.72, 0.18, 1.0};
+static const gdouble mm_default_cache[4] = {0.22, 0.76, 0.42, 1.0};
 static const gdouble mm_default_swap[4] = {1.0, 0.647, 0.0, 1.0};
 
 static char *mm_color_string(const GdkRGBA *color)
@@ -72,7 +78,10 @@ static void mm_read_color(PrivData *priv, const char *key,
     } else if (!mm_parse_color(text, out)) {
         priv->plugin->host->log("memory_monitor %s: invalid %s, using defaults",
                                 priv->plugin->name, key);
-        if (strcmp(key, "graph_background_color") == 0) {
+        if (strcmp(key, "graph_background_color") == 0 ||
+            strcmp(key, "shared_color") == 0 ||
+            strcmp(key, "buffers_color") == 0 ||
+            strcmp(key, "cache_color") == 0) {
             GdkRGBA color = {fallback[0], fallback[1], fallback[2], fallback[3]};
             char *default_text = mm_color_string(&color);
 
@@ -103,6 +112,8 @@ static void mm_push(gdouble *history, guint *head, guint *count, gdouble value)
     *count = MIN(*count + 1, MM_HISTORY_MAX);
 }
 
+static void mm_push_ram_components(PrivData *priv, const MemorySample *sample);
+
 static void mm_draw_graph(cairo_t *cr, double x, double y, int width,
                           int height, const gdouble *history, guint head,
                           guint count, const gdouble color[4],
@@ -132,6 +143,60 @@ static void mm_draw_graph(cairo_t *cr, double x, double y, int width,
                             bar_height);
     }
     cairo_fill(cr);
+    cairo_restore(cr);
+    cairo_set_source_rgba(cr, border[0], border[1], border[2], border[3]);
+    cairo_set_line_width(cr, 1.0);
+    cairo_rectangle(cr, x + 0.5, y + 0.5, width - 1.0, height - 1.0);
+    cairo_stroke(cr);
+}
+
+static void mm_draw_ram_stack(cairo_t *cr, double x, double y, int width,
+                              int height, gdouble history[MM_RAM_COMPONENTS][MM_HISTORY_MAX],
+                              const guint head[MM_RAM_COMPONENTS],
+                              const guint count[MM_RAM_COMPONENTS],
+                              const gdouble colors[][4],
+                              const gdouble background[4],
+                              const gdouble border[4])
+{
+    guint visible = 0;
+    guint start;
+    guint i;
+    int component;
+
+    for (component = 0; component < MM_RAM_COMPONENTS; component++)
+        visible = MAX(visible, count[component]);
+    visible = MIN(visible, (guint)MAX(width, 0));
+    start = (head[0] + MM_HISTORY_MAX - visible) % MM_HISTORY_MAX;
+
+    cairo_set_source_rgba(cr, background[0], background[1], background[2],
+                          background[3]);
+    cairo_rectangle(cr, x, y, width, height);
+    cairo_fill(cr);
+    cairo_save(cr);
+    cairo_rectangle(cr, x + 1.0, y + 1.0, width - 2.0, height - 2.0);
+    cairo_clip(cr);
+    for (i = 0; i < visible; i++) {
+        guint index = (start + i) % MM_HISTORY_MAX;
+        double px = x + 1.0 + (width - 2 - (int)visible) + (int)i;
+        double cursor = y + height - 1.0;
+
+        for (component = 0; component < MM_RAM_COMPONENTS; component++) {
+            double segment = (height - 2.0) *
+                             CLAMP(history[component][index], 0.0, 1.0);
+
+            if (segment <= 0.0)
+                continue;
+            segment = MIN(segment, cursor - (y + 1.0));
+            if (segment <= 0.0)
+                continue;
+            cursor -= segment;
+            cairo_set_source_rgba(cr, colors[component][0],
+                                  colors[component][1], colors[component][2],
+                                  colors[component][3]);
+            cairo_rectangle(cr, px, cursor, 1.0, segment);
+            cairo_fill(cr);
+        }
+    }
     cairo_restore(cr);
     cairo_set_source_rgba(cr, border[0], border[1], border[2], border[3]);
     cairo_set_line_width(cr, 1.0);
@@ -254,10 +319,19 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
                     MIN(priv->sample.swap_free_kib, priv->sample.swap_total_kib);
 
     /* Both histories use the same responsive width and height. */
-    mm_draw_graph(cr, ram_x, ram_y, graph_width, graph_height,
-                  priv->ram_history, priv->ram_head,
-                  priv->ram_count, priv->ram_color,
-                  priv->graph_background_color, priv->border_color);
+    {
+        const gdouble ram_colors[MM_RAM_COMPONENTS][4] = {
+            {priv->ram_color[0], priv->ram_color[1], priv->ram_color[2], priv->ram_color[3]},
+            {priv->shared_color[0], priv->shared_color[1], priv->shared_color[2], priv->shared_color[3]},
+            {priv->buffers_color[0], priv->buffers_color[1], priv->buffers_color[2], priv->buffers_color[3]},
+            {priv->cache_color[0], priv->cache_color[1], priv->cache_color[2], priv->cache_color[3]},
+        };
+
+        mm_draw_ram_stack(cr, ram_x, ram_y, graph_width, graph_height,
+                          priv->ram_history, priv->ram_head,
+                          priv->ram_count, ram_colors,
+                          priv->graph_background_color, priv->border_color);
+    }
     mm_draw_graph(cr, ram_x, swap_y, graph_width, graph_height,
                   priv->swap_history, priv->swap_head,
                   priv->swap_count, priv->swap_color,
@@ -386,6 +460,9 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     mm_read_color(priv, "text_color", mm_default_text, priv->text_color);
     mm_read_color(priv, "border_color", mm_default_border, priv->border_color);
     mm_read_color(priv, "ram_color", mm_default_ram, priv->ram_color);
+    mm_read_color(priv, "shared_color", mm_default_shared, priv->shared_color);
+    mm_read_color(priv, "buffers_color", mm_default_buffers, priv->buffers_color);
+    mm_read_color(priv, "cache_color", mm_default_cache, priv->cache_color);
     mm_read_color(priv, "swap_color", mm_default_swap, priv->swap_color);
 
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
@@ -410,8 +487,7 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     priv->cache_width = priv->window_width;
     priv->cache_height = priv->window_height;
     if (mm_read_meminfo(&priv->sample)) {
-        mm_push(priv->ram_history, &priv->ram_head, &priv->ram_count,
-                mm_ram_fraction(&priv->sample));
+        mm_push_ram_components(priv, &priv->sample);
         mm_push(priv->swap_history, &priv->swap_head, &priv->swap_count,
                 mm_swap_fraction(&priv->sample));
     }
@@ -421,6 +497,17 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     return 0;
 }
 
+static void mm_push_ram_components(PrivData *priv, const MemorySample *sample)
+{
+    gdouble parts[MM_RAM_COMPONENTS] = {0.0, 0.0, 0.0, 0.0};
+    int component;
+
+    mm_ram_components(sample, parts);
+    for (component = 0; component < MM_RAM_COMPONENTS; component++)
+        mm_push(priv->ram_history[component], &priv->ram_head[component],
+                &priv->ram_count[component], parts[component]);
+}
+
 static guint mm_tick(XsPlugin *p)
 {
     PrivData *priv = p ? p->priv : NULL;
@@ -428,8 +515,7 @@ static guint mm_tick(XsPlugin *p)
     if (!priv || !p->win)
         return 0;
     if (mm_read_meminfo(&priv->sample)) {
-        mm_push(priv->ram_history, &priv->ram_head, &priv->ram_count,
-                mm_ram_fraction(&priv->sample));
+        mm_push_ram_components(priv, &priv->sample);
         mm_push(priv->swap_history, &priv->swap_head, &priv->swap_count,
                 mm_swap_fraction(&priv->sample));
     }
@@ -536,6 +622,12 @@ static void mm_color_set(GtkColorButton *button, gpointer data)
         target = priv->border_color;
     else if (strcmp(key, "ram_color") == 0)
         target = priv->ram_color;
+    else if (strcmp(key, "shared_color") == 0)
+        target = priv->shared_color;
+    else if (strcmp(key, "buffers_color") == 0)
+        target = priv->buffers_color;
+    else if (strcmp(key, "cache_color") == 0)
+        target = priv->cache_color;
     else
         target = priv->swap_color;
     gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(button), &color);
@@ -593,7 +685,10 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
                  priv->graph_background_color);
     mm_add_color(page, p, "text_color", "Text", priv->text_color);
     mm_add_color(page, p, "border_color", "Graph border", priv->border_color);
-    mm_add_color(page, p, "ram_color", "RAM history", priv->ram_color);
+    mm_add_color(page, p, "ram_color", "RAM user/apps", priv->ram_color);
+    mm_add_color(page, p, "shared_color", "RAM shared", priv->shared_color);
+    mm_add_color(page, p, "buffers_color", "RAM buffers", priv->buffers_color);
+    mm_add_color(page, p, "cache_color", "RAM cache", priv->cache_color);
     mm_add_color(page, p, "swap_color", "Swap history", priv->swap_color);
     gtk_notebook_append_page(notebook, page, gtk_label_new("Memory Monitor"));
     gtk_widget_show_all(page);

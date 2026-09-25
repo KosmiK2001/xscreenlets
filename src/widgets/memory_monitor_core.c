@@ -71,7 +71,11 @@ gboolean mm_parse_meminfo(const char *text, MemorySample *sample)
 {
     gchar **lines;
     gboolean have_total = FALSE;
+    gboolean have_free = FALSE;
     gboolean have_available = FALSE;
+    gboolean have_buffers = FALSE;
+    gboolean have_cached = FALSE;
+    gboolean have_shared = FALSE;
     gboolean have_swap_total = FALSE;
     gboolean have_swap_free = FALSE;
     guint i;
@@ -85,9 +89,21 @@ gboolean mm_parse_meminfo(const char *text, MemorySample *sample)
         if (mm_parse_line(lines[i], "MemTotal:", &value)) {
             sample->total_kib = value;
             have_total = TRUE;
+        } else if (mm_parse_line(lines[i], "MemFree:", &value)) {
+            sample->free_kib = value;
+            have_free = TRUE;
         } else if (mm_parse_line(lines[i], "MemAvailable:", &value)) {
             sample->available_kib = value;
             have_available = TRUE;
+        } else if (mm_parse_line(lines[i], "Buffers:", &value)) {
+            sample->buffers_kib = value;
+            have_buffers = TRUE;
+        } else if (mm_parse_line(lines[i], "Cached:", &value)) {
+            sample->cached_kib = value;
+            have_cached = TRUE;
+        } else if (mm_parse_line(lines[i], "Shmem:", &value)) {
+            sample->shared_kib = value;
+            have_shared = TRUE;
         } else if (mm_parse_line(lines[i], "SwapTotal:", &value)) {
             sample->swap_total_kib = value;
             have_swap_total = TRUE;
@@ -97,8 +113,9 @@ gboolean mm_parse_meminfo(const char *text, MemorySample *sample)
         }
     }
     g_strfreev(lines);
-    sample->valid = have_total && sample->total_kib > 0 &&
-                    have_available && have_swap_total && have_swap_free;
+    sample->valid = have_total && sample->total_kib > 0 && have_free &&
+                    have_available && have_buffers && have_cached &&
+                    have_shared && have_swap_total && have_swap_free;
     return sample->valid;
 }
 
@@ -111,6 +128,34 @@ gdouble mm_ram_fraction(const MemorySample *sample)
     available = MIN(sample->available_kib, sample->total_kib);
     return CLAMP((sample->total_kib - available) / (gdouble)sample->total_kib,
                  0.0, 1.0);
+}
+
+void mm_ram_components(const MemorySample *sample, gdouble out[MM_RAM_COMPONENTS])
+{
+    guint64 free_kib;
+    guint64 buffers_kib;
+    guint64 shared_kib;
+    guint64 cache_kib;
+    guint64 used_classified_kib;
+    guint64 apps_kib;
+
+    g_return_if_fail(out != NULL);
+    memset(out, 0, MM_RAM_COMPONENTS * sizeof(out[0]));
+    if (!sample || !sample->valid || sample->total_kib == 0)
+        return;
+
+    free_kib = MIN(sample->free_kib, sample->total_kib);
+    buffers_kib = MIN(sample->buffers_kib, sample->total_kib - free_kib);
+    used_classified_kib = sample->total_kib - free_kib - buffers_kib;
+    shared_kib = MIN(sample->shared_kib, sample->cached_kib);
+    shared_kib = MIN(shared_kib, used_classified_kib);
+    cache_kib = MIN(sample->cached_kib - shared_kib,
+                    used_classified_kib - shared_kib);
+    apps_kib = used_classified_kib - shared_kib - cache_kib;
+    out[MM_RAM_APPS] = apps_kib / (gdouble)sample->total_kib;
+    out[MM_RAM_SHARED] = shared_kib / (gdouble)sample->total_kib;
+    out[MM_RAM_BUFFERS] = buffers_kib / (gdouble)sample->total_kib;
+    out[MM_RAM_CACHE] = cache_kib / (gdouble)sample->total_kib;
 }
 
 gdouble mm_swap_fraction(const MemorySample *sample)
