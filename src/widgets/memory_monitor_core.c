@@ -88,3 +88,18 @@ int mm_graph_height(int window_height)
         return MAX(12, (window_height - 76) / 2);
     return MAX(40, (window_height - 64) / 2);
 }
+
+int mm_compact_graph_height(int window_height)
+{
+    return MAX(12, (window_height - 45) / 2);
+}
+
+int mm_compact_hr_y(int window_height)
+{
+    return 18 + mm_compact_graph_height(window_height) + 3;
+}
+
+int mm_compact_content_width(int window_width)
+{
+    return MAX(1, window_width - 8);
+}

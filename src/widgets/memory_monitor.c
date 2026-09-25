@@ -213,6 +213,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     int detail_width = 0;
     int graph_width;
     int graph_height;
+    int header_width;
     double ram_x = MM_PAD;
     double ram_y = 22.0;
     double swap_y;
@@ -257,14 +258,26 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         pango_layout_get_pixel_size(layout, &measured_width, NULL);
         detail_width = MAX(detail_width, measured_width);
     }
-    graph_width = mm_graph_width(width, detail_width, (int)MM_PAD, 6);
-    graph_height = mm_graph_height(height);
-    compact = height < 200;
-    ram_y = compact ? 14.0 : 22.0;
-    swap_y = compact ? 48.0 : ram_y + graph_height + 32.0;
-    section_hr_y = compact ? 42.0 : ram_y + graph_height + 6.0;
-    swap_label_y = compact ? 28.0 : ram_y + graph_height + 10.0;
-    swap_text_y = compact ? 52.0 : swap_y + 4.0;
+    if (compact) {
+        int row_width = MAX(1, width - 2 * (int)MM_PAD);
+        header_width = mm_compact_content_width(width);
+        graph_width = MAX(20, row_width * 45 / 100);
+        graph_height = mm_compact_graph_height(height);
+        ram_y = 18.0;
+        swap_y = graph_height + 37.0;
+        section_hr_y = mm_compact_hr_y(height);
+        swap_label_y = graph_height + 24.0;
+        swap_text_y = graph_height + 40.0;
+    } else {
+        header_width = width;
+        graph_width = mm_graph_width(width, detail_width, (int)MM_PAD, 6);
+        graph_height = mm_graph_height(height);
+        ram_y = 22.0;
+        swap_y = ram_y + graph_height + 32.0;
+        section_hr_y = ram_y + graph_height + 6.0;
+        swap_label_y = ram_y + graph_height + 10.0;
+        swap_text_y = swap_y + 4.0;
+    }
     text_x = ram_x + graph_width + 6.0;
     text_width = MAX(1, width - (int)text_x - (int)MM_PAD);
 
@@ -294,7 +307,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     mm_draw_stippled_hr(cr, MM_PAD, section_hr_y,
                         width - 2 * MM_PAD, priv->text_color);
 
-    pango_layout_set_width(layout, width * PANGO_SCALE);
+    pango_layout_set_width(layout, header_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
     pango_layout_set_text(layout, "Ram:", -1);
     mm_set_text_color(cr, priv->text_color);
@@ -304,7 +317,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->ram_color);
     pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, 0.0, 4.0);
+    cairo_move_to(cr, compact ? MM_PAD : 0.0, 4.0);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 
@@ -325,7 +338,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
                             text_width, priv->text_color);
     }
 
-    pango_layout_set_width(layout, width * PANGO_SCALE);
+    pango_layout_set_width(layout, header_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, "Swap:", -1);
@@ -336,7 +349,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_layout_set_text(layout, text, -1);
     mm_set_text_color(cr, priv->swap_color);
     pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    cairo_move_to(cr, 0.0, swap_label_y);
+    cairo_move_to(cr, compact ? MM_PAD : 0.0, swap_label_y);
     pango_cairo_show_layout(cr, layout);
     g_free(text);
 

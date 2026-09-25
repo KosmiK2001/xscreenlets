@@ -16,5 +16,8 @@ gdouble mm_ram_fraction(const MemorySample *sample);
 gdouble mm_swap_fraction(const MemorySample *sample);
 int mm_graph_width(int window_width, int text_width, int margin, int gap);
 int mm_graph_height(int window_height);
+int mm_compact_graph_height(int window_height);
+int mm_compact_hr_y(int window_height);
+int mm_compact_content_width(int window_width);
 
 #endif
