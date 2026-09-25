@@ -40,6 +40,9 @@ static void test_responsive_graph_width(void)
     assert(mm_stippled_width(80, 200) == 80);
     assert(mm_stippled_width(240, 200) == 200);
     assert(mm_stippled_width(0, 200) == 0);
+    assert(mm_section_hr_width(120, 6, 41, 200) == 167);
+    assert(mm_section_hr_width(180, 6, 80, 200) == 200);
+    assert(mm_section_hr_width(0, 0, 0, 0) == 0);
 }
 
 int main(void)

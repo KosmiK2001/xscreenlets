@@ -107,6 +107,13 @@ int mm_stippled_width(int text_width, int available_width)
     return CLAMP(text_width, 0, MAX(available_width, 0));
 }
 
+int mm_section_hr_width(int graph_width, int gap, int text_width,
+                       int available_width)
+{
+    int content_width = MAX(graph_width, 0) + MAX(gap, 0) + MAX(text_width, 0);
+    return mm_stippled_width(content_width, available_width);
+}
+
 int mm_graph_width(int window_width, int text_width, int margin, int gap)
 {
     int available = window_width - MAX(text_width, 0) - 2 * margin - gap;
