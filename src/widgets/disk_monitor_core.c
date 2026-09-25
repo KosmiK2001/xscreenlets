@@ -79,22 +79,31 @@ gboolean dm_series_block_spec(const char *title,
                               int x, int y,
                               DmSeriesBlockSpec *out)
 {
+    /* The history row is OPTIONAL: the Graph label block has no fill of its
+     * own, so an empty history key/label must not drop the whole block. */
     if (!title || !*title || !font_key || !*font_key ||
         !text_color_key || !*text_color_key || !x_key || !*x_key ||
-        !y_key || !*y_key || !history_color_key || !*history_color_key ||
-        !font || !*font || !history_label || !*history_label ||
-        !text_color || !history_color || !out)
+        !y_key || !*y_key ||
+        !font || !*font || !text_color || !out)
         return FALSE;
     out->title = title;
     out->font_key = font_key;
     out->text_color_key = text_color_key;
     out->x_key = x_key;
     out->y_key = y_key;
-    out->history_color_key = history_color_key;
     out->font = font;
-    out->history_label = history_label;
+    /* Normalise the optional pair: half a history row is a caller bug. */
+    if (history_color_key && *history_color_key && history_label &&
+        *history_label && history_color) {
+        out->history_color_key = history_color_key;
+        out->history_label = history_label;
+        memcpy(out->history_color, history_color, 4 * sizeof(gdouble));
+    } else {
+        out->history_color_key = NULL;
+        out->history_label = NULL;
+        memset(out->history_color, 0, sizeof(out->history_color));
+    }
     memcpy(out->text_color, text_color, 4 * sizeof(gdouble));
-    memcpy(out->history_color, history_color, 4 * sizeof(gdouble));
     out->x = x;
     out->y = y;
     return TRUE;
@@ -156,6 +165,11 @@ GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
                                        &x_spin, &y_spin);
     dm_series_compact_row(box, "Position", position);
 
+    /* The history row is optional: the Graph label block draws no fill of its
+     * own, so it passes no history colour key and must not grow a button
+     * for one. An empty key would also be written into the config as junk. */
+    if (!spec->history_color_key || !spec->history_label)
+        return frame;
     rgba.red = spec->history_color[0];
     rgba.green = spec->history_color[1];
     rgba.blue = spec->history_color[2];

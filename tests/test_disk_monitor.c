@@ -1074,6 +1074,16 @@ static void test_series_color_picker_is_rgb_only(void)
         /* The alpha MUST come from the stored config, never from the picker. */
         g_assert_cmpfloat(target[3], ==, 0.55);
     }
+    /* A block with no history row must still build: the Graph label draws no
+     * fill, so it passes an empty history key and must not be dropped. */
+    {
+        DmSeriesBlockSpec s2 = {0};
+        g_assert_true(dm_series_block_spec(
+            "Graph label", "label_font", "text_color", "label_x", "label_y",
+            NULL, "Sans 8", NULL, s2.text_color, s2.history_color, 0, 0, &s2));
+        g_assert_null(s2.history_color_key);
+        g_assert_null(s2.history_label);
+    }
     g_object_ref_sink(block);
     g_object_unref(block);
 }

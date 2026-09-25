@@ -941,11 +941,17 @@ static void dm_color_set(GtkColorButton *button, gpointer data)
     gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(button), &color);
     target[0] = color.red; target[1] = color.green; target[2] = color.blue;
     /* The series pickers are RGB-only by user request, so GTK drops the alpha
-     * channel on any pick and hands back 1.0. Writing that back would destroy
-     * the configured transparency the first time the user touches a colour —
+     * channel on any pick and hands back 1.0 — writing that back would destroy
+     * the configured transparency the first time the user touches a colour,
      * and that alpha is exactly what the fill is drawn with. The pickers are
-     * built with the stored value, so the safe source is the current target. */
-    (void)color.alpha;
+     * built with the stored value, so the safe source is the current target.
+     *
+     * Background and border keep a real alpha scale (they come from the shared
+     * core row builder, which enables it), so for those the picker's alpha is
+     * the user's actual choice and must be stored. */
+    if (!strcmp(key, "background_color") || !strcmp(key, "graph_background_color") ||
+        !strcmp(key, "border_color"))
+        target[3] = color.alpha;
     value = dm_format_rgba(target);
     g_key_file_set_string(priv->kf, p->name, key, value);
     g_free(value);
@@ -1106,8 +1112,10 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
     dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
     dm_add_separator(page);
+    /* No history row: the label draws no fill, so the block must not offer a
+     * second colour button for one. */
     dm_add_series_block(page,ctx,"Graph label","label_font","text_color",
-                        "label_x","label_y","text_color","Graph label text",
+                        "label_x","label_y",NULL,NULL,
                         priv->label_font,priv->text_color,priv->text_color,
                         priv->label_x,priv->label_y);
     dm_add_separator(page);
@@ -1125,7 +1133,10 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
                         "temp_x","temp_y","temp_color","Temperature history",
                         priv->temp_font,priv->temp_text_color,priv->temp_color,
                         priv->temp_x,priv->temp_y);
-    dm_add_color(page,ctx,"background_color","Background",priv->bg);
+    /* No "Background" row: since DM_GRAPH_TOP became 0 the graph fills the whole
+     * window, so priv->bg is painted as the base layer and is never visible on
+     * its own — a control for it would be a lie. The key is still read from the
+     * config (and kept up to date there) so an existing setup keeps working. */
     dm_add_color(page,ctx,"graph_background_color","Graph background",priv->graph_bg);
     dm_add_color(page,ctx,"text_color","Text",priv->text_color);
     dm_add_color(page,ctx,"border_color","Graph border",priv->border);
