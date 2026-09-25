@@ -614,7 +614,13 @@ cairo_region_t *dm_rounded_region(int width, int height, int radius)
         int cut = 0;
 
         if (d <= scaled)
-            cut = (int) ceil(scaled - sqrt(scaled * scaled - d * d));
+            /* floor, not ceil: the mask is what removes the corner, and ceil
+             * cuts a full pixel deeper than the true arc all the way round.
+             * That extra pixel is exactly where the border's anti-aliased
+             * stroke lives, so ceil ate the visible part of the frame. floor
+             * keeps the cut inside the arc, so the smooth cairo border shows
+             * through and only a thin step remains at the very edge. */
+            cut = (int) floor(scaled - sqrt(scaled * scaled - d * d));
         box.x = i;
         box.y = cut;
         box.width = 1;

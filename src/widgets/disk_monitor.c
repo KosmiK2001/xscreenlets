@@ -17,7 +17,7 @@
  * drawn on top of it, so nothing is reserved for them. */
 #define DM_GRAPH_TOP 0
 /* how far the border arc is pulled inside the quantised X shape cut */
-#define DM_BORDER_PATH_INSET 1.5
+#define DM_BORDER_PATH_INSET 0.5
 #define DM_DISKSTATS "/proc/diskstats"
 #define DM_CTX_KEY "xs-disk-monitor-ctx"
 
@@ -489,11 +489,10 @@ static void dm_rounded_path(cairo_t *cr, int width, int height, int radius,
         return;
     }
     r = MIN(r, MIN(w, h) / 2.0);
-    /* The border must sit BETWEEN the window corner and the shape cut, not
-     * outside it. Measured: at 45 deg the cut is 9.94 px from the corner while
-     * an arc of r-1.5 lands 10.73 px out, i.e. under the cut and therefore
-     * invisible. A smaller radius pulls the arc towards the corner, into the
-     * band the X server actually shows. */
+    /* The border arc must stay just inside the shape cut. dm_rounded_region()
+     * cuts with floor(), i.e. never deeper than the true arc, so a small
+     * inset is enough to keep the stroke out of the removed band while leaving
+     * the smooth cairo edge visible. */
     if (r > border_inset)
         r -= border_inset;
     else
@@ -636,6 +635,13 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
      * design coordinates mapped to the live window, so a resize keeps every
      * value in the same relative spot instead of pushing it out of frame. */
     {
+        /* Text near a corner must not spill over the rounded frame. Clip the
+         * whole text pass to the same outline the border and fill use, so any
+         * glyph that reaches into the cut is simply not painted — no manual
+         * per-label bounds to keep in sync. */
+        cairo_save(cr);
+        dm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
+        cairo_clip(cr);
         const int dw = priv->design_width > 0 ? priv->design_width : width;
         const int dh = priv->design_height > 0 ? priv->design_height : height;
         const int label_x = dm_scale_position(priv->label_x, dw, width,
@@ -700,6 +706,7 @@ static cairo_surface_t *dm_render(PrivData *priv, int width, int height)
         dm_show_text(cr, layout, priv->write_font, write_x, write_y,
                      write_text, priv->write_text_color, width, height);
         g_free(read_text); g_free(write_text);
+        cairo_restore(cr);
     }
     g_object_unref(layout); cairo_destroy(cr); cairo_surface_mark_dirty(surface);
     return surface;
