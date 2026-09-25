@@ -1563,6 +1563,58 @@ static void test_sector_units_independent_of_logical_block_size(void)
     g_assert_cmpint(dm_disk_logical_sector_size("no-such-device-xyz"), ==, 0);
 }
 
+/* On a mostly idle disk the per-tick rate is bursty, so two monitors reading
+ * the same counter can differ by orders of magnitude purely by window. The
+ * smoothing window must average the most recent samples, the way conky's
+ * diskio_avg_samples does, and window 1 must stay instantaneous. */
+static void test_rate_smoothing(void)
+{
+    DmHistoryState h;
+    /* Measured bursty sequence on an idle SSD, KiB/s converted to B/s. */
+    const gint64 burst[6] = {0, 136 * 1024, 0, 0, 12 * 1024, 0};
+    guint i;
+
+    memset(&h, 0, sizeof(h));
+    dm_rate_smooth_reset(&h);
+    g_assert_cmpint(h.rate_count, ==, 0);
+
+    for (i = 0; i < 6; i++)
+        dm_rate_smooth_push(&h, burst[i], burst[i]);
+    g_assert_cmpint(h.rate_count, ==, 6);
+
+    /* Window 1 = the newest sample only = instantaneous, no smoothing. */
+    g_assert_cmpint(dm_rate_smoothed(&h, 1, FALSE), ==, burst[5]);
+    /* Window 2 averages the two newest. */
+    g_assert_cmpint(dm_rate_smoothed(&h, 2, FALSE),
+                    ==, (burst[4] + burst[5]) / 2);
+    /* Window 6 averages all six, which is far below the burst peak. */
+    g_assert_cmpint(dm_rate_smoothed(&h, 6, FALSE),
+                    ==, (0 + burst[1] + 0 + 0 + burst[4] + 0) / 6);
+    g_assert_cmpint(dm_rate_smoothed(&h, 6, FALSE) < burst[1], ==, TRUE);
+
+    /* A window LONGER than the history must not read uninitialised slots. */
+    g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, FALSE),
+                    ==, (0 + burst[1] + 0 + 0 + burst[4] + 0) / 6);
+
+    /* Negative rates are clamped, not subtracted. */
+    dm_rate_smooth_reset(&h);
+    dm_rate_smooth_push(&h, -5, -5);
+    g_assert_cmpint(dm_rate_smoothed(&h, 1, FALSE), ==, 0);
+
+    /* Empty history yields 0 rather than dividing by zero. */
+    dm_rate_smooth_reset(&h);
+    g_assert_cmpint(dm_rate_smoothed(&h, 5, FALSE), ==, 0);
+    g_assert_cmpint(dm_rate_smoothed(&h, 5, TRUE), ==, 0);
+
+    /* The ring wraps without overrunning its fixed capacity. */
+    dm_rate_smooth_reset(&h);
+    for (i = 0; i < DM_RATE_SMOOTH_MAX * 3; i++)
+        dm_rate_smooth_push(&h, 100, 200);
+    g_assert_cmpint(h.rate_count, ==, DM_RATE_SMOOTH_MAX);
+    g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, FALSE), ==, 100);
+    g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, TRUE), ==, 200);
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1608,6 +1660,7 @@ int main(void)
     test_fit_text_coordinate_with_shadow();
     test_find_hwmon_temp_layouts();
     test_sector_units_independent_of_logical_block_size();
+    test_rate_smoothing();
     test_series_color_picker_is_rgb_only();
     test_rounded_region();
     test_rounded_region_cut_profile();

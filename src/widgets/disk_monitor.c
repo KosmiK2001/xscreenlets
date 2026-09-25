@@ -37,6 +37,10 @@ typedef struct {
      * against it and mapped to the live size on every frame. */
     int design_width, design_height;
     guint update_ms;
+    /* How many per-tick rates are averaged for the displayed value.
+     * 1 = instantaneous, which is conky's default behaviour; higher values
+     * make bursty idle-disk I/O comparable with monitors that smooth. */
+    int rate_smooth;
     int read_x, read_y, write_x, write_y, temp_x, temp_y;
     int label_x, label_y;
     gboolean show_temperature_history;
@@ -258,6 +262,13 @@ static void dm_sample(PrivData *priv)
             if (write_rate > 0 || device->history.previous_write == write)
                 device->sample.write_bytes = (guint64)write_rate;
             device->sample.io_valid = TRUE;
+        }
+        dm_rate_smooth_push(&device->history, read_rate, write_rate);
+        if (priv->rate_smooth > 1 && device->sample.io_valid) {
+            gint64 sr = dm_rate_smoothed(&device->history, priv->rate_smooth, FALSE);
+            gint64 sw = dm_rate_smoothed(&device->history, priv->rate_smooth, TRUE);
+            device->sample.read_bytes = (guint64)sr;
+            device->sample.write_bytes = (guint64)sw;
         }
         /* I/O accounting probe: shows the raw sector counters next to the
          * byte deltas and the elapsed time, so a disagreement with another
@@ -736,6 +747,9 @@ static int dm_init(XsPlugin *p, GKeyFile *kf)
     priv->design_width = priv->width;
     priv->design_height = priv->height;
     priv->update_ms = CLAMP(xs_host_api()->conf_int(kf,p->name,"update_ms",1000),100,60000);
+    priv->rate_smooth = CLAMP(xs_host_api()->conf_int(kf,p->name,"rate_smooth",1),
+                              DM_RATE_SMOOTH_MIN, DM_RATE_SMOOTH_MAX);
+    dm_rate_smooth_reset(&priv->device.history);
     priv->read_x=xs_host_api()->conf_int(kf,p->name,"read_x",8); priv->read_y=xs_host_api()->conf_int(kf,p->name,"read_y",12);
     priv->write_x=xs_host_api()->conf_int(kf,p->name,"write_x",150); priv->write_y=xs_host_api()->conf_int(kf,p->name,"write_y",12);
     priv->temp_x=xs_host_api()->conf_int(kf,p->name,"temp_x",310); priv->temp_y=xs_host_api()->conf_int(kf,p->name,"temp_y",12);
@@ -1208,7 +1222,7 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     dm_bind(entry, ctx, "toggled", G_CALLBACK(dm_temperature_history_toggled));
     entry=xs_prop_add_string(GTK_BOX(page),"Graph label","Text shown over the graph",priv->graph_label);
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
-    dm_add_int(page,ctx,"window_width","Window width",priv->width,DM_MIN_WINDOW_WIDTH,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,DM_MIN_WINDOW_HEIGHT,1200); dm_add_int(page,ctx,"corner_radius","Corner radius",priv->corner_radius,0,200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
+    dm_add_int(page,ctx,"window_width","Window width",priv->width,DM_MIN_WINDOW_WIDTH,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,DM_MIN_WINDOW_HEIGHT,1200); dm_add_int(page,ctx,"corner_radius","Corner radius",priv->corner_radius,0,200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000); dm_add_int(page,ctx,"rate_smooth","Rate smoothing (samples)",priv->rate_smooth,DM_RATE_SMOOTH_MIN,DM_RATE_SMOOTH_MAX);
     dm_add_separator(page);
     /* No history row: the label draws no fill, so the block must not offer a
      * second colour button for one. */

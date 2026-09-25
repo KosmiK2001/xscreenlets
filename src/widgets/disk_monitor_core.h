@@ -20,6 +20,12 @@ typedef struct _GtkWidget GtkWidget;
  * update rate) so the log stays readable under sustained load. */
 #define DM_IO_PROBE_EVERY 10
 
+/* Upper bound for the rate-smoothing window. conky caps diskio_avg_samples
+ * at 14, so the same range keeps the two monitors comparable. 1 means
+ * instantaneous (no smoothing) and is the default. */
+#define DM_RATE_SMOOTH_MIN 1
+#define DM_RATE_SMOOTH_MAX 14
+
 typedef struct {
     guint64 read_bytes;
     guint64 write_bytes;
@@ -37,6 +43,14 @@ typedef struct {
     guint64 previous_read, previous_write;
     gint64 previous_time_us;
     gboolean previous_valid;
+    /* Ring of recent per-tick rates for optional smoothing. Instantaneous
+     * throughput on a mostly idle disk is bursty: consecutive samples read
+     * 0, 136, 0, 0, 12, 0 KiB/s, so two monitors reading the same counter can
+     * differ by two orders of magnitude purely by window. Smoothing averages
+     * the last N samples, which is what conky's diskio_avg_samples does. */
+    gint64 rate_read[DM_RATE_SMOOTH_MAX];
+    gint64 rate_write[DM_RATE_SMOOTH_MAX];
+    guint rate_head, rate_count;
 } DmHistoryState;
 typedef struct {
     char *by_id;
@@ -258,6 +272,10 @@ guint dm_history_columns(int width, guint available);
 gboolean dm_by_id_link_name_is_candidate(const char *link_name);
 char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
                          char **secondary);
+void dm_rate_smooth_reset(DmHistoryState *history);
+void dm_rate_smooth_push(DmHistoryState *history, gint64 read_rate,
+                         gint64 write_rate);
+gint64 dm_rate_smoothed(const DmHistoryState *history, int window, gboolean write);
 int dm_disk_logical_sector_size(const char *device_name);
 int dm_hwmon_temp_priority(const char *driver_name, const char *label);
 void dm_graph_background_rgba(const gdouble input[4], gdouble output[4]);

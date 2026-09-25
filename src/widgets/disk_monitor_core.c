@@ -1390,6 +1390,60 @@ int dm_disk_logical_sector_size(const char *device_name)
     return value;
 }
 
+/* Rate smoothing, mirroring conky's diskio_avg_samples: keep the last N
+ * per-tick rates and report their mean. The ring is fixed-capacity and only
+ * the window length changes, so resize and Properties cannot reallocate it
+ * while tick/draw are running. */
+void dm_rate_smooth_reset(DmHistoryState *history)
+{
+    guint i;
+
+    if (!history)
+        return;
+    for (i = 0; i < DM_RATE_SMOOTH_MAX; i++) {
+        history->rate_read[i] = 0;
+        history->rate_write[i] = 0;
+    }
+    history->rate_head = 0;
+    history->rate_count = 0;
+}
+
+void dm_rate_smooth_push(DmHistoryState *history, gint64 read_rate,
+                         gint64 write_rate)
+{
+    if (!history)
+        return;
+    history->rate_read[history->rate_head] = read_rate > 0 ? read_rate : 0;
+    history->rate_write[history->rate_head] = write_rate > 0 ? write_rate : 0;
+    history->rate_head = (history->rate_head + 1) % DM_RATE_SMOOTH_MAX;
+    if (history->rate_count < DM_RATE_SMOOTH_MAX)
+        history->rate_count++;
+}
+
+gint64 dm_rate_smoothed(const DmHistoryState *history, int window, gboolean write)
+{
+    const gint64 *ring;
+    guint count, i;
+    gint64 sum = 0;
+
+    if (!history || !history->rate_count)
+        return 0;
+    ring = write ? history->rate_write : history->rate_read;
+    count = history->rate_count;
+    if (window > 0 && (guint)window < count)
+        count = (guint)window;
+    if (count == 0)
+        return 0;
+    /* Walk BACKWARDS from the newest entry so the most recent samples are
+     * always the ones counted when the window is shorter than the history. */
+    for (i = 0; i < count; i++) {
+        guint idx = (history->rate_head + DM_RATE_SMOOTH_MAX - 1 - i) %
+                    DM_RATE_SMOOTH_MAX;
+        sum += ring[idx];
+    }
+    return sum / (gint64)count;
+}
+
 int dm_hwmon_temp_priority(const char *driver_name, const char *label)
 {
     if (driver_name && !strcmp(driver_name, "drivetemp"))
