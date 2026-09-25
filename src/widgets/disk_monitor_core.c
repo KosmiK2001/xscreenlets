@@ -826,8 +826,13 @@ gboolean dm_parse_diskstats_named(const char *text, const char *device_name,
 
 guint64 dm_sectors_to_bytes(guint64 sectors)
 {
-    /* Linux always reports 512-byte sectors in the block layer, including
-     * 4Kn devices: the count is normalized, not raw. */
+    /* /proc/diskstats sector counters are ALWAYS in fixed 512-byte units,
+     * independent of the device's logical_block_size and of its physical
+     * sector size. See Documentation/admin-guide/iostats.rst. Do NOT multiply
+     * by logical_block_size: on a 512e drive (physical 4096) that inflates the
+     * result 8x, and on a 4Kn device the kernel has already normalised the
+     * counters, so it inflates 8x the other way. dm_disk_logical_sector_size()
+     * exists for logging this value only. */
     if (sectors > G_MAXUINT64 / 512)
         return G_MAXUINT64;
     return sectors * 512;
@@ -1353,6 +1358,36 @@ char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
     else
         g_free(second);
     return best;
+}
+
+/* Report the block device's LOGICAL block size for diagnostics only.
+ *
+ * This value MUST NOT be used to convert /proc/diskstats sector counters:
+ * those are always expressed in fixed 512-byte units regardless of
+ * logical_block_size (see Documentation/admin-guide/iostats.rst), and
+ * multiplying by logical_block_size instead is the classic way to report
+ * 8x or 100x the real throughput on 4Kn devices. It is logged so an operator
+ * comparing against another monitor can see the two are unrelated. */
+int dm_disk_logical_sector_size(const char *device_name)
+{
+    char *path;
+    char *text = NULL;
+    int value = 0;
+
+    if (!device_name || !*device_name)
+        return 0;
+    path = g_strdup_printf("/sys/class/block/%s/queue/logical_block_size",
+                           device_name);
+    if (g_file_get_contents(path, &text, NULL, NULL) && text) {
+        gint64 parsed;
+        char *end = NULL;
+        parsed = g_ascii_strtoll(text, &end, 10);
+        if (end != text && parsed > 0 && parsed <= 65536)
+            value = (int)parsed;
+    }
+    g_free(text);
+    g_free(path);
+    return value;
 }
 
 int dm_hwmon_temp_priority(const char *driver_name, const char *label)

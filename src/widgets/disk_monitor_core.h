@@ -16,6 +16,9 @@ typedef struct _GtkWidget GtkWidget;
  * columns, so this is the floor rather than an arbitrary number. */
 #define DM_MIN_WINDOW_WIDTH 80
 #define DM_MIN_WINDOW_HEIGHT 60
+/* Log the I/O accounting probe every N samples (~N seconds at the default
+ * update rate) so the log stays readable under sustained load. */
+#define DM_IO_PROBE_EVERY 10
 
 typedef struct {
     guint64 read_bytes;
@@ -51,6 +54,8 @@ typedef struct {
     gint cached_hddtemp_milli;
     gboolean cached_hddtemp_valid;
     gint64 last_resolve_attempt_us;
+    /* Counts samples since the last I/O accounting line was logged. */
+    guint io_probe_counter;
 } DmDeviceState;
 
 typedef enum {
@@ -253,6 +258,7 @@ guint dm_history_columns(int width, guint available);
 gboolean dm_by_id_link_name_is_candidate(const char *link_name);
 char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
                          char **secondary);
+int dm_disk_logical_sector_size(const char *device_name);
 int dm_hwmon_temp_priority(const char *driver_name, const char *label);
 void dm_graph_background_rgba(const gdouble input[4], gdouble output[4]);
 

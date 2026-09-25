@@ -165,15 +165,20 @@ static void dm_hddtemp_done(GObject *source, GAsyncResult *result,
     PrivData *priv;
 
     (void)source;
-    if (g_task_is_valid(result, NULL))
-        temperature = g_task_propagate_int(G_TASK(result), &error);
+    /* A cancelled task returns an error and g_task_propagate_int() then yields
+     * 0, which is a VALID temperature. Treat any error as "no reading" so a
+     * shutdown cannot flash 0 C over the real value. */
+    if (g_task_is_valid(result, NULL) && !g_task_propagate_int(G_TASK(result), &error))
+        temperature = error ? G_MININT : temperature;
     g_clear_error(&error);
 
     live = request->instance_name ? xs_core_find_instance(request->instance_name) : NULL;
     priv = live ? live->priv : NULL;
     if (priv && dm_hddtemp_completion_is_current(
                     priv->hddtemp_task, G_TASK(result))) {
-        priv->hddtemp_task = NULL;
+        /* g_task_new() hands the reference to us, so drop it here. Leaving
+         * only the NULL would leak the task on every completion. */
+        g_clear_object(&priv->hddtemp_task);
         g_clear_object(&priv->hddtemp_cancellable);
         if (dm_temperature_completion_apply(&priv->device.sample, request,
                                             temperature, priv->plugin->name,
@@ -189,7 +194,9 @@ static void dm_hddtemp_done(GObject *source, GAsyncResult *result,
         }
     }
     dm_temperature_request_clear(request);
-    g_object_unref(request);
+    /* request comes from g_new0(), not a GObject: unref-ing it would read
+     * instance_name as a GTypeInstance class pointer. */
+    g_free(request);
 }
 
 static void dm_start_hddtemp(PrivData *priv, gint64 now)
@@ -236,18 +243,42 @@ static void dm_sample(PrivData *priv)
     }
     if (g_file_get_contents(DM_DISKSTATS, &text, NULL, NULL) &&
         dm_parse_diskstats_named(text, device->device_name, &read, &write)) {
+        gint64 read_rate = 0, write_rate = 0;
+        gboolean have_rates = device->history.previous_valid && elapsed > 0;
+
         read = dm_sectors_to_bytes(read);
         write = dm_sectors_to_bytes(write);
-        if (device->history.previous_valid && elapsed > 0) {
-            gint64 read_rate = dm_rate_bytes_per_second(
+        if (have_rates) {
+            read_rate = dm_rate_bytes_per_second(
                 device->history.previous_read, read, elapsed);
-            gint64 write_rate = dm_rate_bytes_per_second(
+            write_rate = dm_rate_bytes_per_second(
                 device->history.previous_write, write, elapsed);
             if (read_rate > 0 || device->history.previous_read == read)
                 device->sample.read_bytes = (guint64)read_rate;
             if (write_rate > 0 || device->history.previous_write == write)
                 device->sample.write_bytes = (guint64)write_rate;
             device->sample.io_valid = TRUE;
+        }
+        /* I/O accounting probe: shows the raw sector counters next to the
+         * byte deltas and the elapsed time, so a disagreement with another
+         * monitor can be attributed to the counters, the elapsed window or the
+         * formatting instead of being guessed at. Sampled sparsely, not every
+         * tick, to keep the log readable under load. */
+        device->io_probe_counter++;
+        if (device->io_probe_counter >= DM_IO_PROBE_EVERY &&
+            have_rates && priv->plugin->host->log) {
+            device->io_probe_counter = 0;
+            priv->plugin->host->log(
+                "disk_monitor %s: io %s sectors r=%" G_GUINT64_FORMAT " w=%"
+                G_GUINT64_FORMAT " dR=%" G_GINT64_FORMAT "B dW=%" G_GINT64_FORMAT
+                "B dt=%" G_GUINT64_FORMAT "us rate r=%" G_GINT64_FORMAT
+                "B/s w=%" G_GINT64_FORMAT "B/s lbl_sector=%d",
+                priv->plugin->name, device->device_name,
+                read / 512, write / 512,
+                (gint64)(read - device->history.previous_read),
+                (gint64)(write - device->history.previous_write),
+                elapsed, read_rate, write_rate,
+                dm_disk_logical_sector_size(device->device_name));
         }
         device->history.previous_read = read;
         device->history.previous_write = write;
@@ -937,6 +968,14 @@ static void dm_disk_changed(GtkComboBox *combo, gpointer data)
                                 priv->plugin->name, selected);
         dm_device_state_clear(&prepared);
         g_free(selected);
+        /* A rejected switch leaves the old target in place, so its hddtemp
+         * timing still applies; reset it the same way dm_try_resolve() does so
+         * the two paths cannot drift apart. */
+        if (priv) {
+            priv->device.last_hddtemp_attempt_us = 0;
+            priv->device.cached_hddtemp_valid = FALSE;
+            priv->device.cached_hddtemp_milli = G_MININT;
+        }
         /* Rollback: put the combo back on the device that is still live, with
          * the handler blocked so restoring the selection is not a new switch. */
         text_combo = GTK_COMBO_BOX_TEXT(combo);
@@ -1135,7 +1174,10 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     disks=dm_discover_disks(); combo=gtk_combo_box_text_new();
     for(i=0;i<disks->len;i++) gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),g_ptr_array_index(disks,i));
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo),0);
-    for(i=0;i<disks->len;i++) if(!strcmp(g_ptr_array_index(disks,i),priv->device.by_id)) gtk_combo_box_set_active(GTK_COMBO_BOX(combo),i);
+    /* Preselect the live disk. by_id is read only when set, so an unresolved
+     * instance cannot pass NULL into strcmp(). */
+    if (priv->device.by_id)
+        for(i=0;i<disks->len;i++) if(!strcmp(g_ptr_array_index(disks,i),priv->device.by_id)) gtk_combo_box_set_active(GTK_COMBO_BOX(combo),i);
     if (priv->device.by_id) {
         gint current = dm_combo_find_text(GTK_COMBO_BOX(combo), priv->device.by_id);
         gboolean identity_resolved = dm_by_id_is_whole_disk(priv->device.by_id);

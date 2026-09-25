@@ -1459,9 +1459,18 @@ static void test_find_hwmon_temp_layouts(void)
     /* g_mkdir_with_parents returns 0 on success, -1 on error. */
     ok = g_mkdir_with_parents(dev, 0755);
     g_assert_cmpint(ok, ==, 0);
-    g_file_set_contents(g_build_filename(dev, "name", NULL), "nvme\n", -1, NULL);
-    g_file_set_contents(g_build_filename(dev, "temp1_input", NULL), "34000", -1, NULL);
-    g_file_set_contents(g_build_filename(dev, "temp1_label", NULL), "Composite\n", -1, NULL);
+    {
+        char *f;
+        f = g_build_filename(dev, "name", NULL);
+        g_file_set_contents(f, "nvme\n", -1, NULL);
+        g_free(f);
+        f = g_build_filename(dev, "temp1_input", NULL);
+        g_file_set_contents(f, "34000", -1, NULL);
+        g_free(f);
+        f = g_build_filename(dev, "temp1_label", NULL);
+        g_file_set_contents(f, "Composite\n", -1, NULL);
+        g_free(f);
+    }
     g_free(dev);
 
     /* SATA layout: device/hwmon/hwmon16/{...} one level deeper. */
@@ -1469,8 +1478,15 @@ static void test_find_hwmon_temp_layouts(void)
     /* g_mkdir_with_parents returns 0 on success, -1 on error. */
     ok = g_mkdir_with_parents(dev, 0755);
     g_assert_cmpint(ok, ==, 0);
-    g_file_set_contents(g_build_filename(dev, "name", NULL), "drivetemp\n", -1, NULL);
-    g_file_set_contents(g_build_filename(dev, "temp1_input", NULL), "35000", -1, NULL);
+    {
+        char *f;
+        f = g_build_filename(dev, "name", NULL);
+        g_file_set_contents(f, "drivetemp\n", -1, NULL);
+        g_free(f);
+        f = g_build_filename(dev, "temp1_input", NULL);
+        g_file_set_contents(f, "35000", -1, NULL);
+        g_free(f);
+    }
     g_free(dev);
 
     /* A dir that merely starts with "hwmon" but has no name file is not a
@@ -1513,6 +1529,38 @@ static void test_find_hwmon_temp_layouts(void)
         }
     }
     g_free(root);
+}
+
+/* /proc/diskstats sector counters are fixed 512-byte units regardless of the
+ * device's logical_block_size, and the conversion must stay 512 on a 4Kn
+ * device. Multiplying by logical_block_size is the classic way to report 8x
+ * the real throughput. */
+static void test_sector_units_independent_of_logical_block_size(void)
+{
+    guint64 sectors;
+
+    /* A 4Kn device reports logical_block_size 4096, and the kernel still
+     * normalises its counters to 512-byte units. */
+    sectors = 1000;
+    g_assert_cmpuint(dm_sectors_to_bytes(sectors), ==, sectors * 512);
+
+    /* A 512e device (physical 4096, logical 512) is the same case. */
+    g_assert_cmpuint(dm_sectors_to_bytes(2048), ==, 1024u * 1024u);
+
+    /* The conversion is byte-exact, not rounded. */
+    g_assert_cmpuint(dm_sectors_to_bytes(1), ==, 512u);
+    g_assert_cmpuint(dm_sectors_to_bytes(0), ==, 0u);
+
+    /* Saturates instead of wrapping. */
+    g_assert_cmpuint(dm_sectors_to_bytes(G_MAXUINT64), ==, G_MAXUINT64);
+    g_assert_cmpuint(dm_sectors_to_bytes(G_MAXUINT64 / 512 + 1),
+                     ==, G_MAXUINT64);
+
+    /* The diagnostic reader never feeds the conversion: a missing or malformed
+     * sysfs file reports 0 rather than a plausible-looking default. */
+    g_assert_cmpint(dm_disk_logical_sector_size(NULL), ==, 0);
+    g_assert_cmpint(dm_disk_logical_sector_size(""), ==, 0);
+    g_assert_cmpint(dm_disk_logical_sector_size("no-such-device-xyz"), ==, 0);
 }
 
 int main(void)
@@ -1559,6 +1607,7 @@ int main(void)
     test_fit_text_coordinate();
     test_fit_text_coordinate_with_shadow();
     test_find_hwmon_temp_layouts();
+    test_sector_units_independent_of_logical_block_size();
     test_series_color_picker_is_rgb_only();
     test_rounded_region();
     test_rounded_region_cut_profile();
