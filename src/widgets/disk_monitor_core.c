@@ -812,11 +812,17 @@ gboolean dm_parse_diskstats_named(const char *text, const char *device_name,
             if (raw[k][0])
                 fields[n++] = raw[k];
         fields[n] = NULL;
-        /* major minor name | reads reads_merged sectors_read ms reading_ms
-         * | writes writes_merged sectors_written writing_ms ... */
+        /* /proc/diskstats columns after the NAME are positional:
+         * major minor name | reads reads_merged sectors_read ms
+         *                  | writes writes_merged sectors_written writing_ms
+         * i.e. fields[5] is sectors_read and fields[9] is sectors_written.
+         * Documentation/admin-guide/iostats.rst numbers these 1-based, so its
+         * "Field 3"/"Field 7" are fields[5]/fields[9] here. Taking fields[10]
+         * instead reads the write TIMING in milliseconds, which is why the
+         * applet reported a value ~70x too small. */
         if (n >= 14 && !strcmp(fields[2], device_name) &&
             dm_parse_u64(fields[5], sectors_read) &&
-            dm_parse_u64(fields[10], sectors_written))
+            dm_parse_u64(fields[9], sectors_written))
             found = TRUE;
         g_strfreev(raw);
     }

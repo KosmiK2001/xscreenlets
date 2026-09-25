@@ -185,9 +185,15 @@ static void test_by_id_discovery_names(void)
 
 static void test_diskstats_by_device(void)
 {
-    /* /proc/diskstats columns after the NAME are positional:
-     * 0 reads 1 reads_merged 2 sectors_read 3 ms 4 reads_ms
-     * 5 writes 6 writes_merged 7 sectors_written. */
+    /* /proc/diskstats columns after the NAME are positional, matching the
+     * 1-based numbering in Documentation/admin-guide/iostats.rst shifted by
+     * the leading major/minor/name triple:
+     *   0 reads 1 reads_merged 2 sectors_read 3 reading_ms
+     *   4 writes 5 writes_merged 6 sectors_written 7 writing_ms
+     * i.e. fields[5] == sectors_read and fields[9] == sectors_written.
+     * The trailing writing_ms values here (500 / 6) are deliberately large
+     * and distinctive: reading the wrong column is what made the applet
+     * report ~70x too little written data. */
     static const char text[] =
         "   8       0 sda 100 0 2000 30 40 0 9000 500 0 0 0 0 2 5\n"
         " 259       0 nvme0n1 10 0 20 3 40 0 50 6 0 0 0 0 2 5\n";
@@ -195,12 +201,12 @@ static void test_diskstats_by_device(void)
 
     assert(dm_parse_diskstats_named(text, "nvme0n1", &read, &write));
     assert(read == 20);
-    assert(write == 6);
+    assert(write == 50);
     assert(dm_sectors_to_bytes(read) == 20 * 512);
-    assert(dm_sectors_to_bytes(write) == 6 * 512);
+    assert(dm_sectors_to_bytes(write) == 50 * 512);
     assert(dm_parse_diskstats_named(text, "sda", &read, &write));
     assert(read == 2000);
-    assert(write == 500);
+    assert(write == 9000);
     assert(!dm_parse_diskstats_named(text, "sdb", &read, &write));
     assert(!dm_parse_diskstats_named(text, "sda1", &read, &write));
     assert(!dm_parse_diskstats_named("garbage", "sda", &read, &write));
@@ -1615,6 +1621,32 @@ static void test_rate_smoothing(void)
     g_assert_cmpint(dm_rate_smoothed(&h, DM_RATE_SMOOTH_MAX, TRUE), ==, 200);
 }
 
+/* Guards the exact regression: the write column was off by one and read the
+ * write TIMING in milliseconds. The values are taken from a live sdi line, so
+ * sectors_written and writing_ms differ by orders of magnitude and the wrong
+ * column cannot pass by accident. */
+static void test_diskstats_write_column(void)
+{
+    static const char text[] =
+        "   8     128 sdi 476981 54172 33078894 153344 531891 497270 "
+        "32285448 448968 0 340932 777080 33077 0 33188688 15299 208358 "
+        "159467\n";
+    guint64 read = 0, write = 0;
+
+    assert(dm_parse_diskstats_named(text, "sdi", &read, &write));
+    assert(read == 33078894u);
+    assert(write == 32285448u);
+    /* Not the timing column, and not the merged-request count. */
+    assert(write != 448968u);
+    assert(write != 497270u);
+    assert(write != 531891u);
+    /* A short line (14 columns, pre-4.18 layout) must still parse. */
+    assert(dm_parse_diskstats_named(
+        "   8       0 sdb 1 2 3 4 5 6 7 8 9 10 11 12\n", "sdb", &read, &write));
+    assert(read == 3);
+    assert(write == 7);
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -1626,6 +1658,7 @@ int main(void)
     test_geometry();
     test_by_id_discovery_names();
     test_diskstats_by_device();
+    test_diskstats_write_column();
     test_hwmon_priority_and_background_alpha();
     test_hwmon_selection_is_order_independent();
     test_temperature_history_lockstep();
