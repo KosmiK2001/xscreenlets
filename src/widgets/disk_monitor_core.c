@@ -1,5 +1,6 @@
 #include "disk_monitor_core.h"
 
+#include <gtk/gtk.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -12,6 +13,58 @@
 #define DM_RETRY_INTERVAL_US (60 * G_TIME_SPAN_SECOND)
 
 /* ---- Blocker 6: refcounted dialog context (name only, never a plugin) ---- */
+
+gboolean dm_position_pair_spec(const char *label,
+                               const char *x_key,
+                               const char *y_key,
+                               int x, int y,
+                               int x_max, int y_max,
+                               DmPositionPairSpec *out)
+{
+    if (!label || !*label || !x_key || !*x_key || !y_key || !*y_key || !out)
+        return FALSE;
+    out->label = label;
+    out->x_key = x_key;
+    out->y_key = y_key;
+    out->x = x;
+    out->y = y;
+    out->x_max = x_max;
+    out->y_max = y_max;
+    return TRUE;
+}
+
+GtkWidget *dm_position_pair_widget(const char *label,
+                                   const char *x_key,
+                                   const char *y_key,
+                                   int x, int y,
+                                   int x_max, int y_max,
+                                   GtkWidget **x_spin,
+                                   GtkWidget **y_spin)
+{
+    GtkWidget *row, *widget;
+    DmPositionPairSpec spec;
+
+    if (!x_spin || !y_spin ||
+        !dm_position_pair_spec(label, x_key, y_key, x, y,
+                               x_max, y_max, &spec))
+        return NULL;
+    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_pack_start(GTK_BOX(row), gtk_label_new("X"), FALSE, FALSE, 0);
+    widget = gtk_spin_button_new_with_range(0, x_max, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), x);
+    gtk_widget_set_size_request(widget, 76, -1);
+    g_object_set_data_full(G_OBJECT(widget), "xs-key", g_strdup(x_key), g_free);
+    gtk_box_pack_start(GTK_BOX(row), widget, FALSE, FALSE, 0);
+    *x_spin = widget;
+    gtk_box_pack_start(GTK_BOX(row), gtk_label_new("Y"), FALSE, FALSE, 0);
+    widget = gtk_spin_button_new_with_range(0, y_max, 1);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), y);
+    gtk_widget_set_size_request(widget, 76, -1);
+    g_object_set_data_full(G_OBJECT(widget), "xs-key", g_strdup(y_key), g_free);
+    gtk_box_pack_start(GTK_BOX(row), widget, FALSE, FALSE, 0);
+    *y_spin = widget;
+    return row;
+}
 
 DmDialogContext *dm_dialog_context_new(const char *instance_name)
 {

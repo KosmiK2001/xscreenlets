@@ -4,6 +4,8 @@
 #include <glib.h>
 #include <gio/gio.h>
 
+typedef struct _GtkWidget GtkWidget;
+
 #define DM_HISTORY_MAX 4096U
 #define DM_DEFAULT_HEIGHT 220
 
@@ -52,6 +54,30 @@ typedef struct {
     gint refcount;
     char *instance_name;
 } DmDialogContext;
+
+typedef struct {
+    const char *label;
+    const char *x_key;
+    const char *y_key;
+    int x;
+    int y;
+    int x_max;
+    int y_max;
+} DmPositionPairSpec;
+
+gboolean dm_position_pair_spec(const char *label,
+                               const char *x_key,
+                               const char *y_key,
+                               int x, int y,
+                               int x_max, int y_max,
+                               DmPositionPairSpec *out);
+GtkWidget *dm_position_pair_widget(const char *label,
+                                   const char *x_key,
+                                   const char *y_key,
+                                   int x, int y,
+                                   int x_max, int y_max,
+                                   GtkWidget **x_spin,
+                                   GtkWidget **y_spin);
 
 DmDialogContext *dm_dialog_context_new(const char *instance_name);
 DmDialogContext *dm_dialog_context_ref(DmDialogContext *ctx);

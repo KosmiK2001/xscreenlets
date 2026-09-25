@@ -208,9 +208,10 @@ responsive-расчёт ширины, высоты и компактной ге�
 графика. Отдельного температурного графика нет.
 
 Текущие значения адаптивно форматируются в `B/s`, `KiB/s`, `MiB/s`,
-`GiB/s`, `TiB/s`. Текстовые позиции настраиваются независимо:
-`read_x`/`read_y`, `write_x`/`write_y`, `temp_x`/`temp_y`, плюс
-`graph_label` — произвольная подпись над графиком. Цвета — отдельные
+`GiB/s`, `TiB/s`. В Properties координаты сгруппированы по одной строке на
+значение: `Read text` (`read_x`/`read_y`), `Write text` (`write_x`/`write_y`) и
+`Temperature text` (`temp_x`/`temp_y`), плюс `graph_label` — произвольная
+подпись над графиком. Цвета — отдельные
 RGBA-ключи `background_color`, `graph_background_color`, `text_color`,
 `border_color`, `read_color`, `write_color`, `temp_color`; значения
 сохраняются нормализованной строкой `r,g,b,a` (ASCII, без зависимости от

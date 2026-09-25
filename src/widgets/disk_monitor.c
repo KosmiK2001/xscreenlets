@@ -804,6 +804,22 @@ static void dm_add_int(GtkWidget *page, DmDialogContext *ctx, const char *key, c
     dm_bind(w, ctx, "value-changed", G_CALLBACK(dm_position_changed));
 }
 
+static void dm_add_position_pair(GtkWidget *page, DmDialogContext *ctx,
+                                 const char *label, const char *x_key,
+                                 const char *y_key, int x, int y)
+{
+    GtkWidget *pair, *x_spin, *y_spin;
+
+    pair = dm_position_pair_widget(label, x_key, y_key, x, y,
+                                   1599, 1199, &x_spin, &y_spin);
+    if (!pair)
+        return;
+    dm_bind(x_spin, ctx, "value-changed", G_CALLBACK(dm_position_changed));
+    dm_bind(y_spin, ctx, "value-changed", G_CALLBACK(dm_position_changed));
+    xs_prop_add_row(GTK_BOX(page), label,
+                    "Independent X/Y position of this text", pair);
+}
+
 /* GTK3 has no gtk_combo_box_text_find_text(); dm_combo_find_text() above does
  * the model walk. */
 static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
@@ -851,9 +867,9 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
     entry=xs_prop_add_string(GTK_BOX(page),"Graph label","Text shown over the graph",priv->graph_label);
     dm_bind(entry, ctx, "changed", G_CALLBACK(dm_label_changed));
     dm_add_int(page,ctx,"window_width","Window width",priv->width,160,1600); dm_add_int(page,ctx,"window_height","Window height",priv->height,120,1200); dm_add_int(page,ctx,"update_ms","Update (ms)",priv->update_ms,100,60000);
-    dm_add_int(page,ctx,"read_x","Read text X",priv->read_x,0,1599); dm_add_int(page,ctx,"read_y","Read text Y",priv->read_y,0,1199);
-    dm_add_int(page,ctx,"write_x","Write text X",priv->write_x,0,1599); dm_add_int(page,ctx,"write_y","Write text Y",priv->write_y,0,1199);
-    dm_add_int(page,ctx,"temp_x","Temperature text X",priv->temp_x,0,1599); dm_add_int(page,ctx,"temp_y","Temperature text Y",priv->temp_y,0,1199);
+    dm_add_position_pair(page,ctx,"Read text","read_x","read_y",priv->read_x,priv->read_y);
+    dm_add_position_pair(page,ctx,"Write text","write_x","write_y",priv->write_x,priv->write_y);
+    dm_add_position_pair(page,ctx,"Temperature text","temp_x","temp_y",priv->temp_x,priv->temp_y);
     dm_add_color(page,ctx,"background_color","Background",priv->bg);
     dm_add_color(page,ctx,"graph_background_color","Graph background",priv->graph_bg);
     dm_add_color(page,ctx,"text_color","Text",priv->text_color);

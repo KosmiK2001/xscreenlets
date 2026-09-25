@@ -755,6 +755,97 @@ static void test_render_style_contract(void)
     assert(rgba[3] > 0.549 && rgba[3] < 0.551);
 }
 
+static void capture_spin_change(GtkSpinButton *spin, gpointer user_data)
+{
+    struct {
+        const char *expected_key;
+        gint expected_value;
+        gboolean called;
+    } *capture = user_data;
+
+    assert(g_strcmp0(g_object_get_data(G_OBJECT(spin), "xs-key"),
+                     capture->expected_key) == 0);
+    assert(gtk_spin_button_get_value(spin) == capture->expected_value);
+    capture->called = TRUE;
+}
+
+static void test_position_pair_spec(void)
+{
+    DmPositionPairSpec spec = {0};
+
+    assert(dm_position_pair_spec("Read", "read_x", "read_y", 8, 52,
+                                 1599, 1199, &spec));
+    assert(g_strcmp0(spec.label, "Read") == 0);
+    assert(g_strcmp0(spec.x_key, "read_x") == 0);
+    assert(g_strcmp0(spec.y_key, "read_y") == 0);
+    assert(spec.x == 8 && spec.y == 52);
+    assert(spec.x_max == 1599 && spec.y_max == 1199);
+    assert(dm_position_pair_spec(NULL, "write_x", "write_y", 150, 52,
+                                 1599, 1199, &spec) == FALSE);
+
+    /* The actual GTK row contains two keyed spin controls with independent
+     * X/Y ranges and values. */
+    gtk_init_check(NULL, NULL);
+    {
+        GtkWidget *row, *x_spin, *y_spin;
+        GtkAdjustment *x_adjustment, *y_adjustment;
+        GList *children;
+        struct {
+            const char *expected_key;
+            gint expected_value;
+            gboolean called;
+        } changed[2] = {{"read_x", 9, FALSE}, {"read_y", 53, FALSE}};
+
+        row = dm_position_pair_widget("Read text", "read_x", "read_y",
+                                      8, 52, 1599, 1199,
+                                      &x_spin, &y_spin);
+        assert(GTK_IS_BOX(row));
+        assert(gtk_orientable_get_orientation(GTK_ORIENTABLE(row)) ==
+               GTK_ORIENTATION_HORIZONTAL);
+        assert(GTK_IS_SPIN_BUTTON(x_spin));
+        assert(GTK_IS_SPIN_BUTTON(y_spin));
+        assert(g_strcmp0(g_object_get_data(G_OBJECT(x_spin), "xs-key"),
+                         "read_x") == 0);
+        assert(g_strcmp0(g_object_get_data(G_OBJECT(y_spin), "xs-key"),
+                         "read_y") == 0);
+
+        /* The actual row order is label X, X spin, label Y, Y spin. */
+        children = gtk_container_get_children(GTK_CONTAINER(row));
+        assert(g_list_length(children) == 4);
+        assert(GTK_IS_LABEL(g_list_nth_data(children, 0)));
+        assert(g_strcmp0(gtk_label_get_text(GTK_LABEL(g_list_nth_data(children, 0))),
+                         "X") == 0);
+        assert(g_list_nth_data(children, 1) == x_spin);
+        assert(GTK_IS_LABEL(g_list_nth_data(children, 2)));
+        assert(g_strcmp0(gtk_label_get_text(GTK_LABEL(g_list_nth_data(children, 2))),
+                         "Y") == 0);
+        assert(g_list_nth_data(children, 3) == y_spin);
+        g_list_free(children);
+
+        /* A real value-changed dispatch exposes the matching persistent key. */
+        g_signal_connect(x_spin, "value-changed",
+                         G_CALLBACK(capture_spin_change), &changed[0]);
+        g_signal_connect(y_spin, "value-changed",
+                         G_CALLBACK(capture_spin_change), &changed[1]);
+
+        x_adjustment = gtk_spin_button_get_adjustment(GTK_SPIN_BUTTON(x_spin));
+        y_adjustment = gtk_spin_button_get_adjustment(GTK_SPIN_BUTTON(y_spin));
+        assert(gtk_adjustment_get_lower(x_adjustment) == 0);
+        assert(gtk_adjustment_get_upper(x_adjustment) == 1599);
+        assert(gtk_adjustment_get_lower(y_adjustment) == 0);
+        assert(gtk_adjustment_get_upper(y_adjustment) == 1199);
+        assert(gtk_spin_button_get_value(GTK_SPIN_BUTTON(x_spin)) == 8);
+        assert(gtk_spin_button_get_value(GTK_SPIN_BUTTON(y_spin)) == 52);
+
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(x_spin), 9);
+        assert(changed[0].called);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(y_spin), 53);
+        assert(changed[1].called);
+        g_object_ref_sink(row);
+        g_object_unref(row);
+    }
+}
+
 int main(void)
 {
     test_rates_and_format();
@@ -788,6 +879,7 @@ int main(void)
     test_default_height_matches_example();
     test_deadline_remaining_is_never_negative();
     test_render_style_contract();
+    test_position_pair_spec();
     puts("disk_monitor core tests: OK");
     return 0;
 }
