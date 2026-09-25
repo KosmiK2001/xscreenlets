@@ -272,7 +272,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
                     MIN(priv->sample.swap_free_kib, priv->sample.swap_total_kib);
 
     /* Both histories use all horizontal space left after the measured text. */
-    mm_draw_graph(cr, ram_x, 30.0, graph_width,
+    mm_draw_graph(cr, ram_x, 22.0, graph_width,
                   priv->ram_graph_height, priv->ram_history, priv->ram_head,
                   priv->ram_count, priv->ram_color, priv->border_color);
     mm_draw_graph(cr, ram_x, 194.0, graph_width,
@@ -298,7 +298,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
     pango_layout_set_text(layout, ram_section, -1);
     mm_set_text_color(cr, priv->text_color);
-    cairo_move_to(cr, text_x, 34.0);
+    cairo_move_to(cr, text_x, 26.0);
     pango_cairo_show_layout(cr, layout);
     {
         int layout_height = 0;
@@ -306,7 +306,7 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         int line_height;
         pango_layout_get_pixel_size(layout, NULL, &layout_height);
         line_height = MAX(layout_height / line_count, 1);
-        mm_draw_stippled_hr(cr, text_x, 34.0 + line_height - 1.0,
+        mm_draw_stippled_hr(cr, text_x, 26.0 + line_height - 1.0,
                             text_width, priv->text_color);
     }
 
