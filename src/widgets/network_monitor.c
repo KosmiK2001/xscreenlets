@@ -93,19 +93,31 @@ typedef enum { NM_BAND_HEADER = 0, NM_BAND_LABEL, NM_BAND_TOTAL } NmBandPhase;
 static int nm_band_slot(NmBandPhase phase,
                         const NmLabelPlacement *header_placement,
                         const NmLabelPlacement *label_placement,
-                        NmLabelPlacement want)
+                        NmLabelPlacement want, int rows)
 {
     int slot = 0;
     int i;
 
-    /* Заголовок (фаза 0) сдвигает всё, что ниже. Подписи серий (фаза 1)
-     * сдвигают только сводки (фаза 2). */
+    /* Слот — это число фаз, стоящих ВЫШЕ этой в той же полосе. Порядок
+     * фаз: заголовок, подписи серий, сводки.
+     *
+     * Раньше здесь стоял ранний return, как только найдена подпись серии:
+     * при заголовке сверху И подписи сверху сводка получала слот 1, тот
+     * же, что и подпись, и накладывалась на неё. Теперь считаются все
+     * фазы: заголовок даёт +1, наличие подписей даёт +1. */
     if (phase > NM_BAND_HEADER && header_placement && *header_placement == want)
-        slot = 1;
+        slot++;
     if (phase > NM_BAND_LABEL && label_placement)
         for (i = 0; i < NM_SERIES_MAX; i++)
-            if (label_placement[i] == want)
-                return 1;
+            if (label_placement[i] == want) {
+                slot++;
+                break;
+            }
+    /* Слотов может оказаться больше, чем влезает в полосу: если высоты
+     * не хватило, элементы делят доступные строки, иначе один просто
+     * исчезнет — тише и хуже, чем показать вдвоем то, что влезло. */
+    if (rows > 0 && slot >= rows)
+        slot = rows > 1 ? rows - 1 : 0;
     return slot;
 }
 
@@ -518,29 +530,6 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
      * Считать по элементам нельзя: две сводки дали бы две строки, и
      * вторая уехала бы вниз — строки выглядели бы разной высоты при
      * одном шрифте. */
-    top_rows = 0;
-    bot_rows = 0;
-    top_step = 0;
-    bot_step = 0;
-    if (priv->header_placement == NM_LABEL_OUTSIDE_TOP) {
-        top_rows++;
-        top_step = MAX(top_step, nm_row_height(layout, priv->label_font));
-    }
-    if (priv->header_placement == NM_LABEL_OUTSIDE_BOTTOM) {
-        bot_rows++;
-        bot_step = MAX(bot_step, nm_row_height(layout, priv->label_font));
-    }
-    for (i = 0; i < NM_SERIES_MAX; i++) {
-        int h = nm_row_height(layout, priv->series_font[i]);
-
-        if (priv->label_placement[i] == NM_LABEL_OUTSIDE_TOP) {
-            top_rows++;
-            top_step = MAX(top_step, h);
-        } else if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
-            bot_rows++;
-            bot_step = MAX(bot_step, h);
-        }
-    }
     /* Число строк в полосе. Считается по фазам, но если все totals
      * в нижней полосе — они делят одну строку, и bot_rows = 1. */
     top_rows = 0;
@@ -555,29 +544,52 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         bot_rows++;
         bot_step = MAX(bot_step, nm_row_height(layout, priv->label_font));
     }
-    for (i = 0; i < NM_SERIES_MAX; i++) {
-        int h = nm_row_height(layout, priv->series_font[i]);
+    /* Подписи серий — одна ФАЗА: Down и Up делят одну строку и
+     * раздвигаются по горизонтали (у каждой свой series<N>_label_x).
+     * Раньше каждая серия увеличивала счётчик строк, и две подписи
+     * давали две строки — вторая пустовала, полоса была выше нужного.
+     * Шрифт берётся максимальным из обеих. */
+    {
+        int labels_top = 0, labels_bottom = 0;
 
-        if (priv->label_placement[i] == NM_LABEL_OUTSIDE_TOP) {
-            top_rows++;
-            top_step = MAX(top_step, h);
-        } else if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
-            bot_rows++;
-            bot_step = MAX(bot_step, h);
+        for (i = 0; i < NM_SERIES_MAX; i++) {
+            int h = nm_row_height(layout, priv->series_font[i]);
+
+            if (priv->label_placement[i] == NM_LABEL_OUTSIDE_TOP) {
+                labels_top = 1;
+                top_step = MAX(top_step, h);
+            } else if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
+                labels_bottom = 1;
+                bot_step = MAX(bot_step, h);
+            }
         }
+        top_rows += labels_top;
+        bot_rows += labels_bottom;
     }
-    for (i = 0; i < NM_SERIES_MAX; i++) {
-        int h = nm_row_height(layout, priv->total_font[i]);
+    /* Сводки — отдельная ФАЗА: они занимают свою строку, даже если
+     * заголовок или подписи серий уже стоят в этой полосе. Раньше стояло
+     * «если полоса пуста, занять одну строку», из-за чего при подписи
+     * снизу и сводках снизу полоса считалась в одну строку вместо двух —
+     * и нижний текст уезжал за границу окна.
+     *
+     * Сами сводки между собой строку НЕ делят: у каждой свой X
+     * (total<N>_x), они раздвигаются по горизонтали на одном уровне. */
+    {
+        int totals_top = 0, totals_bottom = 0;
 
-        if (priv->total_placement[i] == NM_LABEL_OUTSIDE_TOP) {
-            top_rows++;
-            top_step = MAX(top_step, h);
-        } else if (priv->total_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
-            /* Все totals внизу делят одну строку — bot_rows считать 1. */
-            if (bot_rows == 0)
-                bot_rows = 1;
-            bot_step = MAX(bot_step, h);
+        for (i = 0; i < NM_SERIES_MAX; i++) {
+            int h = nm_row_height(layout, priv->total_font[i]);
+
+            if (priv->total_placement[i] == NM_LABEL_OUTSIDE_TOP) {
+                totals_top = 1;
+                top_step = MAX(top_step, h);
+            } else if (priv->total_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
+                totals_bottom = 1;
+                bot_step = MAX(bot_step, h);
+            }
         }
+        top_rows += totals_top;
+        bot_rows += totals_bottom;
     }
     top_step = MAX(top_step, NM_ROW_H_MIN);
     bot_step = MAX(bot_step, NM_ROW_H_MIN);
@@ -587,14 +599,43 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                         + NM_MARGIN_BOTTOM : 0;
 
     graph_y = NM_GRAPH_TOP + top_band;
-    graph_h = MAX(1, height - graph_y - bot_band);
-    /* Отступы не должны съесть окно: график получает минимум треть. */
-    if (graph_h < height / 3 && height - top_band - bot_band > 0) {
-        int room = MAX(1, height / 3);
-        int overflow = top_band + bot_band - (height - room);
+    graph_h = height - graph_y - bot_band;
 
-        top_band = MAX(0, top_band - overflow);
-        bot_band = MAX(0, bot_band - overflow);
+    /* Полосы НЕ сжимаются под нужную высоту окна.
+     *
+     * Раньше при нехватке места overflow вычитался сначала из верхней
+     * полосы: если она меньше overflow, она обнулялась, а остаток
+     * терялся — нижняя полоса оставалась рассчитана на полную высоту,
+     * а её текст уезжал за нижнюю границу окна. Второй симптом: слоты
+     * считались от полной полосы, поэтому строка пропадала из вида
+     * целиком.
+     *
+     * Текст важнее графика: график сжимается, полосы остаются. Если
+     * окно совсем мало и места нет вовсе, полосы делят недостающее
+     * поровну, но каждая сохраняет хотя бы одну строку — иначе
+     * элементы просто исчезают, а это тише и хуже, чем обрезка. */
+    if (graph_h < 1) {
+        int need = -graph_h;
+        int cut_top = 0, cut_bot = 0;
+
+        if (top_rows > 0)
+            cut_top = MIN(need, (top_band - NM_ROW_H_MIN) * top_rows
+                               / MAX(1, top_rows));
+        if (need > 0 && bot_rows > 0)
+            cut_bot = MIN(need - cut_top, (bot_band - NM_ROW_H_MIN) * bot_rows
+                                        / MAX(1, bot_rows));
+        top_band = MAX(top_band - cut_top, top_rows ? NM_ROW_H_MIN : 0);
+        bot_band = MAX(bot_band - cut_bot, bot_rows ? NM_ROW_H_MIN : 0);
+        if (top_band + bot_band > height - 1) {
+            /* Совсем мало места: делим пропорционально числу строк. */
+            int room = MAX(0, height - 1);
+            int total_rows = top_rows + bot_rows;
+
+            if (total_rows > 0) {
+                top_band = room * top_rows / total_rows;
+                bot_band = room - top_band;
+            }
+        }
         graph_y = NM_GRAPH_TOP + top_band;
         graph_h = MAX(1, height - graph_y - bot_band);
     }
@@ -823,7 +864,10 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             int slot = nm_band_slot(NM_BAND_LABEL,
                                     &priv->header_placement,
                                     priv->label_placement,
-                                    priv->label_placement[i]);
+                                    priv->label_placement[i],
+                                    priv->label_placement[i]
+                                    == NM_LABEL_OUTSIDE_BOTTOM
+                                    ? bot_rows : top_rows);
             int row_y;
 
             if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM)
@@ -878,7 +922,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         case NM_LABEL_OUTSIDE_TOP:
             row_h = top_step;
             slot = nm_band_slot(NM_BAND_TOTAL, &priv->header_placement,
-                                priv->label_placement, NM_LABEL_OUTSIDE_TOP);
+                                priv->label_placement, NM_LABEL_OUTSIDE_TOP,
+                                top_rows);
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          NM_MARGIN_TOP + slot * row_h,
                          total_text[i], priv->series_text_color[i], width,
@@ -887,7 +932,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         case NM_LABEL_OUTSIDE_BOTTOM:
             row_h = bot_step;
             slot = nm_band_slot(NM_BAND_TOTAL, &priv->header_placement,
-                                priv->label_placement, NM_LABEL_OUTSIDE_BOTTOM);
+                                priv->label_placement, NM_LABEL_OUTSIDE_BOTTOM,
+                                bot_rows);
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          graph_y + graph_h + NM_MARGIN_TOP + slot * row_h,
                          total_text[i], priv->series_text_color[i], width,
