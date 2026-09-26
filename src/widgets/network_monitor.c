@@ -1235,8 +1235,55 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
                   priv->window_bg);
     nm_read_color(priv, "border_color", nm_border_default, priv->border);
     nm_read_color(priv, "text_color", nm_text_default, priv->text_color);
-    nm_read_color(priv, "rx_color", nm_rx_default, priv->series_color[0]);
-    nm_read_color(priv, "tx_color", nm_tx_default, priv->series_color[1]);
+    /* Цвета серий.
+     *
+     * Properties сохраняет выбор цвета в series<N>_color — это имя
+     * стоит в коде диалога. А читались здесь rx_color и tx_color, то
+     * есть ключи, которых в UI нет и которые никто не пишет. Выбор
+     * цвета сохранялся в конфиг и не давал ничего: на экране оставался
+     * дефолт.
+     *
+     * Читаем series<N>_color, а rx_color/tx_color оставлены как
+     * legacy-источник: в конфигах, где серии ещё назывались по
+     * направлению, цвета должны продолжать работать. Приоритет у
+     * series<N>_color, потому что его пишет диалог. */
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        static const char *legacy_keys[NM_SERIES_MAX] = {
+            "rx_color", "tx_color"
+        };
+        static const gdouble *defaults[NM_SERIES_MAX] = {
+            nm_rx_default, nm_tx_default
+        };
+        char series_key[32];
+
+        g_snprintf(series_key, sizeof(series_key), "series%d_color", i);
+        /* Значение выбирается ОДИН раз: сначала пробуем
+         * series<N>_color, а если его нет — legacy-ключ по направлению.
+         * Проба и разбор делаются одним запросом, ключ не читается
+         * дважды. */
+        {
+            char *probe = xs_host_api()->conf_str(priv->kf, priv->plugin->name,
+                                                  series_key, NULL);
+            gdouble parsed[4];
+
+            if (!probe) {
+                g_free(probe);
+                probe = xs_host_api()->conf_str(priv->kf, priv->plugin->name,
+                                                legacy_keys[i], NULL);
+            }
+            if (probe) {
+                if (nm_parse_rgba(probe, parsed))
+                    memcpy(priv->series_color[i], parsed, sizeof(parsed));
+                else
+                    memcpy(priv->series_color[i], defaults[i],
+                           sizeof(gdouble) * 4);
+            } else {
+                memcpy(priv->series_color[i], defaults[i],
+                       sizeof(gdouble) * 4);
+            }
+            g_free(probe);
+        }
+    }
     memcpy(priv->series_text_color[0], priv->series_color[0],
            sizeof(gdouble) * 4);
     memcpy(priv->series_text_color[1], priv->series_color[1],

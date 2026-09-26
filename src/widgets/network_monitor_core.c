@@ -427,22 +427,114 @@ gboolean nm_parse_rgba(const char *text, gdouble rgba[4])
 {
     char *end = NULL;
     gdouble values[4];
+    const char *p;
+    gboolean byted = FALSE;
     int i;
 
-    if (!text || !*text || (!g_ascii_isdigit(*text) && *text != '.'))
+    if (!text || !*text)
         return FALSE;
+
+    /* Формат rgba(r,g,b,a) — тот, что пишет GtkColorButton и который
+     * лежит в примере конфига и в живых конфигах пользователя:
+     *   series0_color=rgba(51,191,255,255)
+     *
+     * Раньше парсер сразу требовал, чтобы первый символ был цифрой или
+     * точкой, а значения лежали в 0..1. Форма rgba(...) не проходила
+     * даже по первому символу, то есть отвергалась целиком, и
+     * nm_read_color молча брал дефолт. Все настройки цвета из конфига
+     * на диске не применялись — без единого сообщения.
+     *
+     * Формат rgba() разбираем первым: у него значения 0..255 и он
+     * однозначен. Если скобок нет, работает старый путь 0..1, который
+     * пишет nm_format_rgba, — так оба формата живут вместе и старые
+     * конфиги не ломаются. */
+    p = text;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (g_ascii_strncasecmp(p, "rgba", 4) == 0) {
+        p += 4;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p != '(')
+            return FALSE;
+        p++;
+        byted = TRUE;
+        text = p;
+    } else if (g_ascii_strncasecmp(p, "rgb", 3) == 0) {
+        /* rgb(r,g,b) — альфа 1. */
+        p += 3;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p != '(')
+            return FALSE;
+        p++;
+        byted = TRUE;
+        text = p;
+    } else {
+        if (!g_ascii_isdigit(*p) && *p != '.' && *p != '-' && *p != '+')
+            return FALSE;
+    }
+
     for (i = 0; i < 4; i++) {
+        while (*text == ' ' || *text == '\t')
+            text++;
+        if (byted && i == 3) {
+            /* Для rgb(...) альфа подставляется единицей, а не
+             * разбирается: четвёртого поля там нет. */
+            if (*text == ')' || *text == '\0') {
+                values[3] = 1.0;
+                break;
+            }
+        }
+        if (!*text)
+            return FALSE;
         errno = 0;
         values[i] = g_ascii_strtod(text, &end);
-        if (errno || end == text || !isfinite(values[i]) ||
-            values[i] < 0.0 || values[i] > 1.0)
+        if (errno || end == text || !isfinite(values[i]))
             return FALSE;
-        if (i < 3) {
-            if (*end != ',' || end[1] == ',' || end[1] == ' ' || end[1] == '\t')
+        if (byted) {
+            if (values[i] < 0.0 || values[i] > 255.0)
                 return FALSE;
-            text = end + 1;
-        } else if (*end)
+            values[i] /= 255.0;
+        } else if (values[i] < 0.0 || values[i] > 1.0) {
             return FALSE;
+        }
+        if (i < 3) {
+            /* Пробелы разрешены с обеих сторон от запятой: в rgba(...) их
+             * писать естественно, и GtkColorButton так и делает. Раньше
+             * здесь стоял запрет на пробел сразу после запятой, из-за
+             * которого «rgba( 0, 128, 0, 255 )» не разбирался. */
+            /* Для rgb(...) после третьего поля запятой нет: вместо неё
+             * сразу закрывающая скобка. */
+            while (*end == ' ' || *end == '\t')
+                end++;
+            if (*end != ',') {
+                if (byted && i == 2 && *end == ')') {
+                    /* rgb(r,g,b): альфы нет, подставляем единицу. */
+                    values[3] = 1.0;
+                    break;
+                }
+                return FALSE;
+            }
+            text = end + 1;
+        } else {
+            /* Четвёртое поле: после него допустимы только закрывающая
+             * скобка (для rgba(...)/rgb(...)) и конец строки. */
+            while (*end == ' ' || *end == '\t')
+                end++;
+            if (byted) {
+                if (*end != ')')
+                    return FALSE;
+                end++;
+                while (*end == ' ' || *end == '\t' || *end == '\n' ||
+                       *end == '\r')
+                    end++;
+                if (*end)
+                    return FALSE;
+            } else if (*end) {
+                return FALSE;
+            }
+        }
     }
     memcpy(rgba, values, sizeof(values));
     return TRUE;

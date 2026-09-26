@@ -789,6 +789,47 @@ static void test_format_label(void)
     g_free(r);
 }
 
+static void test_parse_rgba_formats(void)
+{
+    gdouble c[4];
+
+    /* Формат из живого конфига и из примера. Ревью нашло, что он не
+     * разбирался вообще: nm_read_color молча брал дефолт, и все
+     * настройки цвета были мёртвыми. */
+    check(nm_parse_rgba("rgba(51,191,255,255)", c), "rgba() разбирается");
+    check(fabs(c[0] - 51.0 / 255.0) < 1e-6, "rgba() R = 51/255");
+    check(fabs(c[1] - 191.0 / 255.0) < 1e-6, "rgba() G = 191/255");
+    check(fabs(c[2] - 255.0 / 255.0) < 1e-6, "rgba() B = 255/255");
+    check(fabs(c[3] - 1.0) < 1e-6, "rgba() A = 1.0");
+
+    /* Старый формат, который пишет nm_format_rgba: 0..1 без скобок. */
+    check(nm_parse_rgba("0.2,0.75,1.0,1.0", c), "старый формат жив");
+    check(fabs(c[0] - 0.2) < 1e-6, "старый R = 0.2");
+    check(fabs(c[3] - 1.0) < 1e-6, "старый A = 1.0");
+
+    /* Пробелы и регистр. */
+    check(nm_parse_rgba("  rgba( 0 , 128 , 0 , 255 ) ", c), "пробелы в rgba()");
+    check(fabs(c[1] - 128.0 / 255.0) < 1e-6, "пробелы: G = 128/255");
+    check(nm_parse_rgba("RGBA(0,0,0,255)", c), "регистр не важен");
+    check(nm_parse_rgba("rgba (0,0,0,255)", c), "пробел перед скобкой");
+
+    /* rgb() без альфы. */
+    check(nm_parse_rgba("rgb(255,0,0)", c), "rgb() без альфы");
+    check(fabs(c[0] - 1.0) < 1e-6, "rgb() R = 1.0");
+    check(fabs(c[3] - 1.0) < 1e-6, "rgb() A = 1.0 по умолчанию");
+
+    /* Мусор и выход за диапазон по-прежнему отвергаются. */
+    check(!nm_parse_rgba("rgba(300,0,0,255)", c), "канал > 255");
+    check(nm_parse_rgba("rgba(0,0,0)", c), "rgba() без альфы");
+    check(fabs(c[3] - 1.0) < 1e-6, "rgba() без альфы даёт A = 1.0");
+    check(!nm_parse_rgba("rgba(0,0,0,255", c), "незакрытая скобка");
+    check(!nm_parse_rgba("rgba 0,0,0,255", c), "нет скобки");
+    check(!nm_parse_rgba("hello", c), "мусор");
+    check(!nm_parse_rgba("", c), "пустая строка");
+    check(!nm_parse_rgba(NULL, c), "NULL");
+    check(!nm_parse_rgba("2.0,0,0,1.0", c), "старое значение > 1");
+}
+
 int main(void)
 {
     printf("== парсер /proc/net/dev ==\n");
@@ -828,6 +869,7 @@ int main(void)
     test_placement_combo_mapping();
     test_label_and_value_positions();
     test_format_label();
+    test_parse_rgba_formats();
     test_split_geometry();
     test_window_radius_floor();
     test_config_key_is_copied();
