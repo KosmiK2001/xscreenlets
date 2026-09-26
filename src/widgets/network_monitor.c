@@ -1549,6 +1549,43 @@ static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
     nm_bind_keyed_descendants(sy, ctx);
 }
 
+/* Один X без Y. Для элементов, выбранных «снаружи»: там Y не должен
+ * волновать — элемент прижат к рамке окна сверху или снизу, и ручная
+ * настройка высоты только ломала бы симметрию отступов. Раньше в диалоге
+ * стояла пара X/Y, но Y молча игнорировался: пользователь двигал
+ * спин-кнопку и ничего не происходило. */
+static void nm_add_x(NmGrid *g, NmDialogContext *ctx, const char *label,
+                     const char *key_x, int value_x, int max)
+{
+    GtkWidget *sx = gtk_spin_button_new_with_range(0, max, 1);
+
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(sx), value_x);
+    gtk_widget_set_size_request(sx, 72, -1);
+    g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, sx);
+    nm_bind_keyed_descendants(sx, ctx);
+}
+
+/* Позиция элемента: X всегда, Y — только если элемент выбран «внутри».
+ *
+ * Снаружи Y не должен волновать: элемент прижат к рамке окна сверху или
+ * снизу, и ручная настройка высоты только ломала бы симметрию отступов.
+ * Раньше в диалоге стояла пара X/Y всегда, но Y молча игнорировался —
+ * пользователь двигал спин-кнопку и ничего не происходило. Теперь поле
+ * появляется только когда оно действительно на что-то влияет, то есть
+ * внутри; при переключении Placement в «Outside» строка схлопывается. */
+static void nm_add_pos(NmGrid *g, NmDialogContext *ctx, const char *label,
+                       const char *key_x, const char *key_y,
+                       int value_x, int value_y, int max, gboolean show_y)
+{
+    if (show_y) {
+        nm_add_xy(g, ctx, label, key_x, key_y, value_x, value_y, max);
+        return;
+    }
+    nm_add_x(g, ctx, label, key_x, value_x, max);
+}
+
 static void nm_add_int(NmGrid *g, NmDialogContext *ctx, const char *key,
                        const char *label, int value, int min, int max)
 {
@@ -1759,9 +1796,10 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                                              priv->design_height) - 1);
             g_snprintf(key_x, sizeof(key_x), "series%d_label_x", i);
             g_snprintf(key_y, sizeof(key_y), "series%d_label_y", i);
-            nm_add_xy(g, ctx, "Label pos.", key_x, key_y,
-                      priv->series_label_x[i], priv->series_label_y[i],
-                      MAX(priv->design_width, priv->design_height) - 1);
+            nm_add_pos(g, ctx, "Label pos.", key_x, key_y,
+                       priv->series_label_x[i], priv->series_label_y[i],
+                       MAX(priv->design_width, priv->design_height) - 1,
+                       priv->label_placement[i] == NM_LABEL_INSIDE);
         }
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
@@ -1791,8 +1829,10 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_combo(g, ctx, "header_placement", "Placement", placements,
                      priv->header_placement == NM_LABEL_OUTSIDE ? 1 : 0);
     }
-    nm_add_xy(g, ctx, "Position", "header_x", "header_y", priv->header_x,
-              priv->header_y, MAX(priv->design_width, priv->design_height) - 1);
+    nm_add_pos(g, ctx, "Position", "header_x", "header_y",
+               priv->header_x, priv->header_y,
+               MAX(priv->design_width, priv->design_height) - 1,
+               priv->header_placement == NM_LABEL_INSIDE);
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 
@@ -1815,9 +1855,11 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                      priv->total_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0);
         g_snprintf(key_x, sizeof(key_x), "total%u_x", i);
         g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
-        nm_add_xy(g, ctx, "Position", key_x, key_y, priv->total_x[i],
-                  priv->total_y[i],
-                  MAX(priv->design_width, priv->design_height) - 1);
+        g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
+        nm_add_pos(g, ctx, "Position", key_x, key_y, priv->total_x[i],
+                   priv->total_y[i],
+                   MAX(priv->design_width, priv->design_height) - 1,
+                   priv->total_placement[i] == NM_LABEL_INSIDE);
         frame = nm_section(page, label);
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
