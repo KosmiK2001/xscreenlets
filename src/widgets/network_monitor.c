@@ -325,7 +325,8 @@ static void nm_sample(PrivData *priv)
 static void nm_show_text(cairo_t *cr, PangoLayout *layout,
                          const char *font_name, int x, int y,
                          const char *text, const gdouble color[4],
-                         int width, int clip_y, int clip_h)
+                         int width, int clip_y, int clip_h,
+                         gboolean nm_clip_is_graph)
 {
     PangoFontDescription *font = pango_font_description_from_string(font_name);
     int text_w = 0;
@@ -339,10 +340,43 @@ static void nm_show_text(cairo_t *cr, PangoLayout *layout,
      * оставляет значение формально внутри окна, когда его ореол уже
      * пересекает рамку. */
     x = nm_fit_text_coordinate(x, text_w + 2 * NM_TEXT_SHADOW_RADIUS, width);
-    if (clip_h > 0 && y > clip_y + clip_h - 1 - NM_TEXT_SHADOW_RADIUS)
-        y = clip_y + clip_h - 1 - NM_TEXT_SHADOW_RADIUS;
-    if (y < clip_y + NM_TEXT_SHADOW_RADIUS)
-        y = clip_y + NM_TEXT_SHADOW_RADIUS;
+    /* Отсечение по полосе навязывалось ВСЕМ элементам, включая те, что
+     * рисуются внутри графика. Для числа скорости это означало, что его
+     * координата Y не работала вовсе: значения 2, 10, 16 и 20 давали на
+     * экране одно и то же положение, и подпись оказывалась на той же
+     * строке. Ровно тот баг, который пользователь описывал как
+     * «Position не работает на сами числа».
+     *
+     * Причина — что clip_y для элемента ВНУТРИ графика равен graph_y,
+     * то есть началу области графика. Отсюда обе границы:
+     *   y < graph_y  → текст поднимался к началу графика;
+     *   y > graph_y + graph_h → опускался за нижний край.
+     * Обе срабатывали на нормальных значениях координат, потому что
+     * series<N>_y задаётся пользователем относительно окна, а не
+     * относительно области графика.
+     *
+     * Смысл отсечения — не дать тексту вылезти за ОКНО, то есть спасти
+     * элемент снаружи. Элемент внутри графика уже в окне, и его
+     * собственная координата должна уважаться как есть. Поэтому для
+     * внутренних элементов отсечение по полосе не применяется вовсе:
+     * ограничение задаёт вызывающий, а nm_show_text лишь подгоняет
+     * значение в пределы переданного прямоугольника.
+     *
+     * nm_show_text вызывается из двух мест: элементы внутри графика
+     * передают clip_y = graph_y, элементы внешних полос — 0 (верхняя)
+     * или graph_y + graph_h (нижняя). Отличать их по clip_h нельзя,
+     * поэтому признак «внутри графика» передаётся флагом. */
+    if (clip_h > 0) {
+        int clip_bottom = clip_y + clip_h - 1 - NM_TEXT_SHADOW_RADIUS;
+        if (y > clip_bottom)
+            y = clip_bottom;
+        if (!nm_clip_is_graph) {
+            /* Нижняя граница внешней полосы: не дать ореолу пересечь
+             * край окна. */
+            if (y < clip_y + NM_TEXT_SHADOW_RADIUS)
+                y = clip_y + NM_TEXT_SHADOW_RADIUS;
+        }
+    }
     {
         static const int offsets[8][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
                                           {1, 0}, {-1, 1}, {0, 1}, {1, 1}};
@@ -865,7 +899,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                 nm_show_text(cr, layout, priv->series_font[i], lx, ly,
                              priv->series_label[i],
                              priv->series_text_color[i],
-                             width, graph_y, graph_h);
+                             width, graph_y, graph_h, TRUE);
                 /* Если число настроено левее конца подписи, не даём ему
                  * наехать на текст: сдвигаем вправо, но не дальше
                  * lx + w + NM_VALUE_GAP. */
@@ -896,12 +930,13 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                          priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
                          ? graph_y + graph_h : 0,
                          priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
-                         ? bot_band : top_band);
+                         ? bot_band : top_band, FALSE);
             value_x = sx;
             full = g_strdup(rate_text[i]);
         }
         nm_show_text(cr, layout, priv->series_font[i], value_x, sy, full,
-                     priv->series_text_color[i], width, graph_y, graph_h);
+                     priv->series_text_color[i], width, graph_y, graph_h,
+                     TRUE);
         g_free(full);
     }
     /* Заголовок: внутри — в графике на своей координате, снаружи — в
@@ -915,17 +950,18 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
          * сводки сдвигаются на шаг вниз, если он делит с ними полосу. */
         case NM_LABEL_OUTSIDE_TOP:
             nm_show_text(cr, layout, priv->label_font, hx, NM_MARGIN_TOP,
-                         header_text, priv->text_color, width, 0, top_band);
+                         header_text, priv->text_color, width, 0, top_band,
+                         FALSE);
             break;
         case NM_LABEL_OUTSIDE_BOTTOM:
             nm_show_text(cr, layout, priv->label_font, hx,
                          graph_y + graph_h + NM_MARGIN_TOP, header_text,
                          priv->text_color, width, graph_y + graph_h,
-                         bot_band);
+                         bot_band, FALSE);
             break;
         default:
             nm_show_text(cr, layout, priv->label_font, hx, hy, header_text,
-                         priv->text_color, width, graph_y, graph_h);
+                         priv->text_color, width, graph_y, graph_h, TRUE);
             break;
         }
     }
@@ -943,7 +979,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          NM_MARGIN_TOP + slot * row_h,
                          total_text[i], priv->series_text_color[i], width,
-                         0, top_band);
+                         0, top_band, FALSE);
             break;
         case NM_LABEL_OUTSIDE_BOTTOM:
             row_h = bot_step;
@@ -953,12 +989,12 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          graph_y + graph_h + NM_MARGIN_TOP + slot * row_h,
                          total_text[i], priv->series_text_color[i], width,
-                         graph_y + graph_h, bot_band);
+                         graph_y + graph_h, bot_band, FALSE);
             break;
         default:
             nm_show_text(cr, layout, priv->total_font[i], tx, ty,
                          total_text[i], priv->series_text_color[i], width,
-                         graph_y, graph_h);
+                         graph_y, graph_h, TRUE);
             break;
         }
         g_free(total_text[i]);
