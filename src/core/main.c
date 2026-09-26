@@ -1,3 +1,9 @@
+/* _GNU_SOURCE ДОЛЖЕН идти первым: ucontext_t в gregs и REG_RIP видны
+ * только с ним. common.h его уже втягивает, поэтому объявляем заранее. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "common.h"
 #include "tray.h"
 
@@ -7,6 +13,120 @@
 #include <gmodule.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <execinfo.h>
+#include <ucontext.h>
+#include <stdarg.h>
+
+/* Путь crash-лога из --crash-log. Объявлен ВНЕ #ifdef: сборка без
+ * USE=debug тоже принимает и утирает эту опцию, чтобы один и тот же
+ * unit-файл не ломался о неизвестный ключ. */
+static char *g_crash_log = NULL;
+
+#ifdef XS_ENABLE_CRASH_LATCHER
+/* --- Ловец падений -------------------------------------------------
+ * Компилируется только с -DXS_ENABLE_CRASH_LATCHER (в ebuild это будет
+ * soft-debug USE-флаг). Без него ловец не существует вовсе: обработчика
+ * сигналов нет, поведение демона полностью штатное.
+ * Ядро собрано без CONFIG_ELF_CORE, coredump невозможен, а gdb на
+ * живом демоне не ловит: под gdb гонка не проявляется. Поэтому ловим
+ * SIGSEGV сами и печатаем backtrace в отдельный файл.
+ *
+ * Обработчик НИЧЕГО не чинит и не продолжает: после segfault состояние
+ * процесса не определено. Только диагностика, затем честный выход.
+ * Всё через write(2) — async-signal-safe, без malloc/printf.
+ */
+static int g_crash_fd = -1;
+
+static void crash_write(const char *s)
+{
+    if (g_crash_fd < 0)
+        return;
+    ssize_t n = write(g_crash_fd, s, strlen(s));
+    (void)n;
+}
+
+static void crash_handler(int sig, siginfo_t *si, void *uc)
+{
+    char buf[256];
+    void *frames[64];
+    int n;
+    int len;
+
+    /* Только write() и обратно: ничего, что может залочиться. */
+    crash_write("\n==== XSCREENLETSD CRASH ====\n");
+    len = snprintf(buf, sizeof(buf), "signal %d (%s) at addr %p\n",
+                   sig, strsignal(sig), si ? si->si_addr : NULL);
+    if (len > 0) {
+        ssize_t n = write(g_crash_fd, buf, (size_t)len);
+        (void)n;
+    }
+    /* Регистры контекста, если платформа их даёт */
+    if (uc) {
+        ucontext_t *c = (ucontext_t *)uc;
+        len = snprintf(buf, sizeof(buf),
+                       "pc=%llx sp=%llx rax=%llx rbx=%llx rcx=%llx "
+                       "rdx=%llx rsi=%llx rdi=%llx rbp=%llx\n",
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RIP],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RSP],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RAX],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RBX],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RCX],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RDX],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RSI],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RDI],
+                       (unsigned long long)c->uc_mcontext.gregs[REG_RBP]);
+        if (len > 0) {
+            ssize_t n = write(g_crash_fd, buf, (size_t)len);
+            (void)n;
+        }
+    }
+    /* Стек вызовов. backtrace() может аллоцировать при первом вызове,
+     * поэтому дополнительно прогреваем буфер заранее в install. */
+    n = backtrace(frames, 64);
+    /* backtrace_symbols_fd пишет через fd, без malloc — безопасно. */
+    backtrace_symbols_fd(frames, n, g_crash_fd);
+    crash_write("==== END CRASH ====\n");
+
+    /* Восстанавливаем поведение по умолчанию и умираем честно,
+     * чтобы dmesg увидел настоящий segfault. */
+    signal(sig, SIG_DFL);
+    raise(sig);
+    _exit(139);
+}
+
+static void install_crash_handler(void)
+{
+    /* Прогрев: первый backtrace() аллоцирует, в обработчике это опасно. */
+    void *warm[8];
+    (void)backtrace(warm, 8);
+
+    /* Приоритет: --crash-log, потом XS_CRASH_LOG, потом дефолт. */
+    const char *path = g_crash_log;
+    if (!path || !path[0])
+        path = g_getenv("XS_CRASH_LOG");
+    if (!path || !path[0])
+        path = "/tmp/xscreenletsd-crash.log";
+    /* O_APPEND: каждый процесс дописывает, не затирая чужое. */
+    g_crash_fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    if (g_crash_fd < 0)
+        g_crash_fd = STDERR_FILENO;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = crash_handler;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
+
+#endif /* XS_ENABLE_CRASH_LATCHER */
 
 static char *g_conf_path = NULL;
 static char *g_plugdir = NULL;
@@ -350,6 +470,8 @@ int main(int argc, char **argv)
     g_plugdir = g_build_filename(g_get_home_dir(), "lib", "xscreenlets",
                                  "plugins", NULL);
 
+    int want_debug = 0;
+
     for (int i = 1; i < argc; i++) {
         if (g_strcmp0(argv[i], "--conf") == 0 && i + 1 < argc) {
             g_free(g_conf_path);
@@ -358,9 +480,36 @@ int main(int argc, char **argv)
             g_free(g_plugdir);
             g_plugdir = g_strdup(argv[++i]);
         } else if (g_strcmp0(argv[i], "--debug") == 0) {
-            xs_core_set_debug(TRUE);
+            /* Под USE=debug сюда же попадает установка ловца падений:
+             * одна опция — «диагностика», без отдельного --soft-debug. */
+            want_debug = 1;
+        } else if (g_strcmp0(argv[i], "--crash-log") == 0 && i + 1 < argc) {
+            g_free(g_crash_log);
+            g_crash_log = g_strdup(argv[++i]);
         }
     }
+
+#ifdef XS_ENABLE_CRASH_LATCHER
+    /* Ловец падений ставится до gtk_init: он может упасть сам, и тогда
+     * без раннего перехвата мы потеряем стек. Включается --debug
+     * (USE=debug) либо непустым XS_CRASH_LOG — так переборы могут
+     * запускать демон с ловцом, не добавляя флагов. */
+    {
+        const char *env_log = g_getenv("XS_CRASH_LOG");
+        int want_latch = want_debug || (env_log && env_log[0]);
+
+        if (want_latch) {
+            install_crash_handler();
+            xs_log_impl("debug: crash latch enabled");
+        }
+    }
+#else
+    (void)want_debug;
+    /* Сборка без USE=debug: --crash-log принимается и игнорируется,
+     * чтобы один и тот же unit-файл работал с обоими билдами. */
+    g_clear_pointer(&g_crash_log, g_free);
+#endif
+    xs_core_set_debug(want_debug);
 
     /* SIGHUP reload setup */
     setup_sighup_handler();

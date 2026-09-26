@@ -1,4 +1,9 @@
 CC = gcc
+# Ловец падений (встроенный SIGSEGV-backtrace в main.c) включается
+# -DXS_ENABLE_CRASH_LATCHER. По умолчанию ВЫКЛЮЧЕН: в ebuild это будет
+# soft-debug USE-флаг (напр. "debug"), потому что ловец на каждый
+# аварийный сигнал пишет стек в файл и завершает процесс — в обычной
+# сборке пользователю это не нужно. Включать при расследовании падений.
 CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0)
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
