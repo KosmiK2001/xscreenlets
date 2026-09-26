@@ -22,6 +22,17 @@
 /* График занимает всё окно: подписи и значения рисуются поверх него,
  * поэтому для них ничего не резервируется. */
 #define NM_GRAPH_TOP 0
+/* Высота строки внешней подписи серии. Фиксированная, а не по высоте
+ * Pango: при смене шрифта высота окна «дышала» бы, и applet дёргался при
+ * каждой перерисовке. Запас сверху — на восьминаправленную тень. */
+#define NM_OUTSIDE_ROW_H 14
+/* Заголовок (интерфейс + IP) тоже живёт в верхней полосе и занимает
+ * свою строку. Без этого резервирования первая подпись серии вставала бы
+ * ровно на IP и обе строки накладывались. */
+#define NM_HEADER_ROW_H 14
+/* Скругление окна не может быть меньше скругления графика: иначе рамка
+ * окна срезала бы скруглённые углы графика по диагонали. */
+#define NM_WINDOW_RADIUS_MIN_GRAPH 1
 #define NM_BORDER_PATH_INSET 0.5
 /* Сколько значений усреднять: 1 = мгновенная скорость (поведение conky
  * по умолчанию), больше — сглаживает всплески. */
@@ -57,7 +68,8 @@ typedef struct {
     int series_label_x[NM_SERIES_MAX], series_label_y[NM_SERIES_MAX];
     NmLabelPlacement label_placement[NM_SERIES_MAX];
     int width, height;
-    int corner_radius;
+    int corner_radius;   /* скругление графика */
+    int window_radius;   /* скругление окна, не меньше corner_radius */
     int shape_radius, shape_w, shape_h;
     int design_width, design_height;
     guint update_ms;
@@ -74,7 +86,7 @@ typedef struct {
     char *total_label[NM_SERIES_MAX];
     char *total_font[NM_SERIES_MAX];
     int total_x[NM_SERIES_MAX], total_y[NM_SERIES_MAX];
-    gdouble graph_bg[4], border[4], text_color[4];
+    gdouble graph_bg[4], window_bg[4], border[4], text_color[4];
     gdouble series_color[NM_SERIES_MAX][4];
     gdouble series_text_color[NM_SERIES_MAX][4];
     /* история: 0 = download (rx), 1 = upload (tx) */
@@ -320,6 +332,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     gboolean split = (priv->graph_mode == NM_GRAPH_SPLIT);
     guint i;
     int graph_y, graph_h;
+    int outside_band;
+    int window_radius;
     int dw = priv->design_width > 0 ? priv->design_width : width;
     int dh = priv->design_height > 0 ? priv->design_height : height;
     char *rate_text[NM_SERIES_MAX];
@@ -327,8 +341,32 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     char *header_text;
 
     pango_layout_set_font_description(layout, NULL);
+
+    /* Внешние подписи серий занимают ПОЛОСУ над графиком, а не
+     * накладываются на него. Полоса появляется, если хотя бы у одной
+     * серии выбрано «снаружи», — тогда график опускается, а окно
+     * остаётся рамкой вокруг всего: подписи, график, сводки. */
     {
-        const double radius = nm_corner_radius_value(priv->corner_radius);
+        int outside_rows = 0;
+        for (i = 0; i < NM_SERIES_MAX; i++) {
+            if (priv->label_placement[i] == NM_LABEL_OUTSIDE)
+                outside_rows++;
+        }
+        outside_band = (outside_rows + 1) * NM_OUTSIDE_ROW_H;
+        /* Полоса не должна съесть окно: если места не хватает, график
+         * получает минимум треть высоты, остальное — подписям. */
+        if (outside_band > 0 && height - outside_band < height / 3)
+            outside_band = MAX(0, height - MAX(1, height / 3));
+    }
+    graph_y = NM_GRAPH_TOP + outside_band;
+    graph_h = MAX(1, height - graph_y - 2);
+    /* Скругление окна не меньше скругления графика. */
+    window_radius = MAX(priv->window_radius, priv->corner_radius);
+    {
+        /* Клип по округлённому контуру ОКНА. Скругление окна не меньше
+         * скругления графика (window_radius >= corner_radius), иначе
+         * рамка окна срезала бы углы графика по диагонали. */
+        const double radius = nm_corner_radius_value(window_radius);
         if (nm_corner_radius_is_rounded(radius)) {
             double r = MIN(radius, MIN(width, height) / 2.0);
             cairo_new_sub_path(cr);
@@ -369,9 +407,16 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             scale_max[i] = cap;
     }
 
-    graph_y = NM_GRAPH_TOP;
-    graph_h = MAX(1, height - graph_y - 2);
 
+    /* Окно заливается своим фоном (там, где подписи), график — своим.
+     * Когда внешних подписей нет, обе заливки совпадают и разницы не
+     * видно: ровно как раньше. */
+    cairo_save(cr);
+    nm_rounded_path(cr, width, height, window_radius, 0.0);
+    cairo_set_source_rgba(cr, priv->window_bg[0], priv->window_bg[1],
+                          priv->window_bg[2], priv->window_bg[3]);
+    cairo_fill(cr);
+    cairo_restore(cr);
     cairo_save(cr);
     nm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
     cairo_set_source_rgba(cr, priv->graph_bg[0], priv->graph_bg[1],
@@ -439,19 +484,40 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         }
     }
     cairo_restore(cr);
+    cairo_set_line_width(cr, 1.0);
+
+    /* Рамка графика рисуется в ЕГО области, а не по контуру окна: когда
+     * внешние подписи вынесли график в середину окна, рамка вокруг всего
+     * окна смотрелась бы как рамка графика, и график остался бы без
+     * собственной границы. Когда внешних подписей нет (outside_band==0),
+     * области совпадают и получается ровно одна рамка, как раньше. */
+    if (outside_band > 0) {
+        cairo_set_source_rgba(cr, priv->border[0], priv->border[1],
+                              priv->border[2], priv->border[3]);
+        cairo_save(cr);
+        cairo_rectangle(cr, 0, graph_y, width, graph_h);
+        cairo_clip(cr);
+        nm_rounded_path(cr, width, graph_h, priv->corner_radius, 0.0);
+        cairo_translate(cr, 0, graph_y);
+        cairo_new_path(cr);
+        nm_rounded_path(cr, width, graph_h, priv->corner_radius,
+                        NM_BORDER_PATH_INSET);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
+
+    /* Рамка окна — всегда, своим радиусом. */
     cairo_set_source_rgba(cr, priv->border[0], priv->border[1],
                           priv->border[2], priv->border[3]);
-    cairo_set_line_width(cr, 1.0);
     cairo_save(cr);
-    nm_rounded_path(cr, width, height, priv->corner_radius,
-                    NM_BORDER_PATH_INSET);
+    nm_rounded_path(cr, width, height, window_radius, NM_BORDER_PATH_INSET);
     cairo_stroke(cr);
     cairo_restore(cr);
 
-    /* Текст рисуется поверх графика и клипается тем же контуром, что и
-     * рамка: глиф у угла просто не рисуется, без ручных границ. */
+    /* Текст клипается контуром окна: глиф у скруглённого угла просто не
+     * рисуется, без ручных границ на каждую подпись. */
     cairo_save(cr);
-    nm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
+    nm_rounded_path(cr, width, height, window_radius, 0.0);
     cairo_clip(cr);
 
     for (i = 0; i < NM_SERIES_MAX; i++) {
@@ -477,28 +543,49 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         int sy = nm_scale_position(priv->series_y[i], dh, height, height - 1);
         int lx = nm_scale_position(priv->series_label_x[i], dw, width,
                                    width - 1);
-        int ly = nm_scale_position(priv->series_label_y[i], dh, height,
-                                   height - 1);
         char *full;
 
         if (priv->label_placement[i] == NM_LABEL_INSIDE) {
+            /* Внутри: метка и значение одной строкой поверх графика. */
             full = g_strdup_printf("%s: %s", priv->series_label[i],
                                    rate_text[i]);
         } else {
-            /* Снаружи графика: подпись над значением, как alignr в conky */
-            nm_show_text(cr, layout, priv->series_font[i], lx, ly,
-                         priv->series_label[i], priv->series_text_color[i],
-                         width, height);
+            /* Снаружи: подпись уходит в полосу над графиком, значение
+             * остаётся в графике на своей позиции. Полоса — обычная
+             * область окна, поэтому ограничиваем её шириной. */
+            int row_y;
+
             full = g_strdup(rate_text[i]);
+            /* Ряд в полосе: i-я подпись на строке i. Координата Y из
+             * настроек здесь не используется — иначе подписи наезжали бы
+             * друг на друга, а выбирать вручную их порядок бессмысленно.
+             * Сами координаты из настроек по-прежнему работают для
+             * значения (series<N>_x/y) и внутри полосы — для X. */
+            /* Строка 0 полосы — заголовок, поэтому i-я подпись серии
+             * идёт на строке i+1. */
+            row_y = NM_TEXT_SHADOW_RADIUS +
+                    ((int) i + 1) * NM_OUTSIDE_ROW_H;
+            nm_show_text(cr, layout, priv->series_font[i],
+                         lx, row_y, priv->series_label[i],
+                         priv->series_text_color[i], width, outside_band);
         }
         nm_show_text(cr, layout, priv->series_font[i], sx, sy, full,
                      priv->series_text_color[i], width, height);
         g_free(full);
     }
-    nm_show_text(cr, layout, priv->label_font,
-                 nm_scale_position(priv->header_x, dw, width, width - 1),
-                 nm_scale_position(priv->header_y, dh, height, height - 1),
-                 header_text, priv->text_color, width, height);
+    /* Заголовок прижат к строке 0 полосы, чтобы не наезжать на первую
+     * подпись серии. Когда внешних подписей нет, полосы нет и поведение
+     * прежнее: header_x/header_y из настроек работают как раньше. */
+    {
+        int hx = nm_scale_position(priv->header_x, dw, width, width - 1);
+        int hy = nm_scale_position(priv->header_y, dh, height, height - 1);
+
+        if (outside_band > 0)
+            hy = NM_TEXT_SHADOW_RADIUS;
+        nm_show_text(cr, layout, priv->label_font, hx, hy, header_text,
+                     priv->text_color, width, outside_band > 0
+                     ? outside_band : height);
+    }
     for (i = 0; i < NM_SERIES_MAX; i++) {
         nm_show_text(cr, layout, priv->total_font[i],
                      nm_scale_position(priv->total_x[i], dw, width, width - 1),
@@ -576,6 +663,12 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
     priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                                         "corner_radius", 0),
                                 0, 200);
+    /* Скругление окна не меньше скругления графика: иначе рамка окна
+     * срезала бы скруглённые углы графика по диагонали. */
+    priv->window_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                                        "window_radius", 0),
+                                0, 200);
+    priv->window_radius = MAX(priv->window_radius, priv->corner_radius);
     priv->design_width = priv->width;
     priv->design_height = priv->height;
     priv->update_ms = CLAMP(xs_host_api()->conf_int(kf, p->name, "update_ms",
@@ -692,6 +785,10 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
 
     nm_read_color(priv, "graph_background_color", nm_graph_bg_default,
                   priv->graph_bg);
+    /* Фон окна по умолчанию тот же, что у графика: пока внешних подписей
+     * нет, разницы не видно, и пользователь ничего не настраивает зря. */
+    nm_read_color(priv, "window_background_color", nm_graph_bg_default,
+                  priv->window_bg);
     nm_read_color(priv, "border_color", nm_border_default, priv->border);
     nm_read_color(priv, "text_color", nm_text_default, priv->text_color);
     nm_read_color(priv, "rx_color", nm_rx_default, priv->series_color[0]);
@@ -732,6 +829,8 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_integer(kf, p->name, "rate_smooth", priv->rate_smooth);
     g_key_file_set_integer(kf, p->name, "corner_radius",
                            priv->corner_radius);
+    g_key_file_set_integer(kf, p->name, "window_radius",
+                           priv->window_radius);
     xs_core_plugin_conf_flush(p->name);
 
     x = xs_host_api()->conf_int(kf, p->name, "x", 80);
@@ -937,8 +1036,20 @@ static void nm_position_changed(GtkSpinButton *spin, gpointer data)
         priv->width = value;
     } else if (!strcmp(key, "window_height")) {
         priv->height = value;
+    } else if (!strcmp(key, "window_radius")) {
+        priv->window_radius = value;
     } else if (!strcmp(key, "corner_radius")) {
         priv->corner_radius = value;
+        /* Рамка окна не может стать меньше только что выбранного
+         * скругления графика — иначе окно срежет углы графика. */
+        if (priv->window_radius < priv->corner_radius)
+            priv->window_radius = priv->corner_radius;
+        /* Рамка окна не может стать меньше только что выбранного
+         * скругления графика — иначе окно срежет углы графика. */
+        if (priv->window_radius < priv->corner_radius) {
+            priv->window_radius = priv->corner_radius;
+            value = priv->window_radius;
+        }
     } else if (!strcmp(key, "graph_max_kib")) {
         priv->graph_max_kib = value;
     } else if (!strcmp(key, "rate_smooth")) {
@@ -1517,6 +1628,8 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     g = nm_grid_new();
     nm_add_color(g, ctx, "graph_background_color", "Graph background",
                  priv->graph_bg, TRUE);
+    nm_add_color(g, ctx, "window_background_color", "Window background",
+                 priv->window_bg, TRUE);
     nm_add_color(g, ctx, "text_color", "Text", priv->text_color, FALSE);
     nm_add_color(g, ctx, "border_color", "Graph border", priv->border, TRUE);
     nm_add_font(g, ctx, "label_font", "Header font", priv->label_font);
@@ -1552,8 +1665,12 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_int(g, ctx, "window_height", "Height", priv->height,
                    NM_MIN_WINDOW_HEIGHT, 1200);
     }
-    nm_add_int(g, ctx, "corner_radius", "Corner radius", priv->corner_radius,
+    nm_add_int(g, ctx, "corner_radius", "Graph corner", priv->corner_radius,
                0, 200);
+    /* Нижний предел — текущее скругление графика: меньше нельзя, иначе
+     * рамка окна срежет углы графика. */
+    nm_add_int(g, ctx, "window_radius", "Window corner", priv->window_radius,
+               priv->corner_radius, 200);
     nm_add_int(g, ctx, "update_ms", "Update (ms)", priv->update_ms, 100,
                60000);
     nm_add_int(g, ctx, "rate_smooth", "Smoothing", priv->rate_smooth,
