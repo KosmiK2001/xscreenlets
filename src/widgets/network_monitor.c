@@ -32,6 +32,27 @@
  * сведены близко. Число уезжает вправо, но не дальше этой границы,
  * иначе Label pos. снова начнёт двигать число за собой. */
 #define NM_VALUE_GAP 6
+
+/* Ширины элементов диалога.
+ *
+ * NM_DIALOG_ENTRY — ширина полей ввода координат. Три цифры: у плагина
+ * есть NM_MAX_POS (2047), а спин с полем на 5 знаков занимал бы вдвое
+ * больше места, чем нужно, и растягивал секцию.
+ *
+ * NM_DIALOG_COMBO — ширина выпадающего списка Placement. Подобрана по
+ * самой длинной подписи «Outside bottom»: при меньшей ширине GTK
+ * обрезает её по «Outside bott…», и вариант перестаёт читаться.
+ *
+ * NM_DIALOG_FONT — кнопка шрифта. Меньше 180 не влезает «Sans Bold 10»
+ * вместе с иконкой выбора, а поле метки занимает рядом ещё 10 символов.
+ *
+ * NM_DIALOG_LABEL — поле подписи, 10 символов: «Total down:» ровно
+ * десять, а «Downloaded:» уже тринадцать и такой блок в секцию не
+ * помещается. */
+#define NM_DIALOG_ENTRY  58
+#define NM_DIALOG_COMBO 132
+#define NM_DIALOG_FONT  180
+#define NM_DIALOG_LABEL  92
 /* Нижний предел строки: нулевая высота схлопнула бы отступ, и график
  * наехал бы на текст. */
 #define NM_ROW_H_MIN 8
@@ -179,14 +200,23 @@ typedef struct {
      * своя подпись, свой шрифт, свой цвет и своя позиция. Общая строка
      * "Total: rx / tx" не позволяла поставить подписи так, как это
      * сделано в конфигах conky. */
-    char *total_label[NM_SERIES_MAX];
-    char *total_font[NM_SERIES_MAX];
-    int total_x[NM_SERIES_MAX], total_y[NM_SERIES_MAX];
-    /* Цвет сводки («Total down: 47 GiB»). Своя на каждое направление:
-     * сводка рисуется третьим элементом серии, и её цвет не должен
-     * зависеть от цвета подписи или числа. По умолчанию берёт общий
-     * текст серии, как было до разделения. */
-    gdouble total_color[NM_SERIES_MAX][4];
+    /* Сводка (overall) — те же два элемента, что и у серии: ПОДПИСЬ и
+     * ЗНАЧЕНИЕ, каждое со своим текстом, шрифтом, цветом и позицией.
+     *
+     * Раньше это была одна строка с форматом «Total up: %s», собранная
+     * функцией nm_format_label(). Пришлось бы писать формат с %s, и
+     * подпись с числом нельзя было поставить в разные точки: число
+     * всегда ехало в подписи по шаблону. Теперь пользователь сам
+     * позиционирует подпись и число независимо, как у серий. */
+    char *total_label[NM_SERIES_MAX];      /* «Total up:» */
+    char *total_value_font[NM_SERIES_MAX]; /* шрифт числа */
+    char *total_label_font[NM_SERIES_MAX]; /* шрифт подписи */
+    char *total_value[NM_SERIES_MAX];      /* «120.2 GiB» */
+    int total_x[NM_SERIES_MAX], total_y[NM_SERIES_MAX];        /* подпись */
+    int total_value_x[NM_SERIES_MAX], total_value_y[NM_SERIES_MAX];
+    gdouble total_color[NM_SERIES_MAX][4];         /* цвет подписи */
+    gdouble total_value_color[NM_SERIES_MAX][4];  /* цвет числа */
+    gdouble total_text_color[NM_SERIES_MAX][4];   /* общий текст */
     /* У каждой серии три независимых цвета: заливка графика, цвет
      * подписи («Down:») и цвет числа скорости. Раньше подпись и число
      * брали цвет заливки, и разделить их было нельзя.
@@ -197,6 +227,10 @@ typedef struct {
     gdouble series_label_color[NM_SERIES_MAX][4];
     gdouble series_value_color[NM_SERIES_MAX][4];
     gdouble series_text_color[NM_SERIES_MAX][4];
+    /* Шрифты подписи и числа — свои, как у сводки. Раньше был один
+     * series<N>_font на оба. */
+    char *series_label_font[NM_SERIES_MAX];
+    char *series_value_font[NM_SERIES_MAX];
     /* Заголовок разделён надвое: имя интерфейса и адрес рисуются
      * независимо, у каждого свой цвет и своя координата X. По умолчанию
      * оба берут общий text_color. */
@@ -614,7 +648,12 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         int labels_top = 0, labels_bottom = 0;
 
         for (i = 0; i < NM_SERIES_MAX; i++) {
-            int h = nm_row_height(layout, priv->series_font[i]);
+            /* Шрифтов у серии два, и строка должна помещать оба
+             * элемента: берём максимум из высоты подписи и числа. */
+            int h = MAX(nm_row_height(layout,
+                                      priv->series_label_font[i]),
+                        nm_row_height(layout,
+                                      priv->series_value_font[i]));
 
             if (priv->label_placement[i] == NM_LABEL_OUTSIDE_TOP) {
                 labels_top = 1;
@@ -639,7 +678,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         int totals_top = 0, totals_bottom = 0;
 
         for (i = 0; i < NM_SERIES_MAX; i++) {
-            int h = nm_row_height(layout, priv->total_font[i]);
+            int h = nm_row_height(layout, priv->total_label_font[i]);
 
             if (priv->total_placement[i] == NM_LABEL_OUTSIDE_TOP) {
                 totals_top = 1;
@@ -892,12 +931,24 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
      * быть (ifb, tun без адреса): тогда рисуется только имя, без пустого
      * хвоста и без двоеточия. */
     header_name = nm_split_header(priv->ifname, priv->ip, &header_ip);
-    /* Сводуется каждое направление своей строкой, а не общей "rx / tx":
-     * подписи, шрифт, цвет и позиция у них настраиваются отдельно. */
-    total_text[0] = nm_format_label(priv->total_label[0],
-                                    nm_format_bytes(priv->total_bytes[0]));
-    total_text[1] = nm_format_label(priv->total_label[1],
-                                    nm_format_bytes(priv->total_bytes[1]));
+    /* Сводка (overall) — тоже два элемента, а не строка по шаблону.
+     * Подпись и число рисуются независимо, у каждого свой шрифт, цвет и
+     * координаты. Раньше собиралось nm_format_label("Total up: %s", …),
+     * и число всегда ехало в подписи по шаблону: поставить его в другую
+     * точку было нельзя в принципе.
+     *
+     * total<N>_value — необязательный текст перед числом, чтобы можно
+     * было написать «47.6 GiB всего». */
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char *num = nm_format_bytes(priv->total_bytes[i]);
+
+        if (priv->total_value[i] && *priv->total_value[i])
+            total_text[i] = g_strdup_printf("%s %s", priv->total_value[i],
+                                            num);
+        else
+            total_text[i] = g_strdup(num);
+        g_free(num);
+    }
 
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int sx = nm_scale_position(priv->series_x[i], dw, width, width - 1);
@@ -927,7 +978,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
              * когда координаты сведены близко. */
             {
                 PangoFontDescription *fd =
-                    pango_font_description_from_string(priv->series_font[i]);
+                    pango_font_description_from_string(
+                        priv->series_label_font[i]);
                 int label_w = 0, value_w = 0;
                 char *value_text = g_strdup(rate_text[i]);
 
@@ -970,7 +1022,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                 if (lx + label_w + NM_VALUE_GAP > value_x)
                     lx = value_x + value_w + NM_VALUE_GAP;
 
-                nm_show_text(cr, layout, priv->series_font[i], lx, ly,
+                nm_show_text(cr, layout, priv->series_label_font[i], lx, ly,
                              priv->series_label[i],
                              priv->series_label_color[i],
                              width, graph_y, graph_h, TRUE);
@@ -996,7 +1048,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                 row_y = graph_y + graph_h + NM_MARGIN_TOP + slot * row_h;
             else
                 row_y = NM_MARGIN_TOP + slot * row_h;
-            nm_show_text(cr, layout, priv->series_font[i],
+            nm_show_text(cr, layout, priv->series_label_font[i],
                          lx, row_y, priv->series_label[i],
                          priv->series_label_color[i], width,
                          priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
@@ -1006,7 +1058,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             value_x = sx;
             full = g_strdup(rate_text[i]);
         }
-        nm_show_text(cr, layout, priv->series_font[i], value_x, sy, full,
+        nm_show_text(cr, layout, priv->series_value_font[i], value_x, sy, full,
                      priv->series_value_color[i], width, graph_y, graph_h,
                      TRUE);
         g_free(full);
@@ -1065,10 +1117,24 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                          clip_y0, clip_h, FALSE);
     }
 
+    /* Сводка: подпись и число — два элемента, как у серии. Оба делят
+     * одну полосу (фаза NM_BAND_TOTAL), но у каждого свои координаты,
+     * шрифт и цвет, а наезд разрешается так же: число своё место не
+     * уступает, уезжает подпись.
+     *
+     * Значение выводится, даже если подпись пустая, и наоборот: это два
+     * независимых элемента, а не две части одной строки. */
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int tx = nm_scale_position(priv->total_x[i], dw, width, width - 1);
         int ty = nm_scale_position(priv->total_y[i], dh, height, height - 1);
-        int row_h, slot;
+        int vx = nm_scale_position(priv->total_value_x[i], dw, width,
+                                  width - 1);
+        int vy = nm_scale_position(priv->total_value_y[i], dh, height,
+                                  height - 1);
+        int row_h, slot, row_y, clip_y0, clip_h;
+        int lx = tx, vxp = vx;
+        int label_w = 0, value_w = 0;
+        gboolean clip_is_graph;
 
         switch (priv->total_placement[i]) {
         case NM_LABEL_OUTSIDE_TOP:
@@ -1076,26 +1142,68 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             slot = nm_band_slot(NM_BAND_TOTAL, &priv->header_placement,
                                 priv->label_placement, NM_LABEL_OUTSIDE_TOP,
                                 top_rows);
-            nm_show_text(cr, layout, priv->total_font[i], tx,
-                         NM_MARGIN_TOP + slot * row_h,
-                         total_text[i], priv->total_color[i], width,
-                         0, top_band, FALSE);
+            row_y = NM_MARGIN_TOP + slot * row_h;
+            clip_y0 = 0;
+            clip_h = top_band;
+            clip_is_graph = FALSE;
             break;
         case NM_LABEL_OUTSIDE_BOTTOM:
             row_h = bot_step;
             slot = nm_band_slot(NM_BAND_TOTAL, &priv->header_placement,
                                 priv->label_placement, NM_LABEL_OUTSIDE_BOTTOM,
                                 bot_rows);
-            nm_show_text(cr, layout, priv->total_font[i], tx,
-                         graph_y + graph_h + NM_MARGIN_TOP + slot * row_h,
-                         total_text[i], priv->total_color[i], width,
-                         graph_y + graph_h, bot_band, FALSE);
+            row_y = graph_y + graph_h + NM_MARGIN_TOP + slot * row_h;
+            clip_y0 = graph_y + graph_h;
+            clip_h = bot_band;
+            clip_is_graph = FALSE;
             break;
         default:
-            nm_show_text(cr, layout, priv->total_font[i], tx, ty,
-                         total_text[i], priv->total_color[i], width,
-                         graph_y, graph_h, TRUE);
+            row_y = 0;   /* для inside каждое своё Y, см. ниже */
+            clip_y0 = graph_y;
+            clip_h = graph_h;
+            clip_is_graph = TRUE;
             break;
+        }
+
+        /* Ширины нужны для разрешения наезда: число на своей
+         * координате, подпись при пересечении уезжает за него. */
+        {
+            PangoFontDescription *fd = pango_font_description_from_string(
+                priv->total_label_font[i]);
+
+            pango_layout_set_font_description(layout, fd);
+            pango_layout_set_text(layout,
+                                  priv->total_label[i]
+                                      ? priv->total_label[i] : "", -1);
+            pango_layout_get_pixel_size(layout, &label_w, NULL);
+            pango_font_description_free(fd);
+
+            fd = pango_font_description_from_string(
+                priv->total_value_font[i]);
+            pango_layout_set_font_description(layout, fd);
+            pango_layout_set_text(layout, total_text[i], -1);
+            pango_layout_get_pixel_size(layout, &value_w, NULL);
+            pango_font_description_free(fd);
+        }
+        if (lx + label_w + NM_VALUE_GAP > vxp)
+            lx = vxp + value_w + NM_VALUE_GAP;
+
+        {
+            /* Для inside у каждого своя Y; для внешней полосы оба на
+             * одной строке, посчитанной фазой. */
+            int lrow = row_y, vrow = row_y;
+
+            if (priv->total_placement[i] == NM_LABEL_INSIDE) {
+                lrow = ty;
+                vrow = vy;
+            }
+            if (priv->total_label[i] && *priv->total_label[i])
+                nm_show_text(cr, layout, priv->total_label_font[i], lx, lrow,
+                             priv->total_label[i], priv->total_color[i],
+                             width, clip_y0, clip_h, clip_is_graph);
+            nm_show_text(cr, layout, priv->total_value_font[i], vxp, vrow,
+                         total_text[i], priv->total_value_color[i], width,
+                         clip_y0, clip_h, clip_is_graph);
         }
         g_free(total_text[i]);
     }
@@ -1258,9 +1366,12 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         g_snprintf(key, sizeof(key), "series%u_label", i);
         priv->series_label[i] = xs_host_api()->conf_str(
             kf, p->name, key, i == 0 ? "Down" : "Up");
-        g_snprintf(key, sizeof(key), "series%u_font", i);
-        priv->series_font[i] = xs_host_api()->conf_str(kf, p->name, key,
-                                                       priv->font);
+        g_snprintf(key, sizeof(key), "series%u_label_font", i);
+        priv->series_label_font[i] = xs_host_api()->conf_str(kf, p->name,
+                                                             key, priv->font);
+        g_snprintf(key, sizeof(key), "series%u_value_font", i);
+        priv->series_value_font[i] = xs_host_api()->conf_str(kf, p->name,
+                                                             key, priv->font);
         /* Три строки по вертикали, иначе подпись серии в режиме "снаружи"
          * накладывалась на строку интерфейса и обе исчезали:
          *   y=2  — имя интерфейса и IP
@@ -1285,22 +1396,46 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
     priv->header_y = xs_host_api()->conf_int(kf, p->name, "header_y", 2);
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char key[32];
+        /* Подпись и значение разделены. Старые конфиги хранили строку
+         * формата в total<N>_label («Total up: %s»); из неё берётся
+         * только текст до %s, чтобы старый конфиг продолжал работать.
+         * Новые ключи: total<N>_label — подпись, total<N>_value —
+         * необязательный префикс значения (пусто = только число). */
         static const char *default_labels[NM_SERIES_MAX] = {
-            "Total: %s", "Total: %s"
+            "Total down:", "Total up:"
         };
 
         g_snprintf(key, sizeof(key), "total%u_label", i);
         priv->total_label[i] = xs_host_api()->conf_str(kf, p->name, key,
                                                        default_labels[i]);
-        g_snprintf(key, sizeof(key), "total%u_font", i);
-        priv->total_font[i] = xs_host_api()->conf_str(kf, p->name, key,
-                                                      priv->font);
+        if (strstr(priv->total_label[i], "%s")) {
+            /* Старый формат: отбрасываем « %s» и всё после него. */
+            char *cut = strstr(priv->total_label[i], "%s");
+
+            *cut = '\0';
+            g_strchomp(priv->total_label[i]);
+        }
+        g_snprintf(key, sizeof(key), "total%u_value", i);
+        priv->total_value[i] = xs_host_api()->conf_str(kf, p->name, key, "");
+        g_snprintf(key, sizeof(key), "total%u_label_font", i);
+        priv->total_label_font[i] = xs_host_api()->conf_str(kf, p->name, key,
+                                                           priv->font);
+        g_snprintf(key, sizeof(key), "total%u_value_font", i);
+        priv->total_value_font[i] = xs_host_api()->conf_str(kf, p->name, key,
+                                                           priv->font);
         g_snprintf(key, sizeof(key), "total%u_x", i);
         priv->total_x[i] = xs_host_api()->conf_int(kf, p->name, key,
                                                    4);
         g_snprintf(key, sizeof(key), "total%u_y", i);
         priv->total_y[i] = xs_host_api()->conf_int(kf, p->name, key,
                                                    priv->height - 12);
+        /* Позиция и цвета числа — свои, как у подписи. */
+        g_snprintf(key, sizeof(key), "total%u_value_x", i);
+        priv->total_value_x[i] = xs_host_api()->conf_int(kf, p->name, key,
+                                                         60);
+        g_snprintf(key, sizeof(key), "total%u_value_y", i);
+        priv->total_value_y[i] = xs_host_api()->conf_int(kf, p->name, key,
+                                                         priv->height - 12);
     }
 
     nm_read_color(priv, "graph_background_color", nm_graph_bg_default,
@@ -1394,13 +1529,20 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
                       priv->series_value_color[i]);
     }
 
-    /* Сводка — отдельный элемент, свой цвет на каждое направление. */
+    /* Сводка — два элемента, у каждого свои цвета. Общий текст
+     * (total<N>_text_color) остаётся значением по умолчанию для обоих. */
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char key[40];
 
-        g_snprintf(key, sizeof(key), "total%u_color", i);
+        g_snprintf(key, sizeof(key), "total%u_text_color", i);
         nm_read_color(priv, key, priv->series_text_color[i],
+                      priv->total_text_color[i]);
+        g_snprintf(key, sizeof(key), "total%u_color", i);
+        nm_read_color(priv, key, priv->total_text_color[i],
                       priv->total_color[i]);
+        g_snprintf(key, sizeof(key), "total%u_value_color", i);
+        nm_read_color(priv, key, priv->total_text_color[i],
+                      priv->total_value_color[i]);
     }
 
     /* Имя интерфейса и адрес — два элемента, у каждого свой цвет. */
@@ -1417,8 +1559,8 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         char key[32];
         g_snprintf(key, sizeof(key), "total%u_label", i);
         g_key_file_set_string(kf, p->name, key, priv->total_label[i]);
-        g_snprintf(key, sizeof(key), "total%u_font", i);
-        g_key_file_set_string(kf, p->name, key, priv->total_font[i]);
+        g_snprintf(key, sizeof(key), "total%u_label_font", i);
+        g_key_file_set_string(kf, p->name, key, priv->total_label_font[i]);
         g_snprintf(key, sizeof(key), "total%u_x", i);
         g_key_file_set_integer(kf, p->name, key, priv->total_x[i]);
         g_snprintf(key, sizeof(key), "total%u_y", i);
@@ -1550,10 +1692,13 @@ static void nm_shutdown(XsPlugin *p)
     {
         guint i;
         for (i = 0; i < NM_SERIES_MAX; i++) {
-            g_free(priv->series_font[i]);
+            g_free(priv->series_label_font[i]);
+            g_free(priv->series_value_font[i]);
             g_free(priv->series_label[i]);
             g_free(priv->total_label[i]);
-            g_free(priv->total_font[i]);
+            g_free(priv->total_value[i]);
+            g_free(priv->total_label_font[i]);
+            g_free(priv->total_value_font[i]);
         }
     }
     g_free(priv);
@@ -1646,6 +1791,10 @@ static void nm_position_changed(GtkSpinButton *spin, gpointer data)
                 priv->total_x[series_index] = value;
             else if (!strcmp(numeric_key, "y"))
                 priv->total_y[series_index] = value;
+            else if (!strcmp(numeric_key, "value_x"))
+                priv->total_value_x[series_index] = value;
+            else if (!strcmp(numeric_key, "value_y"))
+                priv->total_value_y[series_index] = value;
         }
     } else if (!strcmp(key, "header_x")) {
         priv->header_x = value;
@@ -1725,6 +1874,19 @@ static void nm_label_changed(GtkEditable *entry, gpointer data)
             !strcmp(tail, "label")) {
             g_free(priv->series_label[series_index]);
             priv->series_label[series_index] = g_strdup(value);
+        }
+    } else if (g_str_has_prefix(key, "total")) {
+        /* У сводки два текстовых поля: подпись и необязательный префикс
+         * значения. */
+        if (sscanf(key, "total%d_%31s", &series_index, tail) == 2 &&
+            series_index >= 0 && series_index < NM_SERIES_MAX) {
+            if (!strcmp(tail, "label")) {
+                g_free(priv->total_label[series_index]);
+                priv->total_label[series_index] = g_strdup(value);
+            } else if (!strcmp(tail, "value")) {
+                g_free(priv->total_value[series_index]);
+                priv->total_value[series_index] = g_strdup(value);
+            }
         }
     }
     g_key_file_set_string(priv->kf, p->name, key, value);
@@ -1941,11 +2103,23 @@ static void nm_color_set(GtkColorButton *button, gpointer data)
     } else if (!strcmp(key, "header_ip_color")) {
         memcpy(priv->header_ip_color, out, sizeof(gdouble) * 4);
     } else if (g_str_has_prefix(key, "total")) {
-        /* Цвет сводки: total<N>_color, своя на направление. */
+        /* Сводка: общий текст, подпись и число — три разных цвета.
+         * Общий текст уводит за собой оба, иначе кнопка перестала бы на
+         * них влиять. */
         unsigned n = 0;
+        char t[32];
 
-        if (sscanf(key, "total%u_color", &n) == 1 && n < NM_SERIES_MAX)
-            memcpy(priv->total_color[n], out, sizeof(gdouble) * 4);
+        if (sscanf(key, "total%u_%31s", &n, t) == 2 && n < NM_SERIES_MAX) {
+            if (!strcmp(t, "text_color")) {
+                memcpy(priv->total_text_color[n], out, sizeof(gdouble) * 4);
+                memcpy(priv->total_color[n], out, sizeof(gdouble) * 4);
+                memcpy(priv->total_value_color[n], out, sizeof(gdouble) * 4);
+            } else if (!strcmp(t, "color")) {
+                memcpy(priv->total_color[n], out, sizeof(gdouble) * 4);
+            } else if (!strcmp(t, "value_color")) {
+                memcpy(priv->total_value_color[n], out, sizeof(gdouble) * 4);
+            }
+        }
     }
     g_key_file_set_string(priv->kf, p->name, key, nm_format_rgba(out));
     xs_core_plugin_conf_flush(p->name);
@@ -1971,11 +2145,40 @@ static void nm_series_font_set(GtkFontButton *button, gpointer data)
     if (!key)
         return;
     value = gtk_font_button_get_font_name(GTK_FONT_BUTTON(button));
-    if (g_str_has_prefix(key, "series") &&
-        sscanf(key, "series%d_%31s", &series_index, tail) == 2 &&
-        series_index >= 0 && series_index < NM_SERIES_MAX) {
-        g_free(priv->series_font[series_index]);
-        priv->series_font[series_index] = g_strdup(value);
+    /* tail заполняется одним из двух sscanf ниже, а не обоими: второй
+     * перезаписал бы первый, и ветка total прочитала бы хвост от ключа
+     * series. Поэтому выбираем формат по префиксу. */
+    series_index = -1;
+    tail[0] = '\0';
+    if (g_str_has_prefix(key, "series")) {
+        if (sscanf(key, "series%d_%31s", &series_index, tail) == 2 &&
+            series_index >= 0 && series_index < NM_SERIES_MAX) {
+            if (!strcmp(tail, "label_font")) {
+                g_free(priv->series_label_font[series_index]);
+                priv->series_label_font[series_index] = g_strdup(value);
+            } else if (!strcmp(tail, "value_font")) {
+                g_free(priv->series_value_font[series_index]);
+                priv->series_value_font[series_index] = g_strdup(value);
+            } else if (!strcmp(tail, "font")) {
+                /* Старый общий ключ: подпись и число шли одним шрифтом. */
+                g_free(priv->series_label_font[series_index]);
+                priv->series_label_font[series_index] = g_strdup(value);
+                g_free(priv->series_value_font[series_index]);
+                priv->series_value_font[series_index] = g_strdup(value);
+            }
+        }
+    } else if (g_str_has_prefix(key, "total")) {
+        /* У сводки два независимых шрифта: подписи и числа. */
+        if (sscanf(key, "total%d_%31s", &series_index, tail) == 2 &&
+            series_index >= 0 && series_index < NM_SERIES_MAX) {
+            if (!strcmp(tail, "label_font")) {
+                g_free(priv->total_label_font[series_index]);
+                priv->total_label_font[series_index] = g_strdup(value);
+            } else if (!strcmp(tail, "value_font")) {
+                g_free(priv->total_value_font[series_index]);
+                priv->total_value_font[series_index] = g_strdup(value);
+            }
+        }
     }
     g_key_file_set_string(priv->kf, p->name, key, value);
     xs_core_plugin_conf_flush(p->name);
@@ -2080,8 +2283,15 @@ static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
 
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(sx), value_x);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(sy), value_y);
-    gtk_widget_set_size_request(sx, 72, -1);
-    gtk_widget_set_size_request(sy, 72, -1);
+    /* Три цифры: у плагина NM_MAX_POS = 2047, а у спина с кнопками
+     * прокрутки поле занимает пять знаков. Убираем прокрутку — ввод
+     * с клавиатуры остаётся, колесо тоже работает. */
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(sx), FALSE);
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(sy), FALSE);
+    gtk_entry_set_max_width_chars(GTK_ENTRY(sx), 3);
+    gtk_entry_set_max_width_chars(GTK_ENTRY(sy), 3);
+    gtk_widget_set_size_request(sx, NM_DIALOG_ENTRY, -1);
+    gtk_widget_set_size_request(sy, NM_DIALOG_ENTRY, -1);
     g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
     g_object_set_data_full(G_OBJECT(sy), "xs-key", g_strdup(key_y), g_free);
     gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
@@ -2124,8 +2334,15 @@ static GtkWidget *nm_add_pos(NmGrid *g, NmDialogContext *ctx,
 
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(sx), value_x);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(sy), value_y);
-    gtk_widget_set_size_request(sx, 72, -1);
-    gtk_widget_set_size_request(sy, 72, -1);
+    /* Три цифры: у плагина NM_MAX_POS = 2047, а у спина с кнопками
+     * прокрутки поле занимает пять знаков. Убираем прокрутку — ввод
+     * с клавиатуры остаётся, колесо тоже работает. */
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(sx), FALSE);
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(sy), FALSE);
+    gtk_entry_set_max_width_chars(GTK_ENTRY(sx), 3);
+    gtk_entry_set_max_width_chars(GTK_ENTRY(sy), 3);
+    gtk_widget_set_size_request(sx, NM_DIALOG_ENTRY, -1);
+    gtk_widget_set_size_request(sy, NM_DIALOG_ENTRY, -1);
     g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
     g_object_set_data_full(G_OBJECT(sy), "xs-key", g_strdup(key_y), g_free);
     gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
@@ -2172,29 +2389,15 @@ static void nm_add_color(NmGrid *g, NmDialogContext *ctx, const char *key,
     nm_bind_keyed_descendants(button, ctx);
 }
 
-static void nm_add_text(NmGrid *g, NmDialogContext *ctx, const char *key,
-                        const char *label, const char *value)
-{
-    GtkWidget *entry = gtk_entry_new();
-    GtkWidget *box;
+/* Поле ввода подписи. Длина ограничена NM_DIALOG_LABEL_CHARS: в секции
+ * рядом стоят кнопка шрифта и кнопка цвета, и длинная подпись
+ * растягивала бы всю секцию за пределы окна диалога.
+ *
+ * Ограничение на ввод, а не на отображение: в конфиг попадает ровно то,
+ * что введено, и длинная строка из старого конфига читается целиком —
+ * обрезать её молча было бы потерей данных. */
+#define NM_DIALOG_LABEL_CHARS 10
 
-    gtk_entry_set_text(GTK_ENTRY(entry), value ? value : "");
-    gtk_widget_set_size_request(entry, 180, -1);
-    g_object_set_data_full(G_OBJECT(entry), "xs-key", g_strdup(key), g_free);
-    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_box_pack_start(GTK_BOX(box), entry, TRUE, TRUE, 0);
-    nm_grid_add_label(g, label);
-    nm_grid_add_widget(g, box);
-    nm_bind_keyed_descendants(entry, ctx);
-}
-
-/* Шрифт и цвет в ОДНОЙ строке, без подписей — приём из disk_monitor
- * (dm_series_block_widget). Кнопка шрифта фиксированной ширины 180 px
- * кладётся в GtkFixed: внутри flex-бокса она иначе тянется на всю
- * оставшуюся ширину и перестаёт быть одинаковой у всех серий. */
-/* Кнопка выбора цвета с подсказкой. Создаётся как отдельная функция,
- * потому что цветов у серии теперь четыре: заливка графика, общий текст,
- * подпись и число. */
 static GtkWidget *nm_color_button(const char *key, const gdouble color[4],
                                   gboolean with_alpha, const char *tip)
 {
@@ -2215,7 +2418,7 @@ static void nm_add_font(NmGrid *g, NmDialogContext *ctx, const char *key,
 {
     GtkWidget *button = gtk_font_button_new_with_font(value ? value : "Sans 8");
 
-    gtk_widget_set_size_request(button, 180, -1);
+    gtk_widget_set_size_request(button, NM_DIALOG_FONT, -1);
     g_object_set_data_full(G_OBJECT(button), "xs-key", g_strdup(key), g_free);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, button);
@@ -2236,6 +2439,9 @@ static GtkWidget *nm_add_combo(NmGrid *g, NmDialogContext *ctx,
         gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), options[i],
                                   options[i]);
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo), active);
+    /* Ширина под самую длинную подпись — «Outside bottom». Уже, и GTK
+     * обрезает её по «Outside bott…», и вариант перестаёт читаться. */
+    gtk_widget_set_size_request(combo, NM_DIALOG_COMBO, -1);
     g_object_set_data_full(G_OBJECT(combo), "xs-key", g_strdup(key), g_free);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, combo);
@@ -2244,6 +2450,56 @@ static GtkWidget *nm_add_combo(NmGrid *g, NmDialogContext *ctx,
         g_object_set_data(G_OBJECT(combo), NM_CTX_KEY ".yy",
                           combo_y);
     return combo;
+}
+
+/* Блок «Label» или «Value» элемента.
+ *
+ * У серии и у сводки одинаковый набор: текст, шрифт, цвет и X/Y.
+ * Собран одним хелпером, иначе серия и сводка разъезжаются по
+ * содержимому: у серии было четыре цвета одной строкой, у сводки
+ * один на всю строку с числом.
+ *
+ * placement_key + combo_y — параметры nm_add_combo; combo_y может быть
+ * NULL, если Y не нужно прятать (у серии и сводки прячется). */
+static void nm_add_inline_text(NmGrid *g, NmDialogContext *ctx,
+                               const char *label_txt,
+                               const char *text_key, const char *text,
+                               const char *font_key, const char *font,
+                               const char *color_key,
+                               const gdouble color[4], const char *tip)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
+    if (text_key) {
+        GtkWidget *entry = gtk_entry_new();
+
+        gtk_entry_set_text(GTK_ENTRY(entry), text ? text : "");
+        gtk_entry_set_max_length(GTK_ENTRY(entry), NM_DIALOG_LABEL_CHARS);
+        gtk_widget_set_size_request(entry, NM_DIALOG_LABEL, -1);
+        g_object_set_data_full(G_OBJECT(entry), "xs-key", g_strdup(text_key),
+                               g_free);
+        gtk_box_pack_start(GTK_BOX(row), entry, FALSE, FALSE, 0);
+        nm_bind_keyed_descendants(entry, ctx);
+    }
+    if (font_key) {
+        GtkWidget *fb = gtk_font_button_new_with_font(font ? font
+                                                            : "Sans 8");
+
+        gtk_widget_set_size_request(fb, NM_DIALOG_FONT, -1);
+        g_object_set_data_full(G_OBJECT(fb), "xs-key", g_strdup(font_key),
+                               g_free);
+        gtk_box_pack_start(GTK_BOX(row), fb, FALSE, FALSE, 0);
+        nm_bind_keyed_descendants(fb, ctx);
+    }
+    if (color_key) {
+        gtk_box_pack_start(GTK_BOX(row),
+                           nm_color_button(color_key, color, FALSE, tip),
+                           FALSE, FALSE, 0);
+    }
+    nm_grid_add_label(g, label_txt ? label_txt : "");
+    nm_grid_add_widget(g, row);
+    if (row)
+        nm_bind_keyed_descendants(row, ctx);
 }
 
 static GtkWidget *nm_section(GtkWidget *page, const char *title)
@@ -2306,108 +2562,77 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                (int) priv->graph_max_kib, 0, 2000000);
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
 
-    /* --- Серии --- */
+    /* --- Серии --- по схеме Placement / Label / Value / Graph color.
+     *
+     * У каждой серии четыре настройки, и каждая в своей строке: так
+     * видно, что за что отвечает, и ни одна не теряется в общей строке.
+     *
+     * Y показывается только при Placement = Inside graph. Для внешних
+     * полос высота элемента считается по фазе, и ручной Y ломал бы
+     * симметрию отступов: сдвинь его — элемент наедет на соседний. */
     for (i = 0; i < NM_SERIES_MAX; i++) {
-        char label[32];
-        char key[32];
+        char title[32];
+        char kx[40], ky[40], key[40];
+        char k_lbl[40], k_lblf[40], k_lblc[40], k_valf[40], k_valc[40],
+             k_fill[40];
         static const char *placements[] = {"Inside graph", "Outside top",
                                         "Outside bottom", NULL};
+        gboolean inside = priv->label_placement[i] == NM_LABEL_INSIDE;
+        GtkWidget *ly;
 
-        g_snprintf(label, sizeof(label), "%s series",
+        g_snprintf(title, sizeof(title), "%s:",
                    i == 0 ? "Download" : "Upload");
-        frame = nm_section(page, label);
+        frame = nm_section(page, title);
         g = nm_grid_new();
-        g_snprintf(key, sizeof(key), "series%d_label", i);
-        nm_add_text(g, ctx, key, "Label", priv->series_label[i]);
-        {
-            char key_font[40];
 
-            g_snprintf(key_font, sizeof(key_font), "series%d_font", i);
-            nm_add_font(g, ctx, key_font, "Font", priv->series_font[i]);
-        }
-        /* Цвета серии — одной строкой, каждая кнопка подписана своим
-         * элементом, который она красит.
-         *
-         * Раньше здесь стоял nm_add_font_color() с кнопкой цвета заливки
-         * ВНУТРИ строки шрифта, и вторая такая же кнопка добавлялась ниже.
-         * Два виджета на один ключ: меняешь цвет в одном — второй остаётся
-         * показывать старое значение до переоткрытия диалога.
-         *
-         * Четыре кнопки с подписями «Заливка / Текст / Метка / Число»:
-         *   series<N>_color        заливка графика
-         *   series<N>_text_color    общий текст серии
-         *   series<N>_label_color   подпись «Down:» / «Up:»
-         *   series<N>_value_color   число скорости
-         *
-         * Текст, метка и число по умолчанию равны общему тексту серии,
-         * заливка ни от чего не зависит. */
-        {
-            char k_fill[40], k_text[40], k_lblc[40], k_valc[40];
-            gdouble fill[4], text_c[4], lbl_c[4], val_c[4];
-            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-            gint w = 0;
+        /* Placement. Y-спин подписи создаётся ДО комбо: комбо получает
+         * его указателем и прячет поле сразу при переключении. */
+        g_snprintf(kx, sizeof(kx), "series%d_label_x", i);
+        g_snprintf(ky, sizeof(ky), "series%d_label_y", i);
+        ly = g_object_ref_sink(
+            nm_add_pos(g, ctx, "Placement", kx, ky, priv->series_label_x[i],
+                       priv->series_label_y[i],
+                       MAX(priv->design_width, priv->design_height) - 1,
+                       inside));
+        g_snprintf(key, sizeof(key), "series%d_placement", i);
+        nm_add_combo(g, ctx, key, "Placement", placements,
+                     (int) priv->label_placement[i], ly);
+        g_object_unref(ly);
+        /* show_all в конце nm_properties отменяет скрытие, поэтому
+         * прячем повторно — см. блок после gtk_notebook_append_page. */
+        priv->series_y_spin[i] = g_object_ref_sink(ly);
+        g_object_unref(priv->series_y_spin[i]);
 
-            memcpy(fill, priv->series_color[i], sizeof(fill));
-            memcpy(text_c, priv->series_text_color[i], sizeof(text_c));
-            memcpy(lbl_c, priv->series_label_color[i], sizeof(lbl_c));
-            memcpy(val_c, priv->series_value_color[i], sizeof(val_c));
-            g_snprintf(k_fill, sizeof(k_fill), "series%d_color", i);
-            g_snprintf(k_text, sizeof(k_text), "series%d_text_color", i);
-            g_snprintf(k_lblc, sizeof(k_lblc), "series%d_label_color", i);
-            g_snprintf(k_valc, sizeof(k_valc), "series%d_value_color", i);
+        /* Label: текст, шрифт, цвет — одной строкой */
+        g_snprintf(k_lbl, sizeof(k_lbl), "series%d_label", i);
+        g_snprintf(k_lblf, sizeof(k_lblf), "series%d_label_font", i);
+        g_snprintf(k_lblc, sizeof(k_lblc), "series%d_label_color", i);
+        nm_add_inline_text(g, ctx, "Label", k_lbl, priv->series_label[i],
+                           k_lblf, priv->series_label_font[i], k_lblc,
+                           priv->series_label_color[i],
+                           "Цвет подписи «Down:» / «Up:»");
+        nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->series_label_x[i],
+                  priv->series_label_y[i],
+                  MAX(priv->design_width, priv->design_height) - 1);
 
-#define NM_CBROW(btn, label_txt, key_txt, rgba, tip_txt)                 \
-            do {                                                          \
-                gtk_box_pack_start(GTK_BOX(row),                           \
-                                   gtk_label_new(label_txt), FALSE,        \
-                                   FALSE, 0);                              \
-                gtk_box_pack_start(GTK_BOX(row),                           \
-                                   nm_color_button((key_txt), (rgba),      \
-                                                   FALSE, (tip_txt)),     \
-                                   FALSE, FALSE, 0);                       \
-                w += 1;                                                    \
-            } while (0)
+        /* Value: шрифт и цвет — той же строкой, текста у числа нет */
+        g_snprintf(k_valf, sizeof(k_valf), "series%d_value_font", i);
+        g_snprintf(k_valc, sizeof(k_valc), "series%d_value_color", i);
+        nm_add_inline_text(g, ctx, "Value", NULL, NULL, k_valf,
+                           priv->series_value_font[i], k_valc,
+                           priv->series_value_color[i],
+                           "Цвет числа скорости");
+        g_snprintf(kx, sizeof(kx), "series%d_x", i);
+        g_snprintf(ky, sizeof(ky), "series%d_y", i);
+        nm_add_xy(g, ctx, "Value X/Y", kx, ky, priv->series_x[i],
+                  priv->series_y[i],
+                  MAX(priv->design_width, priv->design_height) - 1);
 
-            NM_CBROW(NULL, "Заливка", k_fill, fill, "Цвет заливки графика");
-            NM_CBROW(NULL, "Текст", k_text, text_c,
-                     "Общий цвет текста серии. Значение по умолчанию для "
-                     "метки и числа");
-            NM_CBROW(NULL, "Метка", k_lblc, lbl_c, "Цвет подписи «Down:»");
-            NM_CBROW(NULL, "Число", k_valc, val_c, "Цвет числа скорости");
-#undef NM_CBROW
+        /* Graph color */
+        g_snprintf(k_fill, sizeof(k_fill), "series%d_color", i);
+        nm_add_color(g, ctx, k_fill, "Graph color", priv->series_color[i],
+                     FALSE);
 
-            nm_grid_add_widget(g, row);
-            nm_bind_keyed_descendants(row, ctx);
-        }
-        {
-            char key_x[40], key_y[40];
-
-            /* Y-спин создаём ДО комбо Placement: комбо получает его
-             * указателем, чтобы прятать поле сразу при переключении.
-             * Указатель сохраняется в priv — он нужен ещё раз после
-             * gtk_widget_show_all(), который отменяет скрытие. */
-            g_snprintf(key_x, sizeof(key_x), "series%d_label_x", i);
-            g_snprintf(key_y, sizeof(key_y), "series%d_label_y", i);
-            priv->series_y_spin[i] =
-                g_object_ref_sink(nm_add_pos(g, ctx, "Label pos.",
-                                             key_x, key_y,
-                                             priv->series_label_x[i],
-                                                   priv->series_label_y[i],
-                                                   MAX(priv->design_width,
-                                                       priv->design_height) - 1,
-                                                   priv->label_placement[i]
-                                                   == NM_LABEL_INSIDE));
-            g_snprintf(key, sizeof(key), "series%d_placement", i);
-            nm_add_combo(g, ctx, key, "Placement", placements,
-                         (int) priv->label_placement[i],
-                         priv->series_y_spin[i]);
-            g_object_unref(priv->series_y_spin[i]);
-            g_snprintf(key_x, sizeof(key_x), "series%d_x", i);
-            g_snprintf(key_y, sizeof(key_y), "series%d_y", i);
-            nm_add_xy(g, ctx, "Position", key_x, key_y, priv->series_x[i],
-                      priv->series_y[i], MAX(priv->design_width,
-                                             priv->design_height) - 1);
-        }
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
     }
@@ -2475,48 +2700,65 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 
-    /* --- Сводки --- по одной секции на направление: своя подпись-формат,
-     * свой шрифт, свой placement и своя позиция у каждой. */
+    /* --- Сводки (overall) --- по той же схеме: Placement / Label /
+     * Value / Graph color, но у сводки вместо цвета графика ничего
+     * лишнего — она вне графика.
+     *
+     * Подпись и число разделены. Раньше это была одна строка с форматом
+     * «Total up: %s», собранная nm_format_label(), и число ехало в
+     * подписи по шаблону: поставить его в другую точку было нельзя. */
     for (i = 0; i < NM_SERIES_MAX; i++) {
-        char label[40];
-        char key_x[40], key_y[40], key_lbl[40], key_font[40], key_pl[40];
+        char title[40];
+        char kx[40], ky[40], key[40];
+        char k_lbl[40], k_lblf[40], k_lblc[40], k_val[40], k_valf[40],
+             k_valc[40];
         static const char *placements[] = {"Inside graph", "Outside top",
                                         "Outside bottom", NULL};
+        gboolean inside = priv->total_placement[i] == NM_LABEL_INSIDE;
+        GtkWidget *ly;
 
-        g = nm_grid_new();
-        g_snprintf(label, sizeof(label), "%s total",
+        g_snprintf(title, sizeof(title), "%s overall:",
                    i == 0 ? "Download" : "Upload");
-        g_snprintf(key_lbl, sizeof(key_lbl), "total%u_label", i);
-        nm_add_text(g, ctx, key_lbl, "Format", priv->total_label[i]);
-        g_snprintf(key_font, sizeof(key_font), "total%u_font", i);
-        nm_add_font(g, ctx, key_font, "Font", priv->total_font[i]);
-        /* Свой цвет сводки. По умолчанию берёт общий текст серии. */
-        {
-            char k_color[40];
+        frame = nm_section(page, title);
+        g = nm_grid_new();
 
-            g_snprintf(k_color, sizeof(k_color), "total%u_color", i);
-            nm_add_color(g, ctx, k_color, "Color", priv->total_color[i],
-                         FALSE);
-        }
-        g_snprintf(key_x, sizeof(key_x), "total%u_x", i);
-        g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
-        {
-            /* Y-спин создаём ДО комбо: комбо получает его указателем,
-             * чтобы прятать поле сразу при переключении Placement. */
-            GtkWidget *ty = nm_add_pos(g, ctx, "Position", key_x, key_y,
-                                       priv->total_x[i], priv->total_y[i],
-                                       MAX(priv->design_width,
-                                           priv->design_height) - 1,
-                                       priv->total_placement[i]
-                                       == NM_LABEL_INSIDE);
+        /* Placement */
+        g_snprintf(kx, sizeof(kx), "total%u_x", i);
+        g_snprintf(ky, sizeof(ky), "total%u_y", i);
+        ly = g_object_ref_sink(
+            nm_add_pos(g, ctx, "Placement", kx, ky, priv->total_x[i],
+                       priv->total_y[i],
+                       MAX(priv->design_width, priv->design_height) - 1,
+                       inside));
+        g_snprintf(key, sizeof(key), "total%u_placement", i);
+        nm_add_combo(g, ctx, key, "Placement", placements,
+                     (int) priv->total_placement[i], ly);
+        g_object_unref(ly);
 
-            g_object_ref_sink(ty);
-            g_snprintf(key_pl, sizeof(key_pl), "total%u_placement", i);
-            nm_add_combo(g, ctx, key_pl, "Placement", placements,
-                         (int) priv->total_placement[i], ty);
-            g_object_unref(ty);
-        }
-        frame = nm_section(page, label);
+        /* Label: текст, шрифт, цвет */
+        g_snprintf(k_lbl, sizeof(k_lbl), "total%u_label", i);
+        g_snprintf(k_lblf, sizeof(k_lblf), "total%u_label_font", i);
+        g_snprintf(k_lblc, sizeof(k_lblc), "total%u_color", i);
+        nm_add_inline_text(g, ctx, "Label", k_lbl, priv->total_label[i],
+                           k_lblf, priv->total_label_font[i], k_lblc,
+                           priv->total_color[i], "Цвет подписи сводки");
+        nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->total_x[i],
+                  priv->total_y[i],
+                  MAX(priv->design_width, priv->design_height) - 1);
+
+        /* Value: необязательный текст, шрифт, цвет */
+        g_snprintf(k_val, sizeof(k_val), "total%u_value", i);
+        g_snprintf(k_valf, sizeof(k_valf), "total%u_value_font", i);
+        g_snprintf(k_valc, sizeof(k_valc), "total%u_value_color", i);
+        nm_add_inline_text(g, ctx, "Value", k_val, priv->total_value[i],
+                           k_valf, priv->total_value_font[i], k_valc,
+                           priv->total_value_color[i], "Цвет числа сводки");
+        g_snprintf(kx, sizeof(kx), "total%u_value_x", i);
+        g_snprintf(ky, sizeof(ky), "total%u_value_y", i);
+        nm_add_xy(g, ctx, "Value X/Y", kx, ky, priv->total_value_x[i],
+                  priv->total_value_y[i],
+                  MAX(priv->design_width, priv->design_height) - 1);
+
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
     }

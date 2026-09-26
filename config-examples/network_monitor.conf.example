@@ -75,10 +75,10 @@ border_color=rgba(140,148,158,255)
 header_x=8
 header_y=40
 xs_type=network_monitor
-total0_label=Total down: %s
-total1_label=Total up: %s
-total0_font=Sans 8
-total1_font=Sans 8
+total0_label=Total down:
+total1_label=Total up:
+total0_label_font=Sans 8
+total1_label_font=Sans 8
 total0_x=8
 total0_y=0
 total1_x=159
@@ -102,3 +102,20 @@ series1_label=Up:
 #
 # Это не ограничение, а разумное требование: свести координаты
 # настолько, что места между элементами не остаётся, нельзя.
+total0_value_x=60
+total0_value_y=0
+total1_value_x=211
+total1_value_y=0
+# Сводка (overall) — те же два элемента, что и у серии: подпись и число.
+#   total<N>_label        текст подписи, без %s
+#   total<N>_label_font   её шрифт
+#   total<N>_color        её цвет
+#   total<N>_x / _y       её позиция
+#   total<N>_value        необязательный текст перед числом ("всего")
+#   total<N>_value_font   шрифт числа
+#   total<N>_value_color  цвет числа
+#   total<N>_value_x / _y позиция числа
+#
+# Старый формат «Total up: %s» в total<N>_label читается: текст до %s
+# становится подписью, число выводится отдельно. Поэтому старые конфиги
+# продолжают работать.
