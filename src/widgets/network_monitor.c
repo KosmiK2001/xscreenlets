@@ -1164,16 +1164,41 @@ static void nm_bind_keyed_descendants(GtkWidget *widget, NmDialogContext *ctx)
     }
 }
 
-static GtkWidget *nm_row(GtkWidget *table, int row, const char *label)
+/* Секция настроек: грид + счётчик строк.
+ *
+ * Раньше каждый хелпер жёстко писал в строку 0, и все поля секции
+ * ложились в одну строку друг на друга. Счётчик двигает каждую пару
+ * подпись/контрол на свою строку. */
+typedef struct {
+    GtkWidget *grid;
+    int row;
+} NmGrid;
+
+static NmGrid *nm_grid_new(void)
+{
+    NmGrid *g = g_new0(NmGrid, 1);
+
+    g->grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(g->grid), 8);
+    gtk_grid_set_row_spacing(GTK_GRID(g->grid), 4);
+    return g;
+}
+
+static void nm_grid_add_label(NmGrid *g, const char *label)
 {
     GtkWidget *l = gtk_label_new(label);
 
     gtk_widget_set_halign(l, GTK_ALIGN_START);
-    gtk_grid_attach(GTK_GRID(table), l, 0, row, 1, 1);
-    return l;
+    gtk_grid_attach(GTK_GRID(g->grid), l, 0, g->row, 1, 1);
 }
 
-static void nm_add_int(GtkWidget *table, NmDialogContext *ctx, const char *key,
+static void nm_grid_add_widget(NmGrid *g, GtkWidget *w)
+{
+    gtk_grid_attach(GTK_GRID(g->grid), w, 1, g->row, 1, 1);
+    g->row++;
+}
+
+static void nm_add_int(NmGrid *g, NmDialogContext *ctx, const char *key,
                        const char *label, int value, int min, int max)
 {
     GtkWidget *spin = gtk_spin_button_new_with_range(min, max, 1);
@@ -1181,12 +1206,12 @@ static void nm_add_int(GtkWidget *table, NmDialogContext *ctx, const char *key,
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), value);
     gtk_widget_set_size_request(spin, 90, -1);
     g_object_set_data(G_OBJECT(spin), "xs-key", (gpointer) key);
-    gtk_grid_attach(GTK_GRID(table), spin, 1, 0, 1, 1);
-    (void) ctx;
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, spin);
     nm_bind_keyed_descendants(spin, ctx);
 }
 
-static void nm_add_color(GtkWidget *table, NmDialogContext *ctx, const char *key,
+static void nm_add_color(NmGrid *g, NmDialogContext *ctx, const char *key,
                          const char *label, const gdouble color[4],
                          gboolean with_alpha)
 {
@@ -1197,12 +1222,12 @@ static void nm_add_color(GtkWidget *table, NmDialogContext *ctx, const char *key
     if (!with_alpha)
         g_object_set_data(G_OBJECT(button), "xs-rgb-only", GINT_TO_POINTER(1));
     g_object_set_data(G_OBJECT(button), "xs-key", (gpointer) key);
-    nm_row(table, 0, label);
-    gtk_grid_attach(GTK_GRID(table), button, 1, 0, 1, 1);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, button);
     nm_bind_keyed_descendants(button, ctx);
 }
 
-static void nm_add_text(GtkWidget *table, NmDialogContext *ctx, const char *key,
+static void nm_add_text(NmGrid *g, NmDialogContext *ctx, const char *key,
                         const char *label, const char *value)
 {
     GtkWidget *entry = gtk_entry_new();
@@ -1212,27 +1237,27 @@ static void nm_add_text(GtkWidget *table, NmDialogContext *ctx, const char *key,
     gtk_widget_set_size_request(entry, 180, -1);
     g_object_set_data(G_OBJECT(entry), "xs-key", (gpointer) key);
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    nm_row(table, 0, label);
     gtk_box_pack_start(GTK_BOX(box), entry, TRUE, TRUE, 0);
-    gtk_grid_attach(GTK_GRID(table), box, 1, 0, 1, 1);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, box);
     nm_bind_keyed_descendants(entry, ctx);
 }
 
-static void nm_add_font(GtkWidget *table, NmDialogContext *ctx, const char *key,
+static void nm_add_font(NmGrid *g, NmDialogContext *ctx, const char *key,
                         const char *label, const char *value)
 {
     GtkWidget *button = gtk_font_button_new_with_font(value ? value : "Sans 8");
 
     gtk_widget_set_size_request(button, 180, -1);
     g_object_set_data(G_OBJECT(button), "xs-key", (gpointer) key);
-    nm_row(table, 0, label);
-    gtk_grid_attach(GTK_GRID(table), button, 1, 0, 1, 1);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, button);
     nm_bind_keyed_descendants(button, ctx);
 }
 
-static GtkWidget *nm_combo(GtkWidget *table, NmDialogContext *ctx,
-                           const char *key, const char *label,
-                           const char *const *options, int active)
+static GtkWidget *nm_add_combo(NmGrid *g, NmDialogContext *ctx,
+                               const char *key, const char *label,
+                               const char *const *options, int active)
 {
     GtkWidget *combo = gtk_combo_box_text_new();
     int i;
@@ -1242,8 +1267,8 @@ static GtkWidget *nm_combo(GtkWidget *table, NmDialogContext *ctx,
                                   options[i]);
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo), active);
     g_object_set_data(G_OBJECT(combo), "xs-key", (gpointer) key);
-    nm_row(table, 0, label);
-    gtk_grid_attach(GTK_GRID(table), combo, 1, 0, 1, 1);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, combo);
     nm_bind_keyed_descendants(combo, ctx);
     return combo;
 }
@@ -1260,7 +1285,8 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
 {
     PrivData *priv = p->priv;
     NmDialogContext *ctx;
-    GtkWidget *page, *frame, *grid;
+    GtkWidget *page, *frame;
+    NmGrid *g;
     GPtrArray *names;
     int i;
 
@@ -1273,63 +1299,40 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_container_set_border_width(GTK_CONTAINER(page), 8);
 
-    /* --- Интерфейс --- */
+    /* --- Интерфейс и график --- */
     frame = nm_section(page, "Interface");
-    grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
-    gtk_container_add(GTK_CONTAINER(frame), grid);
+    g = nm_grid_new();
     {
-        static const char *modes[] = {"Combined", "Split", NULL};
-        GtkWidget *combo;
         guint index;
+        GtkWidget *combo;
 
-        nm_row(grid, 0, "Interface");
         names = nm_discover_interfaces(FALSE);
         combo = gtk_combo_box_text_new();
         for (index = 0; index < names->len; index++)
             gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo),
                                       g_ptr_array_index(names, index),
                                       g_ptr_array_index(names, index));
-        {
-            gint found = nm_find_combo_text(GTK_COMBO_BOX(combo), priv->ifname);
-            gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
-                                     found >= 0 ? found : 0);
-        }
+        index = (guint) MAX(0, nm_find_combo_text(GTK_COMBO_BOX(combo),
+                                                 priv->ifname));
+        gtk_combo_box_set_active(GTK_COMBO_BOX(combo), (gint) index);
         g_object_set_data(G_OBJECT(combo), "xs-key", (gpointer) "ifname");
-        gtk_grid_attach(GTK_GRID(grid), combo, 1, 0, 1, 1);
+        nm_grid_add_label(g, "Interface");
+        nm_grid_add_widget(g, combo);
         nm_bind_keyed_descendants(combo, ctx);
         g_ptr_array_free(names, TRUE);
-
-        nm_row(grid, 1, "Graph");
-        {
-            GtkWidget *mode_combo = gtk_combo_box_text_new();
-            for (index = 0; modes[index]; index++)
-                gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(mode_combo),
-                                          modes[index], modes[index]);
-            gtk_combo_box_set_active(GTK_COMBO_BOX(mode_combo),
-                                     priv->graph_mode == NM_GRAPH_SPLIT ? 1 : 0);
-            g_object_set_data(G_OBJECT(mode_combo), "xs-key",
-                              (gpointer) "graph_mode");
-            gtk_grid_attach(GTK_GRID(grid), mode_combo, 1, 1, 1, 1);
-            nm_bind_keyed_descendants(mode_combo, ctx);
-        }
-        /* Максимум шкалы в КиБ/с: 0 = по максимуму истории. Ручная
-         * константа, как в конфигах conky (95 для 100 Мбит). */
-        {
-            GtkWidget *spin = gtk_spin_button_new_with_range(0, 100000000, 1);
-            gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin),
-                                      (gdouble) priv->graph_max_kib);
-            gtk_widget_set_size_request(spin, 90, -1);
-            g_object_set_data(G_OBJECT(spin), "xs-key",
-                              (gpointer) "graph_max_kib");
-            nm_row(grid, 2, "Graph max (KiB/s, 0=auto)");
-            gtk_grid_attach(GTK_GRID(grid), spin, 1, 2, 1, 1);
-            nm_bind_keyed_descendants(spin, ctx);
-        }
     }
+    {
+        static const char *modes[] = {"Split", "Combined", NULL};
+        nm_add_combo(g, ctx, "graph_mode", "Graph", modes,
+                     priv->graph_mode == NM_GRAPH_SPLIT ? 0 : 1);
+    }
+    /* Предел шкалы в КиБ/с: 0 = по максимуму истории. Шкала общая для обеих
+     * серий, поэтому одна настройка на оба графика. */
+    nm_add_int(g, ctx, "graph_max_kib", "Graph max (KiB/s, 0=auto)",
+               (int) priv->graph_max_kib, 0, 2000000);
+    gtk_container_add(GTK_CONTAINER(frame), g->grid);
 
-    /* --- Серии: подпись, шрифт, позиция --- */
+    /* --- Серии --- */
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char label[32];
         char key[32];
@@ -1338,76 +1341,70 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_snprintf(label, sizeof(label), "%s series",
                    i == 0 ? "Download" : "Upload");
         frame = nm_section(page, label);
-        grid = gtk_grid_new();
-        gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
-        gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
-        gtk_container_add(GTK_CONTAINER(frame), grid);
-
-        /* Каждая строка — свой грид, иначе g_object_set_data на ключ
-         * перетирал бы предыдущий контрол того же ряда. */
+        g = nm_grid_new();
         g_snprintf(key, sizeof(key), "series%d_label", i);
-        nm_add_text(grid, ctx, key, "Label", priv->series_label[i]);
+        nm_add_text(g, ctx, key, "Label", priv->series_label[i]);
         g_snprintf(key, sizeof(key), "series%d_font", i);
-        nm_add_font(grid, ctx, key, "Font", priv->series_font[i]);
+        nm_add_font(g, ctx, key, "Font", priv->series_font[i]);
         {
             gdouble color[4];
             memcpy(color, priv->series_color[i], sizeof(color));
             g_snprintf(key, sizeof(key), "series%d_color", i);
-            nm_add_color(grid, ctx, key, "Color", color, TRUE);
+            nm_add_color(g, ctx, key, "Color", color, FALSE);
         }
         g_snprintf(key, sizeof(key), "series%d_placement", i);
-        nm_combo(grid, ctx, key, "Placement", placements,
-                 priv->label_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0);
+        nm_add_combo(g, ctx, key, "Placement", placements,
+                     priv->label_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0);
         g_snprintf(key, sizeof(key), "series%d_x", i);
-        nm_add_int(grid, ctx, key, "Position X", priv->series_x[i], 0,
+        nm_add_int(g, ctx, key, "Position X", priv->series_x[i], 0,
                    priv->design_width - 1);
         g_snprintf(key, sizeof(key), "series%d_y", i);
-        nm_add_int(grid, ctx, key, "Position Y", priv->series_y[i], 0,
+        nm_add_int(g, ctx, key, "Position Y", priv->series_y[i], 0,
                    priv->design_height - 1);
         g_snprintf(key, sizeof(key), "series%d_label_x", i);
-        nm_add_int(grid, ctx, key, "Label X", priv->series_label_x[i], 0,
+        nm_add_int(g, ctx, key, "Label X", priv->series_label_x[i], 0,
                    priv->design_width - 1);
         g_snprintf(key, sizeof(key), "series%d_label_y", i);
-        nm_add_int(grid, ctx, key, "Label Y", priv->series_label_y[i], 0,
+        nm_add_int(g, ctx, key, "Label Y", priv->series_label_y[i], 0,
                    priv->design_height - 1);
+        gtk_container_add(GTK_CONTAINER(frame), g->grid);
+        g_free(g);
     }
 
     /* --- Оформление --- */
     frame = nm_section(page, "Appearance");
-    grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
-    gtk_container_add(GTK_CONTAINER(frame), grid);
-    nm_add_color(grid, ctx, "graph_background_color", "Graph background",
+    g = nm_grid_new();
+    nm_add_color(g, ctx, "graph_background_color", "Graph background",
                  priv->graph_bg, TRUE);
-    nm_add_color(grid, ctx, "text_color", "Text", priv->text_color, FALSE);
-    nm_add_color(grid, ctx, "border_color", "Graph border", priv->border, TRUE);
-    nm_add_font(grid, ctx, "label_font", "Header font", priv->label_font);
-    nm_add_int(grid, ctx, "header_x", "Header X", priv->header_x, 0,
+    nm_add_color(g, ctx, "text_color", "Text", priv->text_color, FALSE);
+    nm_add_color(g, ctx, "border_color", "Graph border", priv->border, TRUE);
+    nm_add_font(g, ctx, "label_font", "Header font", priv->label_font);
+    nm_add_int(g, ctx, "header_x", "Header X", priv->header_x, 0,
                priv->design_width - 1);
-    nm_add_int(grid, ctx, "header_y", "Header Y", priv->header_y, 0,
+    nm_add_int(g, ctx, "header_y", "Header Y", priv->header_y, 0,
                priv->design_height - 1);
-    nm_add_int(grid, ctx, "total_x", "Total X", priv->total_x, 0,
+    nm_add_int(g, ctx, "total_x", "Total X", priv->total_x, 0,
                priv->design_width - 1);
-    nm_add_int(grid, ctx, "total_y", "Total Y", priv->total_y, 0,
+    nm_add_int(g, ctx, "total_y", "Total Y", priv->total_y, 0,
                priv->design_height - 1);
+    gtk_container_add(GTK_CONTAINER(frame), g->grid);
+    g_free(g);
 
     /* --- Окно --- */
     frame = nm_section(page, "Window");
-    grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
-    gtk_container_add(GTK_CONTAINER(frame), grid);
-    nm_add_int(grid, ctx, "window_width", "Width", priv->width,
+    g = nm_grid_new();
+    nm_add_int(g, ctx, "window_width", "Width", priv->width,
                NM_MIN_WINDOW_WIDTH, 1600);
-    nm_add_int(grid, ctx, "window_height", "Height", priv->height,
+    nm_add_int(g, ctx, "window_height", "Height", priv->height,
                NM_MIN_WINDOW_HEIGHT, 1200);
-    nm_add_int(grid, ctx, "corner_radius", "Corner radius",
-               priv->corner_radius, 0, 200);
-    nm_add_int(grid, ctx, "update_ms", "Update (ms)", priv->update_ms, 100,
+    nm_add_int(g, ctx, "corner_radius", "Corner radius", priv->corner_radius,
+               0, 200);
+    nm_add_int(g, ctx, "update_ms", "Update (ms)", priv->update_ms, 100,
                60000);
-    nm_add_int(grid, ctx, "rate_smooth", "Smoothing", priv->rate_smooth,
+    nm_add_int(g, ctx, "rate_smooth", "Smoothing", priv->rate_smooth,
                NM_RATE_SMOOTH_MIN, NM_RATE_SMOOTH_MAX);
+    gtk_container_add(GTK_CONTAINER(frame), g->grid);
+    g_free(g);
 
     /* Страница длиннее окна диалога: без прокрутки Properties вырос бы
      * под все строки и ушёл бы за пределы экрана. */
@@ -1421,11 +1418,18 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
             if (scroller)
                 tab = scroller;
         }
+        /* Контекст живёт ДОЛЬШЕ диалога: каждый контрол держит его в
+         * g_signal_connect(user_data) и при срабатывании читает
+         * instance_name. Освобождать его здесь нельзя — обработчик
+         * получал бы указатель на уже освобождённую строку, и
+         * g_hash_table_lookup() падал бы внутри g_str_hash(). Ловится
+         * как segfault при прокрутке диалога колесом мыши. */
+        g_object_set_data_full(G_OBJECT(tab), NM_CTX_KEY, ctx,
+                               (GDestroyNotify) nm_dialog_context_unref);
         gtk_notebook_append_page(notebook, tab,
                                  gtk_label_new("Network Monitor"));
         gtk_widget_show_all(tab);
     }
-    nm_dialog_context_unref(ctx);
 }
 
 static const XsPluginOps nm_ops = {
