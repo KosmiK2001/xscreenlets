@@ -2610,12 +2610,9 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         frame = nm_section(page, title);
         g = nm_grid_new();
 
-        /* Label: текст, шрифт, цвет — одной строкой, X/Y — следующей.
-         *
-         * X/Y идут ПЕРЕД Placement, потому что Placement прячет Y-спин
-         * подписи, а значит должен получить его указатель. Раньше Placement
-         * стоял первым и рисовал X/Y сам, а ниже был второй X/Y на тех же
-         * ключах — два виджета на один ключ. */
+        /* Ключи для следующих строк. X/Y идут ПЕРЕД Placement, потому что
+         * Placement прячет Y-спин подписи, а значит должен получить его
+         * указатель. */
         g_snprintf(kx, sizeof(kx), "series%d_label_x", i);
         g_snprintf(ky, sizeof(ky), "series%d_label_y", i);
         g_snprintf(key, sizeof(key), "series%d_placement", i);
@@ -2632,8 +2629,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                        priv->series_label_y[i],
                        MAX(priv->design_width, priv->design_height) - 1);
         nm_pos_set_y_visible(ly, inside);
-        priv->series_y_spin[i] = g_object_ref_sink(ly);
-        g_object_unref(priv->series_y_spin[i]);
+        priv->series_y_spin[i] = ly;
 
         /* Placement — после X/Y: комбо получает указатель на Y-спин
          * подписи и прячет его, когда выбрано «Outside top/bottom». */
