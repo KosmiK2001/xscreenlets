@@ -62,48 +62,6 @@ typedef enum {
 
 #define NM_LABEL_OUTSIDE NM_LABEL_OUTSIDE_TOP   /* старое имя в конфиге */
 
-/* Порядковый номер строки элемента внутри полосы, в которую он ушёл.
- *
- * Слоты нужны, потому что в полосе может быть несколько элементов: если
- * все положить в NM_MARGIN_TOP, они лягут друг на друга. Порядок
- * фиксирован — заголовок, подписи серий, сводки — и одинаков для
- * верхней и нижней полосы, чтобы «сверху» и «снизу» читались одинаково.
- *
- * Раскладка по фазам:
- *   0 — заголовок
- *   1 — подписи серий
- *   2 — сводки
- * Элемент получает слот среди элементов своей фазы, стоящих в той же
- * полосе. Считается на лету, состояние не требуется. */
-typedef enum { NM_BAND_HEADER = 0, NM_BAND_LABEL, NM_BAND_TOTAL } NmBandPhase;
-
-static int nm_band_slot(NmBandPhase phase, int series_index,
-                        const NmLabelPlacement *header_placement,
-                        const NmLabelPlacement *label_placement,
-                        const NmLabelPlacement *total_placement,
-                        NmLabelPlacement want)
-{
-    int slot = 0;
-    int i;
-
-    if (phase == NM_BAND_HEADER)
-        return header_placement && *header_placement == want ? 0 : -1;
-
-    /* Заголовок идёт первым в своей полосе и занимает слот 0. */
-    if (header_placement && *header_placement == want)
-        slot = 1;
-    for (i = 0; i < NM_SERIES_MAX; i++) {
-        if (label_placement && label_placement[i] == want &&
-            (phase != NM_BAND_LABEL || i < series_index))
-            slot++;
-    }
-    if (phase == NM_BAND_TOTAL)
-        for (i = 0; i < NM_SERIES_MAX; i++)
-            if (total_placement && total_placement[i] == want &&
-                i < series_index)
-                slot++;
-    return slot;
-}
 
 /* Индекс комбо Placement -> значение. Вынесено отдельно, потому что
  * именно тут легко оставить одну ветку на старом булевом виде и
@@ -115,6 +73,40 @@ static NmLabelPlacement nm_placement_from_combo(gint active)
     if (active == 2)
         return NM_LABEL_OUTSIDE_BOTTOM;
     return NM_LABEL_INSIDE;
+}
+
+/* Номер строки элемента внутри полосы, в которую он ушёл.
+ *
+ * Слот считается ПО ФАЗАМ, а не по позиции внутри фазы:
+ *
+ *   фаза 0 — заголовок
+ *   фаза 1 — подписи серий
+ *   фаза 2 — сводки
+ *
+ * Элементы одной фазы делят одну строку, потому что у каждого своя
+ * координата X: сводки Total down и Total up ставятся на один ряд и
+ * раздвигаются по горизонтали. Считать слот по индексу нельзя — тогда
+ * вторая сводка уезжала на строку ниже первой, и строки выглядели
+ * разной высоты, хотя заданы одним шрифтом. */
+typedef enum { NM_BAND_HEADER = 0, NM_BAND_LABEL, NM_BAND_TOTAL } NmBandPhase;
+
+static int nm_band_slot(NmBandPhase phase,
+                        const NmLabelPlacement *header_placement,
+                        const NmLabelPlacement *label_placement,
+                        NmLabelPlacement want)
+{
+    int slot = 0;
+    int i;
+
+    /* Заголовок (фаза 0) сдвигает всё, что ниже. Подписи серий (фаза 1)
+     * сдвигают только сводки (фаза 2). */
+    if (phase > NM_BAND_HEADER && header_placement && *header_placement == want)
+        slot = 1;
+    if (phase > NM_BAND_LABEL && label_placement)
+        for (i = 0; i < NM_SERIES_MAX; i++)
+            if (label_placement[i] == want)
+                return 1;
+    return slot;
 }
 
 static const char *nm_placement_to_string(NmLabelPlacement pl)
@@ -518,6 +510,39 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
      * Высота берётся по РЕАЛЬНОМУ шрифту (nm_row_height), потому что
      * pango_layout_get_extents отдаёт логические единицы, а не пиксели.
      * Плюс NM_MARGIN_TOP/BOTTOM, чтобы текст не липнул к рамкам. */
+    /* Число СТРОК в каждой полосе. Строка — это не элемент, а фаза:
+     * заголовок, подписи серий, сводки. Элементы одной фазы делят одну
+     * строку и раздвигаются по X, поэтому сводки Total down и Total up
+     * стоят рядом, а не друг под другом.
+     *
+     * Считать по элементам нельзя: две сводки дали бы две строки, и
+     * вторая уехала бы вниз — строки выглядели бы разной высоты при
+     * одном шрифте. */
+    top_rows = 0;
+    bot_rows = 0;
+    top_step = 0;
+    bot_step = 0;
+    if (priv->header_placement == NM_LABEL_OUTSIDE_TOP) {
+        top_rows++;
+        top_step = MAX(top_step, nm_row_height(layout, priv->label_font));
+    }
+    if (priv->header_placement == NM_LABEL_OUTSIDE_BOTTOM) {
+        bot_rows++;
+        bot_step = MAX(bot_step, nm_row_height(layout, priv->label_font));
+    }
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        int h = nm_row_height(layout, priv->series_font[i]);
+
+        if (priv->label_placement[i] == NM_LABEL_OUTSIDE_TOP) {
+            top_rows++;
+            top_step = MAX(top_step, h);
+        } else if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
+            bot_rows++;
+            bot_step = MAX(bot_step, h);
+        }
+    }
+    /* Число строк в полосе. Считается по фазам, но если все totals
+     * в нижней полосе — они делят одну строку, и bot_rows = 1. */
     top_rows = 0;
     bot_rows = 0;
     top_step = 0;
@@ -548,7 +573,9 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             top_rows++;
             top_step = MAX(top_step, h);
         } else if (priv->total_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
-            bot_rows++;
+            /* Все totals внизу делят одну строку — bot_rows считать 1. */
+            if (bot_rows == 0)
+                bot_rows = 1;
             bot_step = MAX(bot_step, h);
         }
     }
@@ -793,10 +820,9 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
              * графике. Полоса сверху или снизу — по выбору. */
             int row_h = (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM)
                             ? bot_step : top_step;
-            int slot = nm_band_slot(NM_BAND_LABEL, i,
+            int slot = nm_band_slot(NM_BAND_LABEL,
                                     &priv->header_placement,
                                     priv->label_placement,
-                                    priv->total_placement,
                                     priv->label_placement[i]);
             int row_y;
 
@@ -823,7 +849,6 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     {
         int hx = nm_scale_position(priv->header_x, dw, width, width - 1);
         int hy = nm_scale_position(priv->header_y, dh, height, height - 1);
-        int row_h;
 
         switch (priv->header_placement) {
         /* Заголовок в своей полосе всегда первый: слот 0. Подписи и
@@ -852,9 +877,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         switch (priv->total_placement[i]) {
         case NM_LABEL_OUTSIDE_TOP:
             row_h = top_step;
-            slot = nm_band_slot(NM_BAND_TOTAL, i, &priv->header_placement,
-                                priv->label_placement, priv->total_placement,
-                                NM_LABEL_OUTSIDE_TOP);
+            slot = nm_band_slot(NM_BAND_TOTAL, &priv->header_placement,
+                                priv->label_placement, NM_LABEL_OUTSIDE_TOP);
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          NM_MARGIN_TOP + slot * row_h,
                          total_text[i], priv->series_text_color[i], width,
@@ -862,9 +886,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             break;
         case NM_LABEL_OUTSIDE_BOTTOM:
             row_h = bot_step;
-            slot = nm_band_slot(NM_BAND_TOTAL, i, &priv->header_placement,
-                                priv->label_placement, priv->total_placement,
-                                NM_LABEL_OUTSIDE_BOTTOM);
+            slot = nm_band_slot(NM_BAND_TOTAL, &priv->header_placement,
+                                priv->label_placement, NM_LABEL_OUTSIDE_BOTTOM);
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          graph_y + graph_h + NM_MARGIN_TOP + slot * row_h,
                          total_text[i], priv->series_text_color[i], width,
