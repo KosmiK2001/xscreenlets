@@ -73,6 +73,7 @@ char *nm_interface_ipv4(const char *ifname);
 /* --- Обвязка applet-каркаса (перенесена из disk_monitor) ---------- */
 gboolean nm_parse_rgba(const char *text, gdouble out[4]);
 char *nm_format_label(const char *fmt, const char *value);
+char *nm_split_header(const char *ifname, const char *ip, char **out_ip);
 char *nm_format_rgba(const gdouble color[4]);
 void nm_fill_rgba(const gdouble color[4], double alpha, gdouble out[4]);
 

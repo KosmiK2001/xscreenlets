@@ -551,6 +551,21 @@ gboolean nm_parse_rgba(const char *text, gdouble rgba[4])
     return TRUE;
 }
 
+/* Разделить шапку на имя интерфейса и адрес.
+ *
+ * Раньше шапка была одной строкой «%s: %s», где цвет был общим и обе
+ * части стояли по одной координате. Теперь это два элемента: имя слева,
+ * адрес прижат к правому краю, у каждого свой цвет.
+ *
+ * Если адреса нет (ifb, tun без адреса), возвращается пустая строка, а
+ * не двоеточие с пробелом. */
+char *nm_split_header(const char *ifname, const char *ip, char **out_ip)
+{
+    if (out_ip)
+        *out_ip = g_strdup(ip && *ip ? ip : "");
+    return g_strdup(ifname && *ifname ? ifname : "");
+}
+
 char *nm_format_rgba(const gdouble rgba[4])
 {
     char values[4][G_ASCII_DTOSTR_BUF_SIZE];

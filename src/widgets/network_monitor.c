@@ -174,6 +174,7 @@ typedef struct {
      * константа, как в conky (95 для 100 Мбит, 47-59 для софта). */
     gint64 graph_max_kib;
     int header_x, header_y;   /* имя интерфейса + IP */
+    gdouble graph_bg[4], window_bg[4], border[4], text_color[4];
     /* Сводка настраивается ОТДЕЛЬНО для каждого направления: у down и up
      * своя подпись, свой шрифт, свой цвет и своя позиция. Общая строка
      * "Total: rx / tx" не позволяла поставить подписи так, как это
@@ -181,9 +182,25 @@ typedef struct {
     char *total_label[NM_SERIES_MAX];
     char *total_font[NM_SERIES_MAX];
     int total_x[NM_SERIES_MAX], total_y[NM_SERIES_MAX];
-    gdouble graph_bg[4], window_bg[4], border[4], text_color[4];
+    /* У каждой серии три независимых цвета: заливка графика, цвет
+     * подписи («Down:») и цвет числа скорости. Раньше подпись и число
+     * брали цвет заливки, и разделить их было нельзя.
+     *
+     * Значение по умолчанию у label и value — цвет заливки, поэтому при
+     * отсутствии ключей в конфиге вид не меняется. */
     gdouble series_color[NM_SERIES_MAX][4];
+    gdouble series_label_color[NM_SERIES_MAX][4];
+    gdouble series_value_color[NM_SERIES_MAX][4];
     gdouble series_text_color[NM_SERIES_MAX][4];
+    /* Заголовок разделён надвое: имя интерфейса и адрес рисуются
+     * независимо, у каждого свой цвет и своя координата X. По умолчанию
+     * оба берут общий text_color. */
+    gdouble header_ifname_color[4];
+    gdouble header_ip_color[4];
+    int header_ifname_x;
+    /* Ширина IP прижата к правому краю: X задаётся автоматически, если
+     * он не задан пользователем (0 = считать от правого края). */
+    gboolean header_ip_x_auto;
     /* история: 0 = download (rx), 1 = upload (tx) */
     guint64 history[NM_SERIES_MAX][NM_HISTORY_MAX];
     guint head[NM_SERIES_MAX], count[NM_SERIES_MAX];
@@ -535,7 +552,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     int dh = priv->design_height > 0 ? priv->design_height : height;
     char *rate_text[NM_SERIES_MAX];
     char *total_text[NM_SERIES_MAX];
-    char *header_text;
+    char *header_name;
+    char *header_ip;
 
     pango_layout_set_font_description(layout, NULL);
 
@@ -860,10 +878,15 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     }
     /* Шапка: имя интерфейса и адрес. Адреса может не быть (ifb, tun) —
      * тогда показываем только имя, без пустого хвоста. */
-    if (priv->ip && *priv->ip)
-        header_text = g_strdup_printf("%s: %s", priv->ifname, priv->ip);
-    else
-        header_text = g_strdup(priv->ifname ? priv->ifname : "");
+    /* Шапка разбита на два независимых элемента: имя интерфейса и
+     * адрес. Раньше это была одна строка «%s: %s» с общим цветом и
+     * одной координатой, поэтому ни разделить их по цвету, ни разнести
+     * по краям окна было нельзя.
+     *
+     * Имя идёт слева, адрес — прижат к правому краю. Адреса может не
+     * быть (ifb, tun без адреса): тогда рисуется только имя, без пустого
+     * хвоста и без двоеточия. */
+    header_name = nm_split_header(priv->ifname, priv->ip, &header_ip);
     /* Сводуется каждое направление своей строкой, а не общей "rx / tx":
      * подписи, шрифт, цвет и позиция у них настраиваются отдельно. */
     total_text[0] = nm_format_label(priv->total_label[0],
@@ -931,7 +954,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
 
                 nm_show_text(cr, layout, priv->series_font[i], lx, ly,
                              priv->series_label[i],
-                             priv->series_text_color[i],
+                             priv->series_label_color[i],
                              width, graph_y, graph_h, TRUE);
                 pango_font_description_free(fd);
                 g_free(value_text);
@@ -957,7 +980,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                 row_y = NM_MARGIN_TOP + slot * row_h;
             nm_show_text(cr, layout, priv->series_font[i],
                          lx, row_y, priv->series_label[i],
-                         priv->series_text_color[i], width,
+                         priv->series_label_color[i], width,
                          priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
                          ? graph_y + graph_h : 0,
                          priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
@@ -966,36 +989,64 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             full = g_strdup(rate_text[i]);
         }
         nm_show_text(cr, layout, priv->series_font[i], value_x, sy, full,
-                     priv->series_text_color[i], width, graph_y, graph_h,
+                     priv->series_value_color[i], width, graph_y, graph_h,
                      TRUE);
         g_free(full);
     }
-    /* Заголовок: внутри — в графике на своей координате, снаружи — в
-     * верхней или нижней полосе, прижатый к рамке окна. */
+    /* Заголовок: два элемента с разными цветами. Имя прижато к
+     * header_x (слева), адрес — к правому краю окна.
+     *
+     * Заголовок в своей полосе всегда первый: слот 0. Подписи и сводки
+     * сдвигаются на шаг вниз, если делят с ним полосу. */
     {
         int hx = nm_scale_position(priv->header_x, dw, width, width - 1);
         int hy = nm_scale_position(priv->header_y, dh, height, height - 1);
+        int clip_y0, clip_h, row_y;
+        int ip_x = 0;
 
         switch (priv->header_placement) {
-        /* Заголовок в своей полосе всегда первый: слот 0. Подписи и
-         * сводки сдвигаются на шаг вниз, если он делит с ними полосу. */
         case NM_LABEL_OUTSIDE_TOP:
-            nm_show_text(cr, layout, priv->label_font, hx, NM_MARGIN_TOP,
-                         header_text, priv->text_color, width, 0, top_band,
-                         FALSE);
+            row_y = NM_MARGIN_TOP;
+            clip_y0 = 0;
+            clip_h = top_band;
             break;
         case NM_LABEL_OUTSIDE_BOTTOM:
-            nm_show_text(cr, layout, priv->label_font, hx,
-                         graph_y + graph_h + NM_MARGIN_TOP, header_text,
-                         priv->text_color, width, graph_y + graph_h,
-                         bot_band, FALSE);
+            row_y = graph_y + graph_h + NM_MARGIN_TOP;
+            clip_y0 = graph_y + graph_h;
+            clip_h = bot_band;
             break;
         default:
-            nm_show_text(cr, layout, priv->label_font, hx, hy, header_text,
-                         priv->text_color, width, graph_y, graph_h, TRUE);
+            row_y = hy;
+            clip_y0 = graph_y;
+            clip_h = graph_h;
             break;
         }
+
+        /* Адрес прижимаем к правому краю: X считается от ширины окна
+         * минус ширина текста, минус запас на тень. */
+        if (header_ip && *header_ip) {
+            PangoFontDescription *fd =
+                pango_font_description_from_string(priv->label_font);
+            int ip_w = 0;
+
+            pango_layout_set_font_description(layout, fd);
+            pango_layout_set_text(layout, header_ip, -1);
+            pango_layout_get_pixel_size(layout, &ip_w, NULL);
+            pango_font_description_free(fd);
+            ip_x = nm_fit_text_coordinate(
+                width - ip_w - 2 * NM_TEXT_SHADOW_RADIUS, ip_w, width);
+        }
+
+        if (header_name && *header_name)
+            nm_show_text(cr, layout, priv->label_font, hx, row_y,
+                         header_name, priv->header_ifname_color, width,
+                         clip_y0, clip_h, FALSE);
+        if (header_ip && *header_ip)
+            nm_show_text(cr, layout, priv->label_font, ip_x, row_y,
+                         header_ip, priv->header_ip_color, width,
+                         clip_y0, clip_h, FALSE);
     }
+
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int tx = nm_scale_position(priv->total_x[i], dw, width, width - 1);
         int ty = nm_scale_position(priv->total_y[i], dh, height, height - 1);
@@ -1030,7 +1081,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         }
         g_free(total_text[i]);
     }
-    g_free(header_text);
+    g_free(header_name);
+    g_free(header_ip);
     for (i = 0; i < NM_SERIES_MAX; i++)
         g_free(rate_text[i]);
     cairo_restore(cr);
@@ -1306,6 +1358,26 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         nm_read_color(priv, text_key, priv->series_color[i],
                       priv->series_text_color[i]);
     }
+
+    /* Подпись и число — два отдельных цвета. Оба по умолчанию берут
+     * общий цвет текста серии, то есть при отсутствии ключей вид не
+     * меняется: подпись и число остаются того же цвета, что и раньше. */
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char key[40];
+
+        g_snprintf(key, sizeof(key), "series%u_label_color", i);
+        nm_read_color(priv, key, priv->series_text_color[i],
+                      priv->series_label_color[i]);
+        g_snprintf(key, sizeof(key), "series%u_value_color", i);
+        nm_read_color(priv, key, priv->series_text_color[i],
+                      priv->series_value_color[i]);
+    }
+
+    /* Имя интерфейса и адрес — два элемента, у каждого свой цвет. */
+    nm_read_color(priv, "header_ifname_color", priv->text_color,
+                  priv->header_ifname_color);
+    nm_read_color(priv, "header_ip_color", priv->text_color,
+                  priv->header_ip_color);
 
     g_key_file_set_string(kf, p->name, "ifname", priv->ifname);
     g_key_file_set_string(kf, p->name, "font", priv->font);
@@ -1803,6 +1875,20 @@ static void nm_color_set(GtkColorButton *button, gpointer data)
             } else if (!strcmp(tail, "text_color")) {
                 memcpy(priv->series_text_color[series_index], out,
                        sizeof(gdouble) * 4);
+                /* Общий цвет текста — это значение по умолчанию для
+                 * подписи и числа, поэтому их явные цвета должны
+                 * уехать вместе с ним, иначе кнопка «текст» не влияла
+                 * бы на подпись и число. */
+                memcpy(priv->series_label_color[series_index], out,
+                       sizeof(gdouble) * 4);
+                memcpy(priv->series_value_color[series_index], out,
+                       sizeof(gdouble) * 4);
+            } else if (!strcmp(tail, "label_color")) {
+                memcpy(priv->series_label_color[series_index], out,
+                       sizeof(gdouble) * 4);
+            } else if (!strcmp(tail, "value_color")) {
+                memcpy(priv->series_value_color[series_index], out,
+                       sizeof(gdouble) * 4);
             }
         }
     } else if (!strcmp(key, "graph_background_color")) {
@@ -1811,6 +1897,14 @@ static void nm_color_set(GtkColorButton *button, gpointer data)
         memcpy(priv->border, out, sizeof(gdouble) * 4);
     } else if (!strcmp(key, "text_color")) {
         memcpy(priv->text_color, out, sizeof(gdouble) * 4);
+        /* text_color — значение по умолчанию для обоих элементов шапки,
+         * поэтому их явные цвета должны уехать вместе с ним. */
+        memcpy(priv->header_ifname_color, out, sizeof(gdouble) * 4);
+        memcpy(priv->header_ip_color, out, sizeof(gdouble) * 4);
+    } else if (!strcmp(key, "header_ifname_color")) {
+        memcpy(priv->header_ifname_color, out, sizeof(gdouble) * 4);
+    } else if (!strcmp(key, "header_ip_color")) {
+        memcpy(priv->header_ip_color, out, sizeof(gdouble) * 4);
     }
     g_key_file_set_string(priv->kf, p->name, key, nm_format_rgba(out));
     xs_core_plugin_conf_flush(p->name);
@@ -2057,6 +2151,24 @@ static void nm_add_text(NmGrid *g, NmDialogContext *ctx, const char *key,
  * (dm_series_block_widget). Кнопка шрифта фиксированной ширины 180 px
  * кладётся в GtkFixed: внутри flex-бокса она иначе тянется на всю
  * оставшуюся ширину и перестаёт быть одинаковой у всех серий. */
+/* Кнопка выбора цвета с подсказкой. Создаётся как отдельная функция,
+ * потому что цветов у серии теперь четыре: заливка графика, общий текст,
+ * подпись и число. */
+static GtkWidget *nm_color_button(const char *key, const gdouble color[4],
+                                  gboolean with_alpha, const char *tip)
+{
+    GtkWidget *cb = gtk_color_button_new_with_rgba(&(GdkRGBA) {
+        color[0], color[1], color[2], color[3] });
+
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(cb), with_alpha);
+    if (!with_alpha)
+        g_object_set_data(G_OBJECT(cb), "xs-rgb-only", GINT_TO_POINTER(1));
+    g_object_set_data_full(G_OBJECT(cb), "xs-key", g_strdup(key), g_free);
+    if (tip)
+        gtk_widget_set_tooltip_text(cb, tip);
+    return cb;
+}
+
 static void nm_add_font_color(NmGrid *g, NmDialogContext *ctx,
                               const char *font_key, const char *color_key,
                               const char *font, const gdouble color[4],
@@ -2085,20 +2197,12 @@ static void nm_add_font_color(NmGrid *g, NmDialogContext *ctx,
     gtk_box_pack_start(GTK_BOX(row), holder, FALSE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(row), cb, FALSE, TRUE, 0);
 
-    /* Вторая кнопка — цвет ТЕКСТА серии. Может отсутствовать, если ключ
-     * не передан: тогда строка остаётся как раньше, одна кнопка цвета. */
+    /* Кнопка «общий текст» — только если ключ передан. */
     if (text_color_key && text_color) {
-        GtkWidget *tb = gtk_color_button_new_with_rgba(&(GdkRGBA) {
-            text_color[0], text_color[1], text_color[2], text_color[3] });
-
-        gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(tb), with_alpha);
-        if (!with_alpha)
-            g_object_set_data(G_OBJECT(tb), "xs-rgb-only", GINT_TO_POINTER(1));
-        g_object_set_data_full(G_OBJECT(tb), "xs-key", g_strdup(text_color_key),
-                               g_free);
-        gtk_widget_set_tooltip_text(tb, "Цвет текста: подпись и число");
+        GtkWidget *tb = nm_color_button(text_color_key, text_color,
+                                        with_alpha,
+                                        "Общий цвет текста");
         gtk_box_pack_start(GTK_BOX(row), tb, FALSE, TRUE, 0);
-        nm_bind_keyed_descendants(tb, ctx);
     }
 
     /* Без подписи: секция уже названа по роли серии, а «Font»/«Color»
@@ -2231,6 +2335,43 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                               priv->series_font[i], color, FALSE,
                               key_text_color, text_color);
         }
+        /* Отдельные цвета подписи и числа. В ту же строку, что шрифт, они
+         * не влезают: четыре кнопки в ряд занимали бы всю ширину.
+         * Поэтому своя строка с тремя короткими подписями. */
+        {
+            char k_fill[40], k_label[40], k_value[40];
+            gdouble fill[4], label_c[4], value_c[4];
+            GtkWidget *row;
+
+            memcpy(fill, priv->series_color[i], sizeof(fill));
+            memcpy(label_c, priv->series_label_color[i], sizeof(label_c));
+            memcpy(value_c, priv->series_value_color[i], sizeof(value_c));
+            g_snprintf(k_fill, sizeof(k_fill), "series%d_color", i);
+            g_snprintf(k_label, sizeof(k_label), "series%d_label_color", i);
+            g_snprintf(k_value, sizeof(k_value), "series%d_value_color", i);
+
+            row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+            gtk_box_pack_start(GTK_BOX(row),
+                               gtk_label_new("Заливка"), FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row),
+                               nm_color_button(k_fill, fill, FALSE,
+                                               "Цвет заливки графика"),
+                               FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row),
+                               gtk_label_new("Метка"), FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row),
+                               nm_color_button(k_label, label_c, FALSE,
+                                               "Цвет подписи"),
+                               FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row),
+                               gtk_label_new("Число"), FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row),
+                               nm_color_button(k_value, value_c, FALSE,
+                                               "Цвет числа скорости"),
+                               FALSE, FALSE, 0);
+            nm_grid_add_widget(g, row);
+            nm_bind_keyed_descendants(row, ctx);
+        }
         {
             char key_x[40], key_y[40];
 
@@ -2273,6 +2414,12 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                  priv->window_bg, TRUE);
     nm_add_color(g, ctx, "text_color", "Text", priv->text_color, FALSE);
     nm_add_color(g, ctx, "border_color", "Graph border", priv->border, TRUE);
+    /* Цвета шапки: имя интерфейса и адрес рисуются отдельно, каждый со
+     * своим цветом. Общий text_color остаётся их значением по умолчанию. */
+    nm_add_color(g, ctx, "header_ifname_color", "Header name",
+                 priv->header_ifname_color, FALSE);
+    nm_add_color(g, ctx, "header_ip_color", "Header IP",
+                 priv->header_ip_color, FALSE);
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 

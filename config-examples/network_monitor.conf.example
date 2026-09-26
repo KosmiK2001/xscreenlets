@@ -55,6 +55,16 @@ series1_color=rgba(64,217,89,255)
 # заливку цветной.
 #series0_text_color=rgba(255,255,255,255)
 #series1_text_color=rgba(255,255,255,255)
+# А можно и ещё мельче: свой цвет у подписи «Down:» и свой у числа.
+# Оба по умолчанию берут series<N>_text_color.
+#series0_label_color=rgba(255,220,0,255)
+#series0_value_color=rgba(255,255,255,255)
+#series1_label_color=rgba(255,220,0,255)
+#series1_value_color=rgba(255,255,255,255)
+# Цвета шапки. Имя интерфейса слева, адрес прижат вправо — у каждого свой
+# цвет. По умолчанию оба берут text_color.
+#header_ifname_color=rgba(220,220,220,255)
+#header_ip_color=rgba(150,150,150,255)
 text_color=rgba(255,255,255,255)
 graph_background_color=rgba(5,8,13,255)
 border_color=rgba(140,148,158,255)
