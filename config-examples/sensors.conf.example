@@ -1,0 +1,48 @@
+# sensors — пример конфига. Взят из живого окна, который создаёт init.
+#
+# Строка в rows — это ПАРА «подпись|источник», разделённая точкой с
+# запятой. Подпись видит пользователь, источник нужен апплету для поиска
+# в sysfs. Правьте подпись свободно, источник — нет: он однозначно
+# указывает на канал.
+#
+# Источник устойчив к перезагрузке: это «чип/устройство/канал», а не
+# номер hwmon. Номер hwmon — индекс порядка регистрации драйверов и
+# между загрузками меняется, так что «hwmon8» в конфиге указал бы на
+# другой диск.
+#
+# Список всех найденных сенсоров с галочками — в Properties.
+
+[sensors-9d4e2b71-temperatures]
+type=sensors
+window_width=200
+window_height=100
+# Радиус по умолчанию 3 — диапазон 2-4.
+corner_radius=3
+opacity=1.0
+x=80
+y=80
+update_ms=5000
+
+# units: celsius | fahrenheit. Суффикс °C/°F в выводе соответствует
+# этому ключу. Старый fahrenheit=0|1 ещё читается, но не пишется.
+units=fahrenheit
+
+label_font=Sans 8
+value_font=Sans 8
+
+# Подпись и число — независимые элементы, как в network_monitor.
+# Позиция числа задана своим ключом и не зависит от длины подписи:
+# иначе длинная подпись сдвигала бы число, и это выглядит как
+# «Position ничего не делает».
+label_x=4
+value_x=110
+first_row_y=4
+line_step=12
+
+rows=coretemp Package id 0|coretemp/coretemp.0/Package id 0;coretemp Core 0|coretemp/coretemp.0/Core 0;coretemp Core 1|coretemp/coretemp.0/Core 1;coretemp Core 2|coretemp/coretemp.0/Core 2
+
+# Цвета принимают и rgba(r,g,b,a), и десятичные доли 0-1.
+label_color=rgba(30,255,255,255)
+value_color=rgba(255,255,255,255)
+background_color=rgba(25,25,25,74)
+border_color=rgba(115,115,115,255)
