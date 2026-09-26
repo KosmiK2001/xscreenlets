@@ -28,6 +28,10 @@
  * рамке графика, ни к рамке окна. Пользователь просил 1-2px на край. */
 #define NM_MARGIN_TOP    2
 #define NM_MARGIN_BOTTOM 2
+/* Зазор между подписью («Down:») и числом, когда их координаты
+ * сведены близко. Число уезжает вправо, но не дальше этой границы,
+ * иначе Label pos. снова начнёт двигать число за собой. */
+#define NM_VALUE_GAP 6
 /* Нижний предел строки: нулевая высота схлопнула бы отступ, и график
  * наехал бы на текст. */
 #define NM_ROW_H_MIN 8
@@ -826,6 +830,10 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int sx = nm_scale_position(priv->series_x[i], dw, width, width - 1);
         int sy = nm_scale_position(priv->series_y[i], dh, height, height - 1);
+        /* Куда ставить число. Внутри — за подписью, но не дальше, чем
+         * на NM_VALUE_GAP от её конца; снаружи — на своей координате.
+         * Инициализируется здесь, потому что вызывается в конце цикла. */
+        int value_x = sx;
         int lx = nm_scale_position(priv->series_label_x[i], dw, width,
                                    width - 1);
         int ly = nm_scale_position(priv->series_label_y[i], dh, height,
@@ -833,29 +841,38 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         char *full;
 
         if (priv->label_placement[i] == NM_LABEL_INSIDE) {
-            /* Внутри: подпись на своей координате, значение — рядом с
-             * ней по горизонтали, а не одной склеенной строкой. Раньше
-             * рисовалось "%s: %s" одним куском, из-за чего series<N>_label_x
-             * и _y вообще ни на что не влияли. */
-            int w = 0;
-
-            pango_layout_set_font_description(layout, NULL);
+            /* Внутри подпись и значение — ДВА элемента с разными
+             * координатами:
+             *   series<N>_label_x/y  — где стоит «Down:» / «Up:»
+             *   series<N>_x/y        — где стоит само число скорости
+             *
+             * Раньше значение рисовалось на lx + ширина_подписи + 6, то
+             * ездило вместе с подписью. Отсюда два жалобных: Label pos.
+             * двигал всю строку целиком, а Position не двигал ничего —
+             * число к нему было привязано, но не наоборот.
+             *
+             * Ширина подписи нужна, чтобы число не налезало на текст,
+             * когда координаты сведены близко. */
             {
+                int w = 0;
                 PangoFontDescription *fd =
                     pango_font_description_from_string(priv->series_font[i]);
 
                 pango_layout_set_font_description(layout, fd);
+                pango_layout_set_text(layout, priv->series_label[i], -1);
+                pango_layout_get_pixel_size(layout, &w, NULL);
                 pango_font_description_free(fd);
+                nm_show_text(cr, layout, priv->series_font[i], lx, ly,
+                             priv->series_label[i],
+                             priv->series_text_color[i],
+                             width, graph_y, graph_h);
+                /* Если число настроено левее конца подписи, не даём ему
+                 * наехать на текст: сдвигаем вправо, но не дальше
+                 * lx + w + NM_VALUE_GAP. */
+                value_x = MAX(sx, lx + w + NM_VALUE_GAP);
             }
-            pango_layout_set_text(layout, priv->series_label[i], -1);
-            pango_layout_get_pixel_size(layout, &w, NULL);
-            nm_show_text(cr, layout, priv->series_font[i], lx, ly,
-                         priv->series_label[i], priv->series_text_color[i],
-                         width, graph_y, graph_h);
-            nm_show_text(cr, layout, priv->series_font[i],
-                         lx + w + 6, ly, rate_text[i],
-                         priv->series_text_color[i], width, graph_y, graph_h);
-            full = NULL;
+            value_x = sx;
+            full = g_strdup(rate_text[i]);
         } else {
             /* Снаружи: подпись уходит в полосу, значение остаётся в
              * графике. Полоса сверху или снизу — по выбору. */
@@ -883,9 +900,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                          ? bot_band : top_band);
             full = g_strdup(rate_text[i]);
         }
-        if (full)
-            nm_show_text(cr, layout, priv->series_font[i], sx, sy, full,
-                         priv->series_text_color[i], width, graph_y, graph_h);
+        nm_show_text(cr, layout, priv->series_font[i], value_x, sy, full,
+                     priv->series_text_color[i], width, graph_y, graph_h);
         g_free(full);
     }
     /* Заголовок: внутри — в графике на своей координате, снаружи — в

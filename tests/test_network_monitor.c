@@ -644,6 +644,44 @@ static void test_placement_combo_mapping(void)
           "снизу не превращается во внутри");
 }
 
+/* Подпись и значение — разные элементы с разными координатами.
+ *
+ * Раньше число рисовалось на «конец подписи + 6», то есть ездило
+ * вместе с ней. Отсюда две жалобы: Label pos. двигал всю строку, а
+ * Position не двигал ничего. Правило: число стоит там, где сказано
+ * series<N>_x/y, но не левее конца подписи плюс зазор. */
+#define T_GAP 6
+
+static int t_value_x(int label_x, int label_w, int value_x)
+{
+    int min_x = label_x + label_w + T_GAP;
+
+    return value_x > min_x ? value_x : min_x;
+}
+
+static void test_label_and_value_positions(void)
+{
+    /* Координаты разведены: каждая на своей. */
+    check(t_value_x(6, 30, 120) == 120, "число правее подписи: своя координата");
+    check(t_value_x(6, 30, 60) == 60, "число между подписью и краем: своя");
+    /* 156 + 22 + 6 = 184 — значение упирается в зазор, как и у первой. */
+    check(t_value_x(156, 22, 180) == 184, "вторая серия: то же правило");
+    check(t_value_x(156, 22, 190) == 190, "вторая серия: своя координата");
+
+    /* Координаты сведены: число не наезжает на подпись. */
+    check(t_value_x(30, 30, 7) == 66,
+          "число левее подписи сдвигается за её конец, не наезжает");
+    check(t_value_x(6, 30, 40) == 42, "зазор ровно в NM_VALUE_GAP");
+    check(t_value_x(6, 30, 6) == 42, "число на координате подписи — тоже зазор");
+    check(t_value_x(6, 30, 36) == 42, "меньше зазора — ровно зазор");
+    check(t_value_x(6, 30, 39) == 42, "на пиксель меньше зазора — тот же");
+    check(t_value_x(6, 30, 43) == 43, "больше зазора — не трогаем");
+
+    /* Подпись нулевой ширины: число ровно на своей координате. */
+    check(t_value_x(10, 0, 20) == 20, "пустая подпись не сдвигает число");
+    check(t_value_x(10, 0, 12) == 16, "даже пустая даёт зазор");
+}
+
 static void test_split_geometry(void)
 {
     /* Две половины не должны смыкаться: зазор обязателен, иначе две
@@ -750,6 +788,7 @@ int main(void)
     test_text_clip_offsets();
     test_independent_bands();
     test_placement_combo_mapping();
+    test_label_and_value_positions();
     test_split_geometry();
     test_window_radius_floor();
     test_config_key_is_copied();
