@@ -67,7 +67,13 @@ typedef struct {
      * константа, как в conky (95 для 100 Мбит, 47-59 для софта). */
     gint64 graph_max_kib;
     int header_x, header_y;   /* имя интерфейса + IP */
-    int total_x, total_y;     /* суммарные байты */
+    /* Сводка настраивается ОТДЕЛЬНО для каждого направления: у down и up
+     * своя подпись, свой шрифт, свой цвет и своя позиция. Общая строка
+     * "Total: rx / tx" не позволяла поставить подписи так, как это
+     * сделано в конфигах conky. */
+    char *total_label[NM_SERIES_MAX];
+    char *total_font[NM_SERIES_MAX];
+    int total_x[NM_SERIES_MAX], total_y[NM_SERIES_MAX];
     gdouble graph_bg[4], border[4], text_color[4];
     gdouble series_color[NM_SERIES_MAX][4];
     gdouble series_text_color[NM_SERIES_MAX][4];
@@ -317,7 +323,8 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     int dw = priv->design_width > 0 ? priv->design_width : width;
     int dh = priv->design_height > 0 ? priv->design_height : height;
     char *rate_text[NM_SERIES_MAX];
-    char *header_text, *total_text;
+    char *total_text[NM_SERIES_MAX];
+    char *header_text;
 
     pango_layout_set_font_description(layout, NULL);
     {
@@ -458,9 +465,12 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         header_text = g_strdup_printf("%s: %s", priv->ifname, priv->ip);
     else
         header_text = g_strdup(priv->ifname ? priv->ifname : "");
-    total_text = g_strdup_printf("Total: %s / %s",
-                                 nm_format_bytes(priv->total_bytes[0]),
-                                 nm_format_bytes(priv->total_bytes[1]));
+    /* Сводуется каждое направление своей строкой, а не общей "rx / tx":
+     * подписи, шрифт, цвет и позиция у них настраиваются отдельно. */
+    total_text[0] = g_strdup_printf(priv->total_label[0],
+                                     nm_format_bytes(priv->total_bytes[0]));
+    total_text[1] = g_strdup_printf(priv->total_label[1],
+                                     nm_format_bytes(priv->total_bytes[1]));
 
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int sx = nm_scale_position(priv->series_x[i], dw, width, width - 1);
@@ -489,12 +499,14 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                  nm_scale_position(priv->header_x, dw, width, width - 1),
                  nm_scale_position(priv->header_y, dh, height, height - 1),
                  header_text, priv->text_color, width, height);
-    nm_show_text(cr, layout, priv->label_font,
-                 nm_scale_position(priv->total_x, dw, width, width - 1),
-                 nm_scale_position(priv->total_y, dh, height, height - 1),
-                 total_text, priv->text_color, width, height);
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        nm_show_text(cr, layout, priv->total_font[i],
+                     nm_scale_position(priv->total_x[i], dw, width, width - 1),
+                     nm_scale_position(priv->total_y[i], dh, height, height - 1),
+                     total_text[i], priv->series_text_color[i], width, height);
+        g_free(total_text[i]);
+    }
     g_free(header_text);
-    g_free(total_text);
     for (i = 0; i < NM_SERIES_MAX; i++)
         g_free(rate_text[i]);
     cairo_restore(cr);
@@ -656,9 +668,27 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
     }
     priv->header_x = xs_host_api()->conf_int(kf, p->name, "header_x", 4);
     priv->header_y = xs_host_api()->conf_int(kf, p->name, "header_y", 2);
-    priv->total_x = xs_host_api()->conf_int(kf, p->name, "total_x", 4);
-    priv->total_y = xs_host_api()->conf_int(kf, p->name, "total_y",
-                                            priv->height - 12);
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char key[32];
+        static const char *default_labels[NM_SERIES_MAX] = {
+            "Total: %s", "Total: %s"
+        };
+        char *fmt;
+
+        g_snprintf(key, sizeof(key), "total%u_label", i);
+        priv->total_label[i] = xs_host_api()->conf_str(kf, p->name, key,
+                                                       default_labels[i]);
+        g_snprintf(key, sizeof(key), "total%u_font", i);
+        priv->total_font[i] = xs_host_api()->conf_str(kf, p->name, key,
+                                                      priv->font);
+        g_snprintf(key, sizeof(key), "total%u_x", i);
+        priv->total_x[i] = xs_host_api()->conf_int(kf, p->name, key,
+                                                   4);
+        g_snprintf(key, sizeof(key), "total%u_y", i);
+        priv->total_y[i] = xs_host_api()->conf_int(kf, p->name, key,
+                                                   priv->height - 12);
+        (void) fmt;
+    }
 
     nm_read_color(priv, "graph_background_color", nm_graph_bg_default,
                   priv->graph_bg);
@@ -675,6 +705,17 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_string(kf, p->name, "font", priv->font);
     g_key_file_set_string(kf, p->name, "rx_label", priv->series_label[0]);
     g_key_file_set_string(kf, p->name, "tx_label", priv->series_label[1]);
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char key[32];
+        g_snprintf(key, sizeof(key), "total%u_label", i);
+        g_key_file_set_string(kf, p->name, key, priv->total_label[i]);
+        g_snprintf(key, sizeof(key), "total%u_font", i);
+        g_key_file_set_string(kf, p->name, key, priv->total_font[i]);
+        g_snprintf(key, sizeof(key), "total%u_x", i);
+        g_key_file_set_integer(kf, p->name, key, priv->total_x[i]);
+        g_snprintf(key, sizeof(key), "total%u_y", i);
+        g_key_file_set_integer(kf, p->name, key, priv->total_y[i]);
+    }
     g_key_file_set_integer(kf, p->name, "window_width", priv->width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->height);
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
@@ -793,6 +834,8 @@ static void nm_shutdown(XsPlugin *p)
         for (i = 0; i < NM_SERIES_MAX; i++) {
             g_free(priv->series_font[i]);
             g_free(priv->series_label[i]);
+            g_free(priv->total_label[i]);
+            g_free(priv->total_font[i]);
         }
     }
     g_free(priv);
@@ -878,14 +921,18 @@ static void nm_position_changed(GtkSpinButton *spin, gpointer data)
             else if (!strcmp(numeric_key, "label_y"))
                 priv->series_label_y[series_index] = value;
         }
+    } else if (g_str_has_prefix(key, "total") &&
+               sscanf(key, "total%d_%31s", &series_index, numeric_key) == 2) {
+        if (series_index >= 0 && series_index < NM_SERIES_MAX) {
+            if (!strcmp(numeric_key, "x"))
+                priv->total_x[series_index] = value;
+            else if (!strcmp(numeric_key, "y"))
+                priv->total_y[series_index] = value;
+        }
     } else if (!strcmp(key, "header_x")) {
         priv->header_x = value;
     } else if (!strcmp(key, "header_y")) {
         priv->header_y = value;
-    } else if (!strcmp(key, "total_x")) {
-        priv->total_x = value;
-    } else if (!strcmp(key, "total_y")) {
-        priv->total_y = value;
     } else if (!strcmp(key, "window_width")) {
         priv->width = value;
     } else if (!strcmp(key, "window_height")) {
@@ -1236,8 +1283,8 @@ static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(sy), value_y);
     gtk_widget_set_size_request(sx, 72, -1);
     gtk_widget_set_size_request(sy, 72, -1);
-    g_object_set_data(G_OBJECT(sx), "xs-key", (gpointer) key_x);
-    g_object_set_data(G_OBJECT(sy), "xs-key", (gpointer) key_y);
+    g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
+    g_object_set_data_full(G_OBJECT(sy), "xs-key", g_strdup(key_y), g_free);
     gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(box), gtk_label_new("/"), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), sy, TRUE, TRUE, 0);
@@ -1254,7 +1301,11 @@ static void nm_add_int(NmGrid *g, NmDialogContext *ctx, const char *key,
 
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), value);
     gtk_widget_set_size_request(spin, 90, -1);
-    g_object_set_data(G_OBJECT(spin), "xs-key", (gpointer) key);
+    /* КЛЮЧ КОПИРУЕТСЯ. Раньше сюда передавался указатель на буфер в стеке
+     * nm_properties(); GTK хранит его в виджете, а к моменту клика стек
+     * давно перезаписан — обработчик читал мусор, и настройка не влияла
+     * ни на что. */
+    g_object_set_data_full(G_OBJECT(spin), "xs-key", g_strdup(key), g_free);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, spin);
     nm_bind_keyed_descendants(spin, ctx);
@@ -1270,7 +1321,7 @@ static void nm_add_color(NmGrid *g, NmDialogContext *ctx, const char *key,
     gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(button), with_alpha);
     if (!with_alpha)
         g_object_set_data(G_OBJECT(button), "xs-rgb-only", GINT_TO_POINTER(1));
-    g_object_set_data(G_OBJECT(button), "xs-key", (gpointer) key);
+    g_object_set_data_full(G_OBJECT(button), "xs-key", g_strdup(key), g_free);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, button);
     nm_bind_keyed_descendants(button, ctx);
@@ -1284,12 +1335,48 @@ static void nm_add_text(NmGrid *g, NmDialogContext *ctx, const char *key,
 
     gtk_entry_set_text(GTK_ENTRY(entry), value ? value : "");
     gtk_widget_set_size_request(entry, 180, -1);
-    g_object_set_data(G_OBJECT(entry), "xs-key", (gpointer) key);
+    g_object_set_data_full(G_OBJECT(entry), "xs-key", g_strdup(key), g_free);
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_box_pack_start(GTK_BOX(box), entry, TRUE, TRUE, 0);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, box);
     nm_bind_keyed_descendants(entry, ctx);
+}
+
+/* Шрифт и цвет в ОДНОЙ строке, без подписей — приём из disk_monitor
+ * (dm_series_block_widget). Кнопка шрифта фиксированной ширины 180 px
+ * кладётся в GtkFixed: внутри flex-бокса она иначе тянется на всю
+ * оставшуюся ширину и перестаёт быть одинаковой у всех серий. */
+static void nm_add_font_color(NmGrid *g, NmDialogContext *ctx,
+                              const char *font_key, const char *color_key,
+                              const char *font, const gdouble color[4],
+                              gboolean with_alpha)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *holder = gtk_fixed_new();
+    GtkWidget *fb = gtk_font_button_new_with_font(font ? font : "Sans 8");
+    GtkWidget *cb;
+
+    gtk_widget_set_size_request(fb, 180, -1);
+    gtk_widget_set_size_request(holder, 180, -1);
+    gtk_widget_set_hexpand(holder, FALSE);
+    gtk_fixed_put(GTK_FIXED(holder), fb, 0, 0);
+    g_object_set_data_full(G_OBJECT(fb), "xs-key", g_strdup(font_key), g_free);
+
+    cb = gtk_color_button_new_with_rgba(&(GdkRGBA) {
+        color[0], color[1], color[2], color[3] });
+    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(cb), with_alpha);
+    if (!with_alpha)
+        g_object_set_data(G_OBJECT(cb), "xs-rgb-only", GINT_TO_POINTER(1));
+    g_object_set_data_full(G_OBJECT(cb), "xs-key", g_strdup(color_key), g_free);
+
+    gtk_box_pack_start(GTK_BOX(row), holder, FALSE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(row), cb, FALSE, TRUE, 0);
+    /* Без подписи: секция уже названа по роли серии, а «Font»/«Color»
+     * в каждой строке только съедали высоту. */
+    nm_grid_add_widget(g, row);
+    nm_bind_keyed_descendants(fb, ctx);
+    nm_bind_keyed_descendants(cb, ctx);
 }
 
 static void nm_add_font(NmGrid *g, NmDialogContext *ctx, const char *key,
@@ -1298,7 +1385,7 @@ static void nm_add_font(NmGrid *g, NmDialogContext *ctx, const char *key,
     GtkWidget *button = gtk_font_button_new_with_font(value ? value : "Sans 8");
 
     gtk_widget_set_size_request(button, 180, -1);
-    g_object_set_data(G_OBJECT(button), "xs-key", (gpointer) key);
+    g_object_set_data_full(G_OBJECT(button), "xs-key", g_strdup(key), g_free);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, button);
     nm_bind_keyed_descendants(button, ctx);
@@ -1315,7 +1402,7 @@ static GtkWidget *nm_add_combo(NmGrid *g, NmDialogContext *ctx,
         gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), options[i],
                                   options[i]);
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo), active);
-    g_object_set_data(G_OBJECT(combo), "xs-key", (gpointer) key);
+    g_object_set_data_full(G_OBJECT(combo), "xs-key", g_strdup(key), g_free);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, combo);
     nm_bind_keyed_descendants(combo, ctx);
@@ -1364,7 +1451,8 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         index = (guint) MAX(0, nm_find_combo_text(GTK_COMBO_BOX(combo),
                                                  priv->ifname));
         gtk_combo_box_set_active(GTK_COMBO_BOX(combo), (gint) index);
-        g_object_set_data(G_OBJECT(combo), "xs-key", (gpointer) "ifname");
+        g_object_set_data_full(G_OBJECT(combo), "xs-key",
+                               g_strdup("ifname"), g_free);
         nm_grid_add_label(g, "Interface");
         nm_grid_add_widget(g, combo);
         nm_bind_keyed_descendants(combo, ctx);
@@ -1393,13 +1481,15 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g = nm_grid_new();
         g_snprintf(key, sizeof(key), "series%d_label", i);
         nm_add_text(g, ctx, key, "Label", priv->series_label[i]);
-        g_snprintf(key, sizeof(key), "series%d_font", i);
-        nm_add_font(g, ctx, key, "Font", priv->series_font[i]);
         {
+            char key_font[40], key_color[40];
             gdouble color[4];
+
             memcpy(color, priv->series_color[i], sizeof(color));
-            g_snprintf(key, sizeof(key), "series%d_color", i);
-            nm_add_color(g, ctx, key, "Color", color, FALSE);
+            g_snprintf(key_font, sizeof(key_font), "series%d_font", i);
+            g_snprintf(key_color, sizeof(key_color), "series%d_color", i);
+            nm_add_font_color(g, ctx, key_font, key_color,
+                              priv->series_font[i], color, FALSE);
         }
         g_snprintf(key, sizeof(key), "series%d_placement", i);
         nm_add_combo(g, ctx, key, "Placement", placements,
@@ -1432,8 +1522,22 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     nm_add_font(g, ctx, "label_font", "Header font", priv->label_font);
     nm_add_xy(g, ctx, "Header", "header_x", "header_y", priv->header_x,
               priv->header_y, MAX(priv->design_width, priv->design_height) - 1);
-    nm_add_xy(g, ctx, "Total", "total_x", "total_y", priv->total_x,
-              priv->total_y, MAX(priv->design_width, priv->design_height) - 1);
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char label[40];
+        char key_x[40], key_y[40], key_lbl[40], key_font[40];
+
+        g_snprintf(label, sizeof(label), "%s total",
+                   i == 0 ? "Download" : "Upload");
+        g_snprintf(key_lbl, sizeof(key_lbl), "total%u_label", i);
+        nm_add_text(g, ctx, key_lbl, "Format", priv->total_label[i]);
+        g_snprintf(key_font, sizeof(key_font), "total%u_font", i);
+        nm_add_font(g, ctx, key_font, "Font", priv->total_font[i]);
+        g_snprintf(key_x, sizeof(key_x), "total%u_x", i);
+        g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
+        nm_add_xy(g, ctx, "Position", key_x, key_y, priv->total_x[i],
+                  priv->total_y[i],
+                  MAX(priv->design_width, priv->design_height) - 1);
+    }
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 

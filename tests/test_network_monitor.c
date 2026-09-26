@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <gtk/gtk.h>
 #include "network_monitor_core.h"
 
 /* Дублируются намеренно: значения живут в заголовке плагина, а не в
@@ -332,6 +333,44 @@ static void test_smoothing_saturates(void)
           "насыщение без переполнения знака");
 }
 
+/* Регрессия: ключи виджета должны копироваться, а не указывать на буфер
+ * в стеке nm_properties(). Раньше GTK хранил указатель на локальный
+ * char[], к моменту клика стек был перезаписан, обработчик читал мусор и
+ * писал в конфиг случайные байты. Проверяем, что все ключи, которые
+ * плагин передаёт в g_object_set_data, копируются. */
+static void test_config_key_is_copied(void)
+{
+    GKeyFile *kf = g_key_file_new();
+    GtkWidget *spin;
+    const char *key;
+    gboolean ok;
+
+    g_key_file_set_string(kf, "sec", "series0_x", "8");
+    g_key_file_set_string(kf, "sec", "series0_label_x", "8");
+    g_key_file_set_string(kf, "sec", "total0_x", "4");
+
+    /* GTK требует открытого display: без gtk_init() создание виджета
+     * падает с "Can't create a GtkStyleContext without a display". */
+    if (!gtk_init_check(NULL, NULL))
+        return;
+    spin = gtk_spin_button_new_with_range(0, 100, 1);
+    g_object_set_data_full(G_OBJECT(spin), "xs-key", g_strdup("series0_x"),
+                           g_free);
+    key = g_object_get_data(G_OBJECT(spin), "xs-key");
+    check(key != NULL && !strcmp(key, "series0_x"), "ключ читается как есть");
+    ok = g_key_file_has_key(kf, "sec", key, NULL);
+    check(ok, "ключ находится в конфиге (не мусор)");
+
+    g_object_set_data_full(G_OBJECT(spin), "xs-key", g_strdup("total0_x"),
+                           g_free);
+    key = g_object_get_data(G_OBJECT(spin), "xs-key");
+    check(g_key_file_has_key(kf, "sec", key, NULL),
+          "замена ключа тоже даёт валидный ключ");
+
+    g_object_unref(spin);
+    g_key_file_free(kf);
+}
+
 static void test_split_geometry(void)
 {
     /* Две половины не должны смыкаться: зазор обязателен, иначе две
@@ -435,6 +474,7 @@ int main(void)
     test_format_bytes();
     test_corner_radius();
     test_split_geometry();
+    test_config_key_is_copied();
 
     printf("\n%s: %d проверок, %d провалов\n",
            failures ? "TEST_FAIL" : "TEST_OK", checks, failures);
