@@ -29,6 +29,9 @@
 #define NM_RATE_SMOOTH_MAX 14
 #define NM_MIN_WINDOW_WIDTH 160
 #define NM_MIN_WINDOW_HEIGHT 60
+/* Зазор между половинами в режиме Split: без него две заливки смыкаются
+ * в одну фигуру и границы между download и upload не видно. */
+#define NM_SPLIT_GAP 8
 
 /* Текст рисуется поверх заливки графика и несёт тёмную тень. */
 #define NM_TEXT_SHADOW_RADIUS 3
@@ -374,17 +377,34 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     nm_rounded_path(cr, width, height, priv->corner_radius, 0.0);
     cairo_clip(cr);
     if (split) {
-        /* Два независимых графика рядом, каждый в своей половине: так
-         * они и стоят в конфигах conky. */
-        int half = (width - 4) / 2;
+        /* Две половины с зазором между ними. Без зазора заливки смыкались
+         * в одну пешку, и было не видно, где кончается download и
+         * начинается upload, — а это ровно то, ради чего режим раздельный.
+         * Зазор занимает NM_SPLIT_GAP пикселей и рисуется разделителем в
+         * цвет рамки. */
+        const int gap = MIN(NM_SPLIT_GAP, MAX(0, (width - 4) / 4));
+        const int plot_w = MAX(1, (width - 4 - gap) / 2);
+        const double left_x = 2.0;
+        const double right_x = left_x + plot_w + gap;
+
         nm_draw_series(cr, priv->history[0], priv->head[0], priv->count[0],
-                       nm_history_columns(half, priv->count[0]), half,
-                       scale_max[0], 2.0, graph_y + 1.0, graph_h - 2.0,
+                       nm_history_columns(plot_w, priv->count[0]), plot_w,
+                       scale_max[0], left_x, graph_y + 1.0, graph_h - 2.0,
                        priv->series_color[0]);
         nm_draw_series(cr, priv->history[1], priv->head[1], priv->count[1],
-                       nm_history_columns(half, priv->count[1]), half,
-                       scale_max[1], 2.0 + half, graph_y + 1.0, graph_h - 2.0,
+                       nm_history_columns(plot_w, priv->count[1]), plot_w,
+                       scale_max[1], right_x, graph_y + 1.0, graph_h - 2.0,
                        priv->series_color[1]);
+        if (gap > 0) {
+            double mid = left_x + plot_w + gap / 2.0;
+
+            cairo_set_source_rgba(cr, priv->border[0], priv->border[1],
+                                  priv->border[2], priv->border[3]);
+            cairo_set_line_width(cr, 1.0);
+            cairo_move_to(cr, floor(mid), graph_y + 1.0);
+            cairo_line_to(cr, floor(mid), graph_y + graph_h - 1.0);
+            cairo_stroke(cr);
+        }
     } else {
         /* Общий график: обе серии в одном поле, порядок по сумме, чтобы
          * более крупная ушла на задний план и не закрыла мелкую. */
@@ -621,13 +641,15 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
          *   y=21 — значение скорости
          * Подпись стоит в той же колонке, что и её значение. */
         g_snprintf(key, sizeof(key), "series%u_x", i);
+        /* Вторая колонка сдвинута за разделитель: при ширине 420 первая
+         * половина идёт от 2 до 212, зазор 8, вторая — от 220. */
         priv->series_x[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                    8 + (int)i * 210);
+                                                    8 + (int)i * 212);
         g_snprintf(key, sizeof(key), "series%u_y", i);
         priv->series_y[i] = xs_host_api()->conf_int(kf, p->name, key, 21);
         g_snprintf(key, sizeof(key), "series%u_label_x", i);
         priv->series_label_x[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                          8 + (int)i * 210);
+                                                          8 + (int)i * 212);
         g_snprintf(key, sizeof(key), "series%u_label_y", i);
         priv->series_label_y[i] = xs_host_api()->conf_int(kf, p->name, key,
                                                           12);

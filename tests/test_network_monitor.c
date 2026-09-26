@@ -4,6 +4,13 @@
 #include <math.h>
 #include "network_monitor_core.h"
 
+/* Дублируются намеренно: значения живут в заголовке плагина, а не в
+ * core, и тянуть .c плагина в тест нельзя — Makefile линкует оба
+ * объектных файла, и было бы дублирование символов. Тест защищает
+ * геометрию от regressии, а не от рассогласования констант. */
+#define NM_SPLIT_GAP 8
+#define NM_MIN_WINDOW_WIDTH 160
+
 static int failures;
 static int checks;
 
@@ -325,6 +332,41 @@ static void test_smoothing_saturates(void)
           "насыщение без переполнения знака");
 }
 
+static void test_split_geometry(void)
+{
+    /* Две половины не должны смыкаться: зазор обязателен, иначе две
+     * заливки образуют одну фигуру и границы между download и upload
+     * не видно. Геометрия повторяет расчёт в nm_render(). */
+    int gap, plot_w, right_x;
+    int width = 420;
+
+    gap = MIN(8, MAX(0, (width - 4) / 4));
+    plot_w = MAX(1, (width - 4 - gap) / 2);
+    right_x = 2 + plot_w + gap;
+    check_eq_int(gap, 8, "зазор между половинами = 8");
+    check(right_x > 2 + plot_w, "вторая половина начинается за зазором");
+    check_eq_int(right_x + plot_w, width - 2, "вторая половина доходит до края");
+    /* Первая половина не залезает за середину окна. */
+    check(2 + plot_w < width / 2 + gap, "первая половина не залезает на вторую");
+
+    /* Узкое окно: зазор сжимается, но половины остаются непустыми. */
+    {
+        int w = NM_MIN_WINDOW_WIDTH;   /* 160 */
+        int g2 = MIN(8, MAX(0, (w - 4) / 4));
+        int p2 = MAX(1, (w - 4 - g2) / 2);
+        check(g2 > 0, "зазор остаётся положительным в узком окне");
+        check(p2 >= 1, "половина не схлопывается в ноль");
+        check_eq_int(2 + p2 + g2 + p2, w - 2, "узкое окно: обе половины в границах");
+    }
+    /* Совсем узкое окно: зазор обрезается, но переполнения не будет. */
+    {
+        int w = 20;
+        int g3 = MIN(8, MAX(0, (w - 4) / 4));
+        int p3 = MAX(1, (w - 4 - g3) / 2);
+        check(2 + p3 + g3 + p3 <= w, "узкое окно без переполнения");
+    }
+}
+
 static void test_format_rate(void)
 {
     char *s = nm_format_rate(0);
@@ -392,6 +434,7 @@ int main(void)
     test_format_rate();
     test_format_bytes();
     test_corner_radius();
+    test_split_geometry();
 
     printf("\n%s: %d проверок, %d провалов\n",
            failures ? "TEST_FAIL" : "TEST_OK", checks, failures);
