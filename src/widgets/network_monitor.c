@@ -199,6 +199,9 @@ typedef struct {
     gboolean sample_valid;
     cairo_surface_t *cache;
     int cache_width, cache_height;
+    /* Y-спины серий: на них держится скрытие при Placement = снаружи, и
+     * после gtk_widget_show_all() скрытие надо применить заново. */
+    GtkWidget *series_y_spin[NM_SERIES_MAX];
 } PrivData;
 
 static const gdouble nm_graph_bg_default[4] = {0.02, 0.03, 0.05, 1.0};
@@ -2192,15 +2195,17 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         }
         {
             char key_x[40], key_y[40];
-            GtkWidget *label_y;
 
             /* Y-спин создаём ДО комбо Placement: комбо получает его
-             * указателем, чтобы прятать поле сразу при переключении. */
+             * указателем, чтобы прятать поле сразу при переключении.
+             * Указатель сохраняется в priv — он нужен ещё раз после
+             * gtk_widget_show_all(), который отменяет скрытие. */
             g_snprintf(key_x, sizeof(key_x), "series%d_label_x", i);
             g_snprintf(key_y, sizeof(key_y), "series%d_label_y", i);
-            label_y = g_object_ref_sink(nm_add_pos(g, ctx, "Label pos.",
-                                                   key_x, key_y,
-                                                   priv->series_label_x[i],
+            priv->series_y_spin[i] =
+                g_object_ref_sink(nm_add_pos(g, ctx, "Label pos.",
+                                             key_x, key_y,
+                                             priv->series_label_x[i],
                                                    priv->series_label_y[i],
                                                    MAX(priv->design_width,
                                                        priv->design_height) - 1,
@@ -2208,8 +2213,9 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                                                    == NM_LABEL_INSIDE));
             g_snprintf(key, sizeof(key), "series%d_placement", i);
             nm_add_combo(g, ctx, key, "Placement", placements,
-                         (int) priv->label_placement[i], label_y);
-            g_object_unref(label_y);
+                         (int) priv->label_placement[i],
+                         priv->series_y_spin[i]);
+            g_object_unref(priv->series_y_spin[i]);
             g_snprintf(key_x, sizeof(key_x), "series%d_x", i);
             g_snprintf(key_y, sizeof(key_y), "series%d_y", i);
             nm_add_xy(g, ctx, "Position", key_x, key_y, priv->series_x[i],
@@ -2342,6 +2348,23 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         gtk_notebook_append_page(notebook, tab,
                                  gtk_label_new("Network Monitor"));
         gtk_widget_show_all(tab);
+        /* show_all показывает ВСЕ виджеты, включая только что спрятанные
+         * Y-спины. Поэтому «Placement: снаружи» при первом открытии
+         * диалога показывал поле, которое ничего не делает: скрытие
+         * применялось при создании, а show_all его тут же отменял.
+         * Обработчик смены Placement повторял скрытие, но только после
+         * клика по комбо.
+         *
+         * Повторяем скрытие для всех серий, которым оно полагается.
+         * nm_pos_set_y_visible вызывается выше, при nm_add_pos, — там
+         * проходит priv->label_placement, то есть текущее значение из
+         * конфига. */
+        for (i = 0; i < NM_SERIES_MAX; i++) {
+            if (priv->series_y_spin[i])
+                nm_pos_set_y_visible(priv->series_y_spin[i],
+                                     priv->label_placement[i]
+                                     == NM_LABEL_INSIDE);
+        }
     }
 }
 

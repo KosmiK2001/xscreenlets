@@ -79,7 +79,15 @@ gboolean nm_parse_netdev(const char *text, const char *ifname,
                 break;
             p = end;
         }
-        if (n < 10)
+        /* Нужно 12 полей, а не 10: ниже читаются values[10] и values[11]
+         * (ошибки и потери передачи). Проверка на 10 пропускала строку из
+         * ровно 10 полей, и эти два значения приходили из
+         * неинициализированного стека.
+         *
+         * Значения сейчас нигде не отображаются, поэтому это латентный
+         * баг: как только ошибки выведут на экран, он станет видимым
+         * мусором. */
+        if (n < 12)
             return FALSE;   /* обрезанная строка — это не данные */
         out->ifname = g_strdup(ifname);
         out->rx_bytes = values[0];
@@ -152,7 +160,10 @@ guint nm_parse_netdev_all(const char *text, NmNetSample *out, guint max)
                 break;
             p = end;
         }
-        if (n >= 10 && count < max) {
+        /* 12, а не 10: ниже читаются values[10] и values[11]. На 10
+         * строка из ровно 10 полей проходила, и ошибки/потери приходили
+         * из неинициализированного стека. */
+        if (n >= 12 && count < max) {
             out[count].ifname = g_strdup(name);
             out[count].rx_bytes = values[0];
             out[count].rx_packets = values[1];

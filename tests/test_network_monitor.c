@@ -830,6 +830,37 @@ static void test_parse_rgba_formats(void)
     check(!nm_parse_rgba("2.0,0,0,1.0", c), "старое значение > 1");
 }
 
+static void test_netdev_field_count(void)
+{
+    /* Ревью нашло: проверка была на 10 полей, а ниже читаются
+     * values[10] и values[11]. Строка из ровно 10 полей проходила, и
+     * ошибки/потери приходили из неинициализированного стека.
+     *
+     * Значения нигде не отображаются, поэтому баг латентный. Тест
+     * фиксирует именно число полей. */
+    NmNetSample s;
+    const char *full12 =
+        "Inter-|   Receive                        |  Transmit\n"
+        " face |bytes packets errs drop fifo frame compressed multicast|"
+        "bytes packets errs drop fifo colls carrier compressed\n"
+        "   eth0: 100 1 0 0 0 0 0 0 200 2 3 4 0 0 0\n"
+        "   eth1: 100 1 0 0 0 0 0 0 200 2\n";
+    NmNetSample all[NM_MAX_IFACES];
+    guint n;
+
+    check(nm_parse_netdev(full12, "eth0", &s), "строка из 16 полей разобрана");
+    check(s.tx_errors == 3, "tx_errors из полной строки");
+    check(s.tx_dropped == 4, "tx_dropped из полной строки");
+
+    /* Строка из ровно 10 полей — обрезанная. Её надо отвергнуть, а не
+     * читать values[10] из стека. */
+    check(!nm_parse_netdev(full12, "eth1", &s),
+          "строка из 10 полей отвергнута");
+
+    n = nm_parse_netdev_all(full12, all, NM_MAX_IFACES);
+    check(n == 1, "все интерфейсы: только полная строка");
+}
+
 int main(void)
 {
     printf("== парсер /proc/net/dev ==\n");
@@ -870,6 +901,7 @@ int main(void)
     test_label_and_value_positions();
     test_format_label();
     test_parse_rgba_formats();
+    test_netdev_field_count();
     test_split_geometry();
     test_window_radius_floor();
     test_config_key_is_copied();
