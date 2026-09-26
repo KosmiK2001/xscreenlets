@@ -1252,34 +1252,64 @@ static void nm_label_changed(GtkEditable *entry, gpointer data)
         gtk_widget_queue_draw(p->win);
 }
 
+/* Определена ниже, в блоке хелперов Properties. */
+static void nm_pos_set_y_visible(GtkWidget *y, gboolean visible);
+
 static void nm_placement_changed(GtkComboBox *combo, gpointer data)
 {
     NmDialogContext *ctx = data;
     PrivData *priv = nm_live_priv(ctx);
     gint active;
     const char *key;
-    int series_index = -1;
-    char tail[32];
+    GtkWidget *yy;
+    gboolean inside;
     XsPlugin *p;
 
-    if (!priv)
+    if (!priv || !GTK_IS_COMBO_BOX(combo))
         return;
     p = priv->plugin;
     key = g_object_get_data(G_OBJECT(combo), "xs-key");
-    if (!key || sscanf(key, "series%d_%31s", &series_index, tail) != 2 ||
-        strcmp(tail, "placement"))
+    if (!key)
         return;
     active = gtk_combo_box_get_active(combo);
-    if (series_index < 0 || series_index >= NM_SERIES_MAX)
+    inside = (active != 1);
+
+    if (!strcmp(key, "header_placement")) {
+        priv->header_placement = inside ? NM_LABEL_INSIDE
+                                        : NM_LABEL_OUTSIDE;
+    } else if (g_str_has_prefix(key, "series")) {
+        int idx = -1;
+
+        if (sscanf(key, "series%d_", &idx) != 1 || idx < 0 ||
+            idx >= NM_SERIES_MAX)
+            return;
+        priv->label_placement[idx] = inside ? NM_LABEL_INSIDE
+                                            : NM_LABEL_OUTSIDE;
+    } else if (g_str_has_prefix(key, "total")) {
+        int idx = -1;
+
+        if (sscanf(key, "total%d_", &idx) != 1 || idx < 0 ||
+            idx >= NM_SERIES_MAX)
+            return;
+        priv->total_placement[idx] = inside ? NM_LABEL_INSIDE
+                                           : NM_LABEL_OUTSIDE;
+    } else {
         return;
-    priv->label_placement[series_index] =
-        (active == 1) ? NM_LABEL_OUTSIDE : NM_LABEL_INSIDE;
+    }
+
     g_key_file_set_string(priv->kf, p->name, key,
-                          (active == 1) ? "outside" : "inside");
+                          inside ? "inside" : "outside");
     xs_core_plugin_conf_flush(p->name);
     nm_rebuild(priv);
     if (p->win)
         gtk_widget_queue_draw(p->win);
+
+    /* Поле Y показывается только «внутри»: снаружи элемент прижат к
+     * рамке окна, и высота не должна настраиваться. Скрываем сразу, не
+     * дожидаясь переоткрытия диалога. */
+    yy = g_object_get_data(G_OBJECT(combo), NM_CTX_KEY ".yy");
+    if (yy && GTK_IS_WIDGET(yy))
+        nm_pos_set_y_visible(yy, inside);
 }
 
 static void nm_graph_mode_changed(GtkComboBox *combo, gpointer data)
@@ -1549,41 +1579,50 @@ static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
     nm_bind_keyed_descendants(sy, ctx);
 }
 
-/* Один X без Y. Для элементов, выбранных «снаружи»: там Y не должен
- * волновать — элемент прижат к рамке окна сверху или снизу, и ручная
- * настройка высоты только ломала бы симметрию отступов. Раньше в диалоге
- * стояла пара X/Y, но Y молча игнорировался: пользователь двигал
- * спин-кнопку и ничего не происходило. */
-static void nm_add_x(NmGrid *g, NmDialogContext *ctx, const char *label,
-                     const char *key_x, int value_x, int max)
-{
-    GtkWidget *sx = gtk_spin_button_new_with_range(0, max, 1);
-
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(sx), value_x);
-    gtk_widget_set_size_request(sx, 72, -1);
-    g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
-    nm_grid_add_label(g, label);
-    nm_grid_add_widget(g, sx);
-    nm_bind_keyed_descendants(sx, ctx);
-}
 
 /* Позиция элемента: X всегда, Y — только если элемент выбран «внутри».
  *
  * Снаружи Y не должен волновать: элемент прижат к рамке окна сверху или
- * снизу, и ручная настройка высоты только ломала бы симметрию отступов.
- * Раньше в диалоге стояла пара X/Y всегда, но Y молча игнорировался —
- * пользователь двигал спин-кнопку и ничего не происходило. Теперь поле
- * появляется только когда оно действительно на что-то влияет, то есть
- * внутри; при переключении Placement в «Outside» строка схлопывается. */
-static void nm_add_pos(NmGrid *g, NmDialogContext *ctx, const char *label,
-                       const char *key_x, const char *key_y,
-                       int value_x, int value_y, int max, gboolean show_y)
+ * снизу, и ручная настройка высоты ломала бы симметрию отступов. Раньше
+ * в диалоге стояла пара X/Y всегда, но Y молча игнорировался — пользователь
+ * двигал спин-кнопку и ничего не происходило.
+ *
+ * Y всегда создаётся, но в «Outside» скрыт: gtk_grid не умеет прятать
+ * ячейку, зато умеет скрывать виджет, и строка схлопывается сама.
+ * Скрытие повторяется обработчиком смены Placement, поэтому видно сразу,
+ * а не после переоткрытия диалога. */
+static void nm_pos_set_y_visible(GtkWidget *y, gboolean visible)
 {
-    if (show_y) {
-        nm_add_xy(g, ctx, label, key_x, key_y, value_x, value_y, max);
-        return;
-    }
-    nm_add_x(g, ctx, label, key_x, value_x, max);
+    if (y)
+        gtk_widget_set_visible(y, visible);
+}
+
+/* Возвращает Y-спин, чтобы вызывающий связал его с комбо Placement. */
+static GtkWidget *nm_add_pos(NmGrid *g, NmDialogContext *ctx,
+                             const char *label,
+                             const char *key_x, const char *key_y,
+                             int value_x, int value_y, int max,
+                             gboolean show_y)
+{
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *sx = gtk_spin_button_new_with_range(0, max, 1);
+    GtkWidget *sy = gtk_spin_button_new_with_range(0, max, 1);
+
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(sx), value_x);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(sy), value_y);
+    gtk_widget_set_size_request(sx, 72, -1);
+    gtk_widget_set_size_request(sy, 72, -1);
+    g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
+    g_object_set_data_full(G_OBJECT(sy), "xs-key", g_strdup(key_y), g_free);
+    gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(box), gtk_label_new("/"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), sy, TRUE, TRUE, 0);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, box);
+    nm_bind_keyed_descendants(sx, ctx);
+    nm_bind_keyed_descendants(sy, ctx);
+    nm_pos_set_y_visible(sy, show_y);
+    return sy;
 }
 
 static void nm_add_int(NmGrid *g, NmDialogContext *ctx, const char *key,
@@ -1683,9 +1722,12 @@ static void nm_add_font(NmGrid *g, NmDialogContext *ctx, const char *key,
     nm_bind_keyed_descendants(button, ctx);
 }
 
+/* combo_y: Y-спин, который нужно показывать/прятать вместе с этим
+ * Placement. Может быть NULL. */
 static GtkWidget *nm_add_combo(NmGrid *g, NmDialogContext *ctx,
                                const char *key, const char *label,
-                               const char *const *options, int active)
+                               const char *const *options, int active,
+                               GtkWidget *combo_y)
 {
     GtkWidget *combo = gtk_combo_box_text_new();
     int i;
@@ -1698,6 +1740,9 @@ static GtkWidget *nm_add_combo(NmGrid *g, NmDialogContext *ctx,
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, combo);
     nm_bind_keyed_descendants(combo, ctx);
+    if (combo_y)
+        g_object_set_data(G_OBJECT(combo), NM_CTX_KEY ".yy",
+                          combo_y);
     return combo;
 }
 
@@ -1753,7 +1798,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     {
         static const char *modes[] = {"Split", "Combined", NULL};
         nm_add_combo(g, ctx, "graph_mode", "Graph", modes,
-                     priv->graph_mode == NM_GRAPH_SPLIT ? 0 : 1);
+                     priv->graph_mode == NM_GRAPH_SPLIT ? 0 : 1, NULL);
     }
     /* Предел шкалы в КиБ/с: 0 = по максимуму истории. Шкала общая для обеих
      * серий, поэтому одна настройка на оба графика. */
@@ -1783,23 +1828,32 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
             nm_add_font_color(g, ctx, key_font, key_color,
                               priv->series_font[i], color, FALSE);
         }
-        g_snprintf(key, sizeof(key), "series%d_placement", i);
-        nm_add_combo(g, ctx, key, "Placement", placements,
-                     priv->label_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0);
         {
             char key_x[40], key_y[40];
+            GtkWidget *label_y;
 
+            /* Y-спин создаём ДО комбо Placement: комбо получает его
+             * указателем, чтобы прятать поле сразу при переключении. */
+            g_snprintf(key_x, sizeof(key_x), "series%d_label_x", i);
+            g_snprintf(key_y, sizeof(key_y), "series%d_label_y", i);
+            label_y = g_object_ref_sink(nm_add_pos(g, ctx, "Label pos.",
+                                                   key_x, key_y,
+                                                   priv->series_label_x[i],
+                                                   priv->series_label_y[i],
+                                                   MAX(priv->design_width,
+                                                       priv->design_height) - 1,
+                                                   priv->label_placement[i]
+                                                   == NM_LABEL_INSIDE));
+            g_snprintf(key, sizeof(key), "series%d_placement", i);
+            nm_add_combo(g, ctx, key, "Placement", placements,
+                         priv->label_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0,
+                         label_y);
+            g_object_unref(label_y);
             g_snprintf(key_x, sizeof(key_x), "series%d_x", i);
             g_snprintf(key_y, sizeof(key_y), "series%d_y", i);
             nm_add_xy(g, ctx, "Position", key_x, key_y, priv->series_x[i],
                       priv->series_y[i], MAX(priv->design_width,
                                              priv->design_height) - 1);
-            g_snprintf(key_x, sizeof(key_x), "series%d_label_x", i);
-            g_snprintf(key_y, sizeof(key_y), "series%d_label_y", i);
-            nm_add_pos(g, ctx, "Label pos.", key_x, key_y,
-                       priv->series_label_x[i], priv->series_label_y[i],
-                       MAX(priv->design_width, priv->design_height) - 1,
-                       priv->label_placement[i] == NM_LABEL_INSIDE);
         }
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
@@ -1825,14 +1879,19 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     nm_add_font(g, ctx, "label_font", "Font", priv->label_font);
     {
         static const char *placements[] = {"Inside graph", "Outside", NULL};
+        /* Y-спин создаём ДО комбо: комбо получает его указателем, чтобы
+         * прятать поле сразу при переключении Placement. */
+        GtkWidget *hy = nm_add_pos(g, ctx, "Position", "header_x",
+                                   "header_y", priv->header_x, priv->header_y,
+                                   MAX(priv->design_width,
+                                       priv->design_height) - 1,
+                                   priv->header_placement == NM_LABEL_INSIDE);
 
+        g_object_ref_sink(hy);
         nm_add_combo(g, ctx, "header_placement", "Placement", placements,
-                     priv->header_placement == NM_LABEL_OUTSIDE ? 1 : 0);
+                     priv->header_placement == NM_LABEL_OUTSIDE ? 1 : 0, hy);
+        g_object_unref(hy);
     }
-    nm_add_pos(g, ctx, "Position", "header_x", "header_y",
-               priv->header_x, priv->header_y,
-               MAX(priv->design_width, priv->design_height) - 1,
-               priv->header_placement == NM_LABEL_INSIDE);
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 
@@ -1850,16 +1909,25 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_text(g, ctx, key_lbl, "Format", priv->total_label[i]);
         g_snprintf(key_font, sizeof(key_font), "total%u_font", i);
         nm_add_font(g, ctx, key_font, "Font", priv->total_font[i]);
-        g_snprintf(key_pl, sizeof(key_pl), "total%u_placement", i);
-        nm_add_combo(g, ctx, key_pl, "Placement", placements,
-                     priv->total_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0);
         g_snprintf(key_x, sizeof(key_x), "total%u_x", i);
         g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
-        g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
-        nm_add_pos(g, ctx, "Position", key_x, key_y, priv->total_x[i],
-                   priv->total_y[i],
-                   MAX(priv->design_width, priv->design_height) - 1,
-                   priv->total_placement[i] == NM_LABEL_INSIDE);
+        {
+            /* Y-спин создаём ДО комбо: комбо получает его указателем,
+             * чтобы прятать поле сразу при переключении Placement. */
+            GtkWidget *ty = nm_add_pos(g, ctx, "Position", key_x, key_y,
+                                       priv->total_x[i], priv->total_y[i],
+                                       MAX(priv->design_width,
+                                           priv->design_height) - 1,
+                                       priv->total_placement[i]
+                                       == NM_LABEL_INSIDE);
+
+            g_object_ref_sink(ty);
+            g_snprintf(key_pl, sizeof(key_pl), "total%u_placement", i);
+            nm_add_combo(g, ctx, key_pl, "Placement", placements,
+                         priv->total_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0,
+                         ty);
+            g_object_unref(ty);
+        }
         frame = nm_section(page, label);
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
