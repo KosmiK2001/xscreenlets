@@ -53,8 +53,81 @@
  * над ним, на отдельной строке (как в conky с alignr). */
 typedef enum {
     NM_LABEL_INSIDE = 0,
-    NM_LABEL_OUTSIDE,
+    /* Снаружи элемент уходит в поле между окном и графиком. Сверху это
+     * подписи серий, снизу — сводки; но выбор не ограничен этим, верх и
+     * низ доступны любому элементу. */
+    NM_LABEL_OUTSIDE_TOP,
+    NM_LABEL_OUTSIDE_BOTTOM,
 } NmLabelPlacement;
+
+#define NM_LABEL_OUTSIDE NM_LABEL_OUTSIDE_TOP   /* старое имя в конфиге */
+
+/* Порядковый номер строки элемента внутри полосы, в которую он ушёл.
+ *
+ * Слоты нужны, потому что в полосе может быть несколько элементов: если
+ * все положить в NM_MARGIN_TOP, они лягут друг на друга. Порядок
+ * фиксирован — заголовок, подписи серий, сводки — и одинаков для
+ * верхней и нижней полосы, чтобы «сверху» и «снизу» читались одинаково.
+ *
+ * Раскладка по фазам:
+ *   0 — заголовок
+ *   1 — подписи серий
+ *   2 — сводки
+ * Элемент получает слот среди элементов своей фазы, стоящих в той же
+ * полосе. Считается на лету, состояние не требуется. */
+typedef enum { NM_BAND_HEADER = 0, NM_BAND_LABEL, NM_BAND_TOTAL } NmBandPhase;
+
+static int nm_band_slot(NmBandPhase phase, int series_index,
+                        const NmLabelPlacement *header_placement,
+                        const NmLabelPlacement *label_placement,
+                        const NmLabelPlacement *total_placement,
+                        NmLabelPlacement want)
+{
+    int slot = 0;
+    int i;
+
+    if (phase == NM_BAND_HEADER)
+        return header_placement && *header_placement == want ? 0 : -1;
+
+    /* Заголовок идёт первым в своей полосе и занимает слот 0. */
+    if (header_placement && *header_placement == want)
+        slot = 1;
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        if (label_placement && label_placement[i] == want &&
+            (phase != NM_BAND_LABEL || i < series_index))
+            slot++;
+    }
+    if (phase == NM_BAND_TOTAL)
+        for (i = 0; i < NM_SERIES_MAX; i++)
+            if (total_placement && total_placement[i] == want &&
+                i < series_index)
+                slot++;
+    return slot;
+}
+
+static const char *nm_placement_to_string(NmLabelPlacement pl)
+{
+    switch (pl) {
+    case NM_LABEL_OUTSIDE_TOP:    return "top";
+    case NM_LABEL_OUTSIDE_BOTTOM: return "bottom";
+    default:                      return "inside";
+    }
+}
+
+/* Разбор значения ключа *_placement: inside | outside | top | bottom.
+ * «outside» без уточнения — это верх, как раньше. */
+static NmLabelPlacement nm_placement_from_string(const char *v)
+{
+    if (!v)
+        return NM_LABEL_INSIDE;
+    if (g_ascii_strcasecmp(v, "top") == 0 ||
+        g_ascii_strcasecmp(v, "outside") == 0)
+        return NM_LABEL_OUTSIDE_TOP;
+    if (g_ascii_strcasecmp(v, "bottom") == 0)
+        return NM_LABEL_OUTSIDE_BOTTOM;
+    return NM_LABEL_INSIDE;
+}
+
 
 typedef struct {
     XsPlugin *plugin;
@@ -221,10 +294,18 @@ static void nm_sample(PrivData *priv)
 /* Отрисовка                                                           */
 /* ------------------------------------------------------------------ */
 
+/* (x, y) — координаты в окне. clip_h вместе с clip_y задаёт область
+ * отсечения: элемент виден только внутри неё, но его собственные
+ * координаты остаются абсолютными.
+ *
+ * Раньше отсечение задавалось одним height, а y считался абсолютным, и
+ * nm_show_text клампил y по height как если бы тот был пределом окна.
+ * Для нижней полосы это давало y = 105 → 13, то есть сводка улетала на
+ * верх. Теперь предел считается как clip_y + clip_h. */
 static void nm_show_text(cairo_t *cr, PangoLayout *layout,
                          const char *font_name, int x, int y,
                          const char *text, const gdouble color[4],
-                         int width, int height)
+                         int width, int clip_y, int clip_h)
 {
     PangoFontDescription *font = pango_font_description_from_string(font_name);
     int text_w = 0;
@@ -238,10 +319,10 @@ static void nm_show_text(cairo_t *cr, PangoLayout *layout,
      * оставляет значение формально внутри окна, когда его ореол уже
      * пересекает рамку. */
     x = nm_fit_text_coordinate(x, text_w + 2 * NM_TEXT_SHADOW_RADIUS, width);
-    if (height > 0 && y > height - 1 - NM_TEXT_SHADOW_RADIUS)
-        y = height - 1 - NM_TEXT_SHADOW_RADIUS;
-    if (y < NM_TEXT_SHADOW_RADIUS)
-        y = NM_TEXT_SHADOW_RADIUS;
+    if (clip_h > 0 && y > clip_y + clip_h - 1 - NM_TEXT_SHADOW_RADIUS)
+        y = clip_y + clip_h - 1 - NM_TEXT_SHADOW_RADIUS;
+    if (y < clip_y + NM_TEXT_SHADOW_RADIUS)
+        y = clip_y + NM_TEXT_SHADOW_RADIUS;
     {
         static const int offsets[8][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0},
                                           {1, 0}, {-1, 1}, {0, 1}, {1, 1}};
@@ -394,7 +475,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
     gboolean split = (priv->graph_mode == NM_GRAPH_SPLIT);
     guint i;
     int graph_y, graph_h;
-    int top_band, bot_band;
+    int top_band, bot_band, top_rows, bot_rows, top_step, bot_step;
     int window_radius;
     int dw = priv->design_width > 0 ? priv->design_width : width;
     int dh = priv->design_height > 0 ? priv->design_height : height;
@@ -404,39 +485,67 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
 
     pango_layout_set_font_description(layout, NULL);
 
-    /* Отступы между окном и графиком появляются, когда какой-то элемент
-     * выбран «снаружи»: он уходит из графика в поле между рамкой окна и
-     * рамкой графика. Отступ считается по РЕАЛЬНОЙ высоте шрифта именно
-     * того элемента, который выбран снаружи, а если таких несколько — по
-     * наибольшей из них; плюс NM_MARGIN_TOP/BOTTOM сверху и снизу, чтобы
-     * текст не липнул к рамкам. Одинаковая высота для всех не годится: у
-     * крупной сводки она мала, и текст упирался бы в рамку графика. */
-    top_band = 0;
-    bot_band = 0;
-    {
-        int row_h = 0;
+    /* Отступы между окном и графиком. Элемент, выбранный «снаружи»,
+     * уходит из графика в поле между рамкой окна и рамкой графика: в
+     * верхнюю полосу или в нижнюю, по выбору пользователя.
+     *
+     * Полосы независимы: если сверху только заголовок, а снизу две
+     * сводки, то top_band и bot_band считаются по своим элементам.
+     * Высота берётся по РЕАЛЬНОМУ шрифту (nm_row_height), потому что
+     * pango_layout_get_extents отдаёт логические единицы, а не пиксели.
+     * Плюс NM_MARGIN_TOP/BOTTOM, чтобы текст не липнул к рамкам. */
+    /* Раскладка полос. Элемент, выбранный «снаружи», уходит из графика
+     * в поле между рамкой окна и рамкой графика — наверх или вниз.
+     *
+     * Шаг строки ОБЩИЙ для двух вещей: для высоты полосы и для сдвига
+     * между строками. Раньше высота считалась как NM_ROW_H_MIN * rows
+     * (8 px на строку), а сдвиг — по реальному шрифту плюс margin
+     * (15 px). Нижние строки уезжали за полосу и обрезались: в нижней
+     * полосе оставалась одна строка вместо трёх.
+     *
+     * Высота берётся по РЕАЛЬНОМУ шрифту (nm_row_height), потому что
+     * pango_layout_get_extents отдаёт логические единицы, а не пиксели.
+     * Плюс NM_MARGIN_TOP/BOTTOM, чтобы текст не липнул к рамкам. */
+    top_rows = 0;
+    bot_rows = 0;
+    top_step = 0;
+    bot_step = 0;
+    if (priv->header_placement == NM_LABEL_OUTSIDE_TOP) {
+        top_rows++;
+        top_step = MAX(top_step, nm_row_height(layout, priv->label_font));
+    }
+    if (priv->header_placement == NM_LABEL_OUTSIDE_BOTTOM) {
+        bot_rows++;
+        bot_step = MAX(bot_step, nm_row_height(layout, priv->label_font));
+    }
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        int h = nm_row_height(layout, priv->series_font[i]);
 
-        for (i = 0; i < NM_SERIES_MAX; i++)
-            if (priv->label_placement[i] == NM_LABEL_OUTSIDE)
-                row_h = MAX(row_h,
-                            nm_row_height(layout, priv->series_font[i]));
-        if (priv->header_placement == NM_LABEL_OUTSIDE)
-            row_h = MAX(row_h, nm_row_height(layout, priv->label_font));
-        for (i = 0; i < NM_SERIES_MAX; i++)
-            if (priv->total_placement[i] == NM_LABEL_OUTSIDE)
-                row_h = MAX(row_h,
-                            nm_row_height(layout, priv->total_font[i]));
-        if (row_h > 0) {
-            row_h = MAX(row_h, NM_ROW_H_MIN);
-            top_band = row_h + NM_MARGIN_TOP + NM_MARGIN_BOTTOM;
-            bot_band = top_band;
+        if (priv->label_placement[i] == NM_LABEL_OUTSIDE_TOP) {
+            top_rows++;
+            top_step = MAX(top_step, h);
+        } else if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
+            bot_rows++;
+            bot_step = MAX(bot_step, h);
         }
     }
-    /* Нижний отступ нужен только если сводки выбраны снаружи: они живут
-     * внизу. Если обе внутри — снизу отступа нет, иначе пустое поле. */
-    if (priv->total_placement[0] == NM_LABEL_INSIDE &&
-        priv->total_placement[1] == NM_LABEL_INSIDE)
-        bot_band = 0;
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        int h = nm_row_height(layout, priv->total_font[i]);
+
+        if (priv->total_placement[i] == NM_LABEL_OUTSIDE_TOP) {
+            top_rows++;
+            top_step = MAX(top_step, h);
+        } else if (priv->total_placement[i] == NM_LABEL_OUTSIDE_BOTTOM) {
+            bot_rows++;
+            bot_step = MAX(bot_step, h);
+        }
+    }
+    top_step = MAX(top_step, NM_ROW_H_MIN);
+    bot_step = MAX(bot_step, NM_ROW_H_MIN);
+    top_band = top_rows ? top_step * top_rows + NM_MARGIN_TOP
+                        + NM_MARGIN_BOTTOM : 0;
+    bot_band = bot_rows ? bot_step * bot_rows + NM_MARGIN_TOP
+                        + NM_MARGIN_BOTTOM : 0;
 
     graph_y = NM_GRAPH_TOP + top_band;
     graph_h = MAX(1, height - graph_y - bot_band);
@@ -450,6 +559,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         graph_y = NM_GRAPH_TOP + top_band;
         graph_h = MAX(1, height - graph_y - bot_band);
     }
+
     /* Скругление окна не меньше скругления графика. */
     window_radius = MAX(priv->window_radius, priv->corner_radius);
     {
@@ -638,66 +748,121 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         int sy = nm_scale_position(priv->series_y[i], dh, height, height - 1);
         int lx = nm_scale_position(priv->series_label_x[i], dw, width,
                                    width - 1);
+        int ly = nm_scale_position(priv->series_label_y[i], dh, height,
+                                   height - 1);
         char *full;
 
         if (priv->label_placement[i] == NM_LABEL_INSIDE) {
-            /* Внутри: метка и значение одной строкой поверх графика. */
-            full = g_strdup_printf("%s: %s", priv->series_label[i],
-                                   rate_text[i]);
+            /* Внутри: подпись на своей координате, значение — рядом с
+             * ней по горизонтали, а не одной склеенной строкой. Раньше
+             * рисовалось "%s: %s" одним куском, из-за чего series<N>_label_x
+             * и _y вообще ни на что не влияли. */
+            int w = 0;
+
+            pango_layout_set_font_description(layout, NULL);
+            {
+                PangoFontDescription *fd =
+                    pango_font_description_from_string(priv->series_font[i]);
+
+                pango_layout_set_font_description(layout, fd);
+                pango_font_description_free(fd);
+            }
+            pango_layout_set_text(layout, priv->series_label[i], -1);
+            pango_layout_get_pixel_size(layout, &w, NULL);
+            nm_show_text(cr, layout, priv->series_font[i], lx, ly,
+                         priv->series_label[i], priv->series_text_color[i],
+                         width, graph_y, graph_h);
+            nm_show_text(cr, layout, priv->series_font[i],
+                         lx + w + 6, ly, rate_text[i],
+                         priv->series_text_color[i], width, graph_y, graph_h);
+            full = NULL;
         } else {
-            /* Снаружи: подпись уходит в полосу над графиком, значение
-             * остаётся в графике на своей позиции. Полоса — обычная
-             * область окна, поэтому ограничиваем её шириной. */
-            int row_h;
+            /* Снаружи: подпись уходит в полосу, значение остаётся в
+             * графике. Полоса сверху или снизу — по выбору. */
+            int row_h = (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM)
+                            ? bot_step : top_step;
+            int slot = nm_band_slot(NM_BAND_LABEL, i,
+                                    &priv->header_placement,
+                                    priv->label_placement,
+                                    priv->total_placement,
+                                    priv->label_placement[i]);
             int row_y;
 
-            full = g_strdup(rate_text[i]);
-            /* Каждая подпись серии — своя строка в верхнем отступе, с
-             * высотой по своему шрифту. Заголовок сюда больше не входит:
-             * у него свой placement, и если он внутри, строка 0 отступа
-             * свободна. Координата Y из настроек здесь не используется —
-             * иначе подписи наезжали бы друг на друга. */
-            row_h = MAX(1, nm_row_height(layout, priv->series_font[i]));
-            row_y = NM_MARGIN_TOP +
-                    (int) i * (row_h + NM_MARGIN_BOTTOM);
+            if (priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM)
+                row_y = graph_y + graph_h + NM_MARGIN_TOP + slot * row_h;
+            else
+                row_y = NM_MARGIN_TOP + slot * row_h;
             nm_show_text(cr, layout, priv->series_font[i],
                          lx, row_y, priv->series_label[i],
-                         priv->series_text_color[i], width, top_band);
+                         priv->series_text_color[i], width,
+                         priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
+                         ? graph_y + graph_h : 0,
+                         priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
+                         ? bot_band : top_band);
+            full = g_strdup(rate_text[i]);
         }
-        nm_show_text(cr, layout, priv->series_font[i], sx, sy, full,
-                     priv->series_text_color[i], width, height);
+        if (full)
+            nm_show_text(cr, layout, priv->series_font[i], sx, sy, full,
+                         priv->series_text_color[i], width, graph_y, graph_h);
         g_free(full);
     }
-    /* Заголовок: внутри — на своей координате в графике, снаружи — в
-     * верхнем отступе, прижатый к рамке окна. */
+    /* Заголовок: внутри — в графике на своей координате, снаружи — в
+     * верхней или нижней полосе, прижатый к рамке окна. */
     {
         int hx = nm_scale_position(priv->header_x, dw, width, width - 1);
         int hy = nm_scale_position(priv->header_y, dh, height, height - 1);
+        int row_h;
 
-        if (priv->header_placement == NM_LABEL_OUTSIDE) {
-            hy = NM_MARGIN_TOP;
+        switch (priv->header_placement) {
+        /* Заголовок в своей полосе всегда первый: слот 0. Подписи и
+         * сводки сдвигаются на шаг вниз, если он делит с ними полосу. */
+        case NM_LABEL_OUTSIDE_TOP:
+            nm_show_text(cr, layout, priv->label_font, hx, NM_MARGIN_TOP,
+                         header_text, priv->text_color, width, 0, top_band);
+            break;
+        case NM_LABEL_OUTSIDE_BOTTOM:
+            nm_show_text(cr, layout, priv->label_font, hx,
+                         graph_y + graph_h + NM_MARGIN_TOP, header_text,
+                         priv->text_color, width, graph_y + graph_h,
+                         bot_band);
+            break;
+        default:
             nm_show_text(cr, layout, priv->label_font, hx, hy, header_text,
-                         priv->text_color, width, top_band);
-        } else {
-            nm_show_text(cr, layout, priv->label_font, hx, hy, header_text,
-                         priv->text_color, width, graph_h);
+                         priv->text_color, width, graph_y, graph_h);
+            break;
         }
     }
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int tx = nm_scale_position(priv->total_x[i], dw, width, width - 1);
         int ty = nm_scale_position(priv->total_y[i], dh, height, height - 1);
+        int row_h, slot;
 
-        /* Снаружи сводка уходит в нижний отступ, прижатая к рамке окна;
-         * внутри остаётся на своей координате в графике. */
-        if (priv->total_placement[i] == NM_LABEL_OUTSIDE) {
-            ty = graph_y + graph_h + NM_MARGIN_TOP;
+        switch (priv->total_placement[i]) {
+        case NM_LABEL_OUTSIDE_TOP:
+            row_h = top_step;
+            slot = nm_band_slot(NM_BAND_TOTAL, i, &priv->header_placement,
+                                priv->label_placement, priv->total_placement,
+                                NM_LABEL_OUTSIDE_TOP);
+            nm_show_text(cr, layout, priv->total_font[i], tx,
+                         NM_MARGIN_TOP + slot * row_h,
+                         total_text[i], priv->series_text_color[i], width,
+                         0, top_band);
+            break;
+        case NM_LABEL_OUTSIDE_BOTTOM:
+            row_h = bot_step;
+            slot = nm_band_slot(NM_BAND_TOTAL, i, &priv->header_placement,
+                                priv->label_placement, priv->total_placement,
+                                NM_LABEL_OUTSIDE_BOTTOM);
+            nm_show_text(cr, layout, priv->total_font[i], tx,
+                         graph_y + graph_h + NM_MARGIN_TOP + slot * row_h,
+                         total_text[i], priv->series_text_color[i], width,
+                         graph_y + graph_h, bot_band);
+            break;
+        default:
             nm_show_text(cr, layout, priv->total_font[i], tx, ty,
                          total_text[i], priv->series_text_color[i], width,
-                         bot_band);
-        } else {
-            nm_show_text(cr, layout, priv->total_font[i], tx, ty,
-                         total_text[i], priv->series_text_color[i], width,
-                         graph_h);
+                         graph_y, graph_h);
+            break;
         }
         g_free(total_text[i]);
     }
@@ -807,17 +972,13 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
 
         g_snprintf(key, sizeof(key), "series%u_placement", i);
         placement = xs_host_api()->conf_str(kf, p->name, key, "inside");
-        priv->label_placement[i] =
-            (g_ascii_strcasecmp(placement, "outside") == 0)
-                ? NM_LABEL_OUTSIDE : NM_LABEL_INSIDE;
+        priv->label_placement[i] = nm_placement_from_string(placement);
         g_free(placement);
 
         /* У сводок свой выбор inside/outside, раньше его не было. */
         g_snprintf(key, sizeof(key), "total%u_placement", i);
         placement = xs_host_api()->conf_str(kf, p->name, key, "inside");
-        priv->total_placement[i] =
-            (g_ascii_strcasecmp(placement, "outside") == 0)
-                ? NM_LABEL_OUTSIDE : NM_LABEL_INSIDE;
+        priv->total_placement[i] = nm_placement_from_string(placement);
         g_free(placement);
     }
     {
@@ -825,9 +986,7 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
 
         placement = xs_host_api()->conf_str(kf, p->name, "header_placement",
                                            "inside");
-        priv->header_placement =
-            (g_ascii_strcasecmp(placement, "outside") == 0)
-                ? NM_LABEL_OUTSIDE : NM_LABEL_INSIDE;
+        priv->header_placement = nm_placement_from_string(placement);
         g_free(placement);
     }
 
@@ -949,19 +1108,16 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         char key[32];
         g_snprintf(key, sizeof(key), "series%u_placement", i);
         g_key_file_set_string(kf, p->name, key,
-                              (priv->label_placement[i] == NM_LABEL_OUTSIDE)
-                                  ? "outside" : "inside");
+                              nm_placement_to_string(priv->label_placement[i]));
     }
     g_key_file_set_string(kf, p->name, "header_placement",
-                          priv->header_placement == NM_LABEL_OUTSIDE
-                          ? "outside" : "inside");
+                          nm_placement_to_string(priv->header_placement));
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char tkey[32];
 
         g_snprintf(tkey, sizeof(tkey), "total%u_placement", i);
         g_key_file_set_string(kf, p->name, tkey,
-                              priv->total_placement[i] == NM_LABEL_OUTSIDE
-                              ? "outside" : "inside");
+                              nm_placement_to_string(priv->total_placement[i]));
     }
     g_key_file_set_integer(kf, p->name, "rate_smooth", priv->rate_smooth);
     g_key_file_set_integer(kf, p->name, "corner_radius",
@@ -1262,6 +1418,7 @@ static void nm_placement_changed(GtkComboBox *combo, gpointer data)
     gint active;
     const char *key;
     GtkWidget *yy;
+    NmLabelPlacement place;
     gboolean inside;
     XsPlugin *p;
 
@@ -1272,19 +1429,19 @@ static void nm_placement_changed(GtkComboBox *combo, gpointer data)
     if (!key)
         return;
     active = gtk_combo_box_get_active(combo);
-    inside = (active != 1);
 
+    place = (active == 1) ? NM_LABEL_OUTSIDE_TOP :
+            (active == 2) ? NM_LABEL_OUTSIDE_BOTTOM : NM_LABEL_INSIDE;
+    inside = (place == NM_LABEL_INSIDE);
     if (!strcmp(key, "header_placement")) {
-        priv->header_placement = inside ? NM_LABEL_INSIDE
-                                        : NM_LABEL_OUTSIDE;
+        priv->header_placement = place;
     } else if (g_str_has_prefix(key, "series")) {
         int idx = -1;
 
         if (sscanf(key, "series%d_", &idx) != 1 || idx < 0 ||
             idx >= NM_SERIES_MAX)
             return;
-        priv->label_placement[idx] = inside ? NM_LABEL_INSIDE
-                                            : NM_LABEL_OUTSIDE;
+        priv->label_placement[idx] = place;
     } else if (g_str_has_prefix(key, "total")) {
         int idx = -1;
 
@@ -1298,7 +1455,7 @@ static void nm_placement_changed(GtkComboBox *combo, gpointer data)
     }
 
     g_key_file_set_string(priv->kf, p->name, key,
-                          inside ? "inside" : "outside");
+                          nm_placement_to_string(place));
     xs_core_plugin_conf_flush(p->name);
     nm_rebuild(priv);
     if (p->win)
@@ -1810,7 +1967,8 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char label[32];
         char key[32];
-        static const char *placements[] = {"Inside graph", "Outside", NULL};
+        static const char *placements[] = {"Inside graph", "Outside top",
+                                        "Outside bottom", NULL};
 
         g_snprintf(label, sizeof(label), "%s series",
                    i == 0 ? "Download" : "Upload");
@@ -1846,8 +2004,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                                                    == NM_LABEL_INSIDE));
             g_snprintf(key, sizeof(key), "series%d_placement", i);
             nm_add_combo(g, ctx, key, "Placement", placements,
-                         priv->label_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0,
-                         label_y);
+                         (int) priv->label_placement[i], label_y);
             g_object_unref(label_y);
             g_snprintf(key_x, sizeof(key_x), "series%d_x", i);
             g_snprintf(key_y, sizeof(key_y), "series%d_y", i);
@@ -1878,7 +2035,8 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     g = nm_grid_new();
     nm_add_font(g, ctx, "label_font", "Font", priv->label_font);
     {
-        static const char *placements[] = {"Inside graph", "Outside", NULL};
+        static const char *placements[] = {"Inside graph", "Outside top",
+                                        "Outside bottom", NULL};
         /* Y-спин создаём ДО комбо: комбо получает его указателем, чтобы
          * прятать поле сразу при переключении Placement. */
         GtkWidget *hy = nm_add_pos(g, ctx, "Position", "header_x",
@@ -1889,7 +2047,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
 
         g_object_ref_sink(hy);
         nm_add_combo(g, ctx, "header_placement", "Placement", placements,
-                     priv->header_placement == NM_LABEL_OUTSIDE ? 1 : 0, hy);
+                     (int) priv->header_placement, hy);
         g_object_unref(hy);
     }
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
@@ -1900,7 +2058,8 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char label[40];
         char key_x[40], key_y[40], key_lbl[40], key_font[40], key_pl[40];
-        static const char *placements[] = {"Inside graph", "Outside", NULL};
+        static const char *placements[] = {"Inside graph", "Outside top",
+                                        "Outside bottom", NULL};
 
         g = nm_grid_new();
         g_snprintf(label, sizeof(label), "%s total",
@@ -1924,8 +2083,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
             g_object_ref_sink(ty);
             g_snprintf(key_pl, sizeof(key_pl), "total%u_placement", i);
             nm_add_combo(g, ctx, key_pl, "Placement", placements,
-                         priv->total_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0,
-                         ty);
+                         (int) priv->total_placement[i], ty);
             g_object_unref(ty);
         }
         frame = nm_section(page, label);

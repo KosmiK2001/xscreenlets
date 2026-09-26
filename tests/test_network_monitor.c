@@ -458,6 +458,119 @@ static void test_outside_margins(void)
           "крупный ВНУТРЕННИЙ шрифт отступ не создаёт");
 }
 
+/* Кламп отсечения: y абсолютный, а предел считается как clip_y + clip_h.
+ *
+ * Раньше nm_show_text получал один height и клампил y по нему как если
+ * бы тот был пределом окна. Для нижней полосы y = 105 при height = 17
+ * превращался в 13 — сводка улетала наверх. Регрессия фиксирует
+ * правило: y живёт в [clip_y + R, clip_y + clip_h - 1 - R]. */
+#define T_SHADOW 3
+
+static int t_clamp(int y, int clip_y, int clip_h)
+{
+    if (clip_h > 0 && y > clip_y + clip_h - 1 - T_SHADOW)
+        y = clip_y + clip_h - 1 - T_SHADOW;
+    if (y < clip_y + T_SHADOW)
+        y = clip_y + T_SHADOW;
+    return y;
+}
+
+static void test_text_clip_offsets(void)
+{
+    /* Верхняя полоса: отсчёт от нуля. */
+    check(t_clamp(2, 0, 17) == 3, "верх: тень снизу не даёт выйти за край");
+    check(t_clamp(5, 0, 17) == 5, "верх: координата внутри полосы не трогается");
+    check(t_clamp(30, 0, 17) == 13,
+          "верх: слишком низкое y прижимается к низу полосы, не к верху окна");
+
+    /* Нижняя полоса: отсчёт от graph_y. y = 105 при clip_y = 103. */
+    /* 105 попадает в [106, 116], но тень сверху требует 106 — и это
+     * начало нижней полосы, а НЕ верх окна. Прежний код давал 13. */
+    check(t_clamp(105, 103, 17) == 106,
+          "низ: y прижимается к началу нижней полосы, а не к верху окна");
+    check(t_clamp(105, 0, 17) == 13,
+          "низ без clip_y — старый неверный результат");
+    check(t_clamp(120, 103, 17) == 116, "низ: клампится по clip_y + clip_h");
+    check(t_clamp(100, 103, 17) == 106, "низ: нижний предел не ниже clip_y");
+
+    /* График: клип по области графика, а не по полосе. */
+    check(t_clamp(50, 17, 106) == 50, "график: внутри не трогается");
+    check(t_clamp(200, 17, 106) == 119,
+          "график: выход за низ графика даёт последний ряд");
+}
+
+/* Верхняя и нижняя полосы независимы и считаются по общему шагу строки.
+ *
+ * Шаг строки — это одновременно и высота строки, и сдвиг между строками.
+ * Раньше высота считалась как T_ROW_H_MIN * rows, а сдвиг — по реальному
+ * шрифту плюс margin. Для трёх строк снизу это 24 px полосы при сдвиге
+ * 15 px, и нижние строки уезжали за полосу и обрезались. */
+typedef struct {
+    int hdr_top, hdr_bot, s0_top, s0_bot, t0_top, t0_bot;
+} TSide;
+
+static void t_bands(const TSide *s, int font_px, int *top, int *bot)
+{
+    int th = 0, bh = 0, tr = 0, br = 0;
+
+    if (font_px <= 0)
+        font_px = T_ROW_H_MIN;
+    if (s->hdr_top) { th = MAX(th, font_px); tr++; }
+    if (s->hdr_bot) { bh = MAX(bh, font_px); br++; }
+    if (s->s0_top)  { th = MAX(th, font_px); tr++; }
+    if (s->s0_bot)  { bh = MAX(bh, font_px); br++; }
+    if (s->t0_top)  { th = MAX(th, font_px); tr++; }
+    if (s->t0_bot)  { bh = MAX(bh, font_px); br++; }
+    th = MAX(th, T_ROW_H_MIN);
+    bh = MAX(bh, T_ROW_H_MIN);
+    *top = tr ? th * tr + T_MARGIN_TOP + T_MARGIN_BOTTOM : 0;
+    *bot = br ? bh * br + T_MARGIN_TOP + T_MARGIN_BOTTOM : 0;
+}
+
+/* Смещение строки №slot от края полосы при высоте строки step. */
+static int t_row_y(int slot, int step)
+{
+    return T_MARGIN_TOP + slot * step;
+}
+
+static void test_independent_bands(void)
+{
+    int top = -1, bot = -1;
+
+    t_bands(&(TSide){0,0,0,0,0,0}, 13, &top, &bot);
+    check(top == 0 && bot == 0, "все внутри: полос нет");
+
+    t_bands(&(TSide){1,0,0,0,0,0}, 13, &top, &bot);
+    check(top == 13 * 1 + 4 && bot == 0, "заголовок сверху: полоса только сверху");
+
+    t_bands(&(TSide){0,0,0,0,0,1}, 13, &top, &bot);
+    check(top == 0 && bot == 13 * 1 + 4, "сводка снизу: полоса только снизу");
+
+    t_bands(&(TSide){1,0,1,0,0,1}, 13, &top, &bot);
+    check(top == 13 * 2 + 4 && bot == 13 * 1 + 4,
+          "элементы сверху и снизу: обе полосы по своим элементам");
+
+    t_bands(&(TSide){1,0,0,0,0,0}, 30, &top, &bot);
+    check(top == 30 + 4, "крупный шрифт наверху увеличивает верхнюю полосу");
+    check(bot == 0, "крупный шрифт наверху не трогает нижнюю");
+
+    /* Регрессия: полоса обязана вмещать последнюю строку. Шаг равен
+     * высоте строки, а не T_ROW_H_MIN, — иначе нижние строки исчезают. */
+    t_bands(&(TSide){0,1,0,1,0,1}, 13, &top, &bot);   /* 3 строки снизу */
+    check(bot == 13 * 3 + 4, "три строки снизу: полоса из трёх шагов");
+    check(bot == 43, "полоса снизу равна 43");
+    check(t_row_y(2, 13) + 13 <= bot,
+          "нижняя граница последней строки внутри полосы");
+    check(t_row_y(2, 13) == 28, "третья строка смещена на два шага");
+    check(bot - (t_row_y(2, 13) + 13) == T_MARGIN_BOTTOM,
+          "под последней строкой остаётся нижний margin");
+
+    /* Со старой формулой (шаг 8 при высоте 13) последняя строка вышла
+     * бы за полосу: 2*8 + 13 = 29 > 8*3 + 4 = 28. */
+    check(t_row_y(2, T_ROW_H_MIN) + 13 > T_ROW_H_MIN * 3 + 4,
+          "старый шаг по NM_ROW_H_MIN обрезал бы последнюю строку");
+}
+
 static void test_split_geometry(void)
 {
     /* Две половины не должны смыкаться: зазор обязателен, иначе две
@@ -561,6 +674,8 @@ int main(void)
     test_format_bytes();
     test_corner_radius();
     test_outside_margins();
+    test_text_clip_offsets();
+    test_independent_bands();
     test_split_geometry();
     test_window_radius_floor();
     test_config_key_is_copied();
