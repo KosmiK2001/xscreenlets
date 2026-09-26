@@ -699,6 +699,91 @@ static void test_units_format(void)
               "Цельсий не переводится");
 }
 
+/* ------------------------------------------- склейка пар (регресс)
+ *
+ * Регрессия, на которую я наступал дважды: сериализация «подпись|
+ * источник» была продублирована в init и в обработчике галочек, и
+ * обработчик писал одни подписи. Стоило один раз двинуть галочку —
+ * источники исчезали, и строки переставали переживать перезагрузку.
+ * Теперь реализация одна, в core.
+ */
+
+static void test_join_pair_keeps_source(void)
+{
+    GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *sources = g_ptr_array_new_with_free_func(g_free);
+    char *text;
+
+    g_ptr_array_add(labels, g_strdup("CPU"));
+    g_ptr_array_add(labels, g_strdup("Диск 1"));
+    g_ptr_array_add(labels, g_strdup("GPU"));
+    g_ptr_array_add(sources, g_strdup("coretemp/coretemp.0/Package id 0"));
+    g_ptr_array_add(sources, g_strdup("drivetemp/0:0:2:0/temp1"));
+    g_ptr_array_add(sources, g_strdup("nvme/nvme0/Composite"));
+
+    text = sensor_config_join_pair(labels, sources);
+    check_str(text,
+              "CPU|coretemp/coretemp.0/Package id 0;"
+              "Диск 1|drivetemp/0:0:2:0/temp1;"
+              "GPU|nvme/nvme0/Composite",
+              "пары склеены в порядке массивов");
+    g_free(text);
+
+    /* Метка пользователем переименована — источник обязан уцелеть */
+    g_free(g_ptr_array_index(labels, 0));
+    g_ptr_array_index(labels, 0) = g_strdup("Процессор");
+    text = sensor_config_join_pair(labels, sources);
+    check(g_strstr_len(text, -1, "Процессор|coretemp/coretemp.0/Package id 0")
+          != NULL, "переименование метки не теряет источник");
+    g_free(text);
+
+    /* Короткий массив источников: строки без источника пишутся как есть */
+    g_ptr_array_set_size(sources, 1);
+    text = sensor_config_join_pair(labels, sources);
+    check_str(text, "Процессор|coretemp/coretemp.0/Package id 0;Диск 1;GPU",
+              "строка без источника не получает висящего разделителя");
+    g_free(text);
+
+    /* Пустые входы */
+    text = sensor_config_join_pair(NULL, NULL);
+    check_str(text, "", "NULL-массивы дают пустую строку");
+    g_free(text);
+    text = sensor_config_join_pair(labels, NULL);
+    check_str(text, "Процессор;Диск 1;GPU", "NULL-источники");
+    g_free(text);
+
+    g_ptr_array_unref(labels);
+    g_ptr_array_unref(sources);
+}
+
+/* Round-trip: склейка → разбор → та же строка. Это то, что происходит
+ * при перезапуске демона. */
+static void test_join_pair_roundtrip(void)
+{
+    GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *sources = g_ptr_array_new_with_free_func(g_free);
+    char *text, *id;
+
+    g_ptr_array_add(labels, g_strdup("CPU 1"));
+    g_ptr_array_add(sources, g_strdup("coretemp/coretemp.0/Core 0"));
+    g_ptr_array_add(labels, g_strdup("Диск: sda"));
+    g_ptr_array_add(sources, g_strdup("drivetemp/1:0:3:0/temp1"));
+    text = sensor_config_join_pair(labels, sources);
+
+    {
+        GPtrArray *back = sensor_config_list(text);
+
+        check_int((gint) back->len, 2, "разбор вернул обе строки");
+        id = g_strdup(g_ptr_array_index(back, 0));
+        g_ptr_array_unref(back);
+    }
+    check_str(id, "CPU 1|coretemp/coretemp.0/Core 0", "строка 0 целиком");
+    g_free(id);
+    g_free(text);
+    g_ptr_array_unref(labels);
+    g_ptr_array_unref(sources);
+}
+
 /* ---------------------------------------------------------------- формат */
 
 static void test_units(void)
@@ -882,6 +967,8 @@ int main(void)
     test_font_size_in_points();
     test_font_scale_proportional();
     test_units_format();
+    test_join_pair_keeps_source();
+    test_join_pair_roundtrip();
     test_units();
     test_format();
     test_config_list();

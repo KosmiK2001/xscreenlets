@@ -96,6 +96,12 @@ typedef struct {
 typedef struct {
     SenPriv *priv;
     char *instance_name;
+    /* Пока строится список сенсоров, обработчики молчат. Список
+     * создаётся ДО sen_connect_children(), но gtk_entry_set_text() при
+     * заполнении всё равно шлёт «changed» на каждое из 46 полей — и
+     * каждый вызов писал конфиг и перестраивал кеш, то есть 46 раз
+     * за одно открытие Properties. */
+    gboolean building;
 } SenDialogContext;
 
 /* Таблица «имя инстанса -> priv». Нужна, потому что контекст диалога
@@ -439,6 +445,10 @@ static void sen_rebuild_cache(SenPriv *priv, int width, int height)
     priv->cache_height = height;
 }
 
+/* Сериализация строк в «подпись|источник». Определение стоит рядом с
+ * sen_save(), но вызывается и из init — прототип нужен здесь. */
+static char *sen_rows_to_config(const SenPriv *priv);
+
 static int sen_init(XsPlugin *p, GKeyFile *kf)
 {
     SenPriv *priv = g_new0(SenPriv, 1);
@@ -590,23 +600,10 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * устройству. Строка переживала бы перезагрузку только до первого
      * же сохранения — а оно происходит в init. */
     {
-        GString *rows_text = g_string_new(NULL);
+        char *rows_text = sen_rows_to_config(priv);
 
-        for (guint i = 0; i < priv->rows->len; i++) {
-            const char *label = g_ptr_array_index(priv->rows, i);
-            const char *source = i < priv->row_sources->len
-                               ? g_ptr_array_index(priv->row_sources, i)
-                               : "";
-
-            if (i > 0)
-                g_string_append_c(rows_text, ';');
-            if (source && *source)
-                g_string_append_printf(rows_text, "%s|%s", label, source);
-            else
-                g_string_append(rows_text, label);
-        }
-        g_key_file_set_string(kf, p->name, "rows", rows_text->str);
-        g_string_free(rows_text, TRUE);
+        g_key_file_set_string(kf, p->name, "rows", rows_text);
+        g_free(rows_text);
     }
     g_key_file_set_integer(kf, p->name, "window_width", priv->width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->height);
@@ -712,12 +709,24 @@ static SenPriv *sen_live_priv(SenDialogContext *ctx)
     return g_hash_table_lookup(sen_instances, ctx->instance_name);
 }
 
+/* Сериализация строк в конфиг: «подпись|источник», через «;».
+ *
+ * ОДНА функция на запись и на init. Дублировать разбор «подпись|источник»
+ * в двух местах означало две расходящиеся версии: init писал пары, а
+ * обработчик галочек — одни подписи, и первое же движение галочки стирало
+ * привязку к устройству. Строка переживала бы перезагрузку только до
+ * первого клика в Properties. */
+static char *sen_rows_to_config(const SenPriv *priv)
+{
+    return sensor_config_join_pair(priv->rows, priv->row_sources);
+}
+
 static void sen_save(SenPriv *priv)
 {
-    char *joined = sensor_config_join(priv->rows);
+    char *text = sen_rows_to_config(priv);
 
-    g_key_file_set_string(priv->kf, priv->plugin->name, "rows", joined);
-    g_free(joined);
+    g_key_file_set_string(priv->kf, priv->plugin->name, "rows", text);
+    g_free(text);
     xs_core_plugin_conf_flush(priv->plugin->name);
 }
 
@@ -909,6 +918,19 @@ static GtkWidget *sen_font_button(const char *key, const char *font)
  * меняется по нажатию, а не по алфавиту: пользователь сам решает, что
  * сверху. При снятии галочки строка удаляется — иначе в апплете остаются
  * значения для сенсоров, которые пользователь убрал. */
+/* Индекс строки в priv по её источнику. */
+static guint sen_row_index(SenPriv *priv, const char *source)
+{
+    for (guint i = 0; i < priv->row_sources->len; i++) {
+        if (g_strcmp0(g_ptr_array_index(priv->row_sources, i), source) == 0)
+            return i;
+    }
+    return SEN_ROW_NONE;
+}
+
+/* Галочка «показывать эту строку». Состав и порядок строк задаёт
+ * пользователь, поэтому включение добавляет в конец, а выключение
+ * убирает с хвостом сдвига. */
 static void sen_row_toggled(GtkToggleButton *check, gpointer data)
 {
     SenDialogContext *ctx = data;
@@ -920,33 +942,30 @@ static void sen_row_toggled(GtkToggleButton *check, gpointer data)
 
     if (!priv)
         return;
+    if (ctx->building)
+        return;
     source = g_object_get_data(G_OBJECT(check), "xs-source");
     label = g_object_get_data(G_OBJECT(check), "xs-label");
     if (!source || !label)
         return;
     on = gtk_toggle_button_get_active(check);
+    idx = sen_row_index(priv, source);
 
-    idx = SEN_ROW_NONE;
-    for (guint i = 0; i < priv->row_sources->len; i++) {
-        if (g_strcmp0(g_ptr_array_index(priv->row_sources, i), source) == 0) {
-            idx = i;
-            break;
-        }
-    }
     if (on) {
         if (idx != SEN_ROW_NONE)
-            return;   /* уже есть — порядок не меняем при простом клике */
+            return;   /* уже есть: простой клик порядок не меняет */
         g_ptr_array_add(priv->rows, g_strdup(label));
         g_ptr_array_add(priv->row_sources, g_strdup(source));
-        g_ptr_array_add(priv->values, NULL);
+        if (priv->values)
+            g_ptr_array_add(priv->values, NULL);
     } else {
         if (idx == SEN_ROW_NONE)
             return;
-        /* Сдвигаем: удаление g_ptr_array_remove_index не переносит хвост,
-         * и следующая строка получила бы чужой источник. */
+        /* Сдвигаем: g_ptr_array_remove_index не переносит хвост, и
+         * следующая строка получила бы чужой источник. */
         g_ptr_array_remove_index(priv->rows, idx);
         g_ptr_array_remove_index(priv->row_sources, idx);
-        if (idx < priv->values->len)
+        if (priv->values && idx < priv->values->len)
             g_ptr_array_remove_index(priv->values, idx);
     }
     sen_save(priv);
@@ -957,22 +976,64 @@ static void sen_row_toggled(GtkToggleButton *check, gpointer data)
         gtk_widget_queue_draw(priv->plugin->win);
 }
 
-/* Список найденных сенсоров с галочками. Показываем ВСЕ найденные —
- * решение пользователя, какие строки оставить. */
+/* Правка подписи. Меняется ТОЛЬКО подпись: источник остаётся тем же,
+ * иначе стрка потеряла бы привязку к физическому устройству и пережила
+ * бы перезагрузку только до первого сохранения. */
+static void sen_label_changed(GtkEntry *entry, gpointer data)
+{
+    SenDialogContext *ctx = data;
+    SenPriv *priv = sen_live_priv(ctx);
+    const char *source = g_object_get_data(G_OBJECT(entry), "xs-source");
+    const char *text = gtk_entry_get_text(entry);
+    guint idx;
+
+    if (ctx->building)
+        return;
+    if (!priv || !source || !text)
+        return;
+    idx = sen_row_index(priv, source);
+    /* Строка не выведена — подпись ей не нужна. Сюда попадает и вызов
+     * во время ПОСТРОЕНИЯ списка: sen_connect_children() обходит дерево
+     * уже после sen_sensor_list(), и gtk_entry_set_text() успевает
+     * сработать «changed» на каждой из 46 строк. */
+    if (idx == SEN_ROW_NONE)
+        return;
+    /* Пустая подпись опасна: строка выводится с числом и без имени,
+     * и пользователь не понимает, что это. Возвращаем прежнюю. */
+    if (!*text) {
+        gtk_entry_set_text(entry,
+                           (const char *) g_object_get_data(G_OBJECT(entry),
+                                                            "xs-row-label"));
+        return;
+    }
+    g_free(g_ptr_array_index(priv->rows, idx));
+    g_ptr_array_index(priv->rows, idx) = g_strdup(text);
+    sen_save(priv);
+    sen_rebuild_cache(priv, priv->width, priv->height);
+    xs_host_api()->invalidate(priv->plugin);
+    if (priv->plugin->win)
+        gtk_widget_queue_draw(priv->plugin->win);
+}
+
+/* Список найденных сенсоров: галочка «показывать» плюс поле подписи.
+ *
+ * В списке ВСЕ найденные сенсоры — решение пользователя, что оставить.
+ * Подпись в списке редактируемая: имя сенсора в стиле sensors узнаваемо,
+ * но для апплета пользователь хочет «CPU 1», «Диск sda», а не
+ * «coretemp · Core 1». */
 static GtkWidget *sen_sensor_list(SenDialogContext *ctx)
 {
-    GtkWidget *scrolled = gtk_scrolled_window_new(NULL, NULL);
     GtkWidget *list = gtk_list_box_new();
     SensorList *found = sensor_list_read("/sys/class/hwmon");
 
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(scrolled),
-                                        GTK_SHADOW_NONE);
-    /* Ограничиваем по высоте: 46 каналов иначе растянут окно диалога на
-     * весь экран. */
-    gtk_widget_set_size_request(scrolled, -1, 240);
-    gtk_container_add(GTK_CONTAINER(scrolled), list);
+    ctx->building = TRUE;
+
+    /* Свой скроллер списку НЕ нужен: страница Properties уже
+     * прокручивается, и два скроллера один в другом ловят колесо по
+     * очереди — список «залипает» на первых строках, а до секций Вид и
+     * Раскладка добраться нельзя. Список ограничен по высоте и
+     * обрезается по месту, прокручивает его страница. */
+    gtk_widget_set_size_request(list, -1, 300);
 
     if (found) {
         for (guint i = 0; i < found->chips->len; i++) {
@@ -982,33 +1043,57 @@ static GtkWidget *sen_sensor_list(SenDialogContext *ctx)
             for (guint j = 0; j < c->readings->len; j++) {
                 SensorReading *r = g_ptr_array_index(c->readings, j);
                 char *source = sen_source_key(c->chip, c->device, r->label);
-                /* Подпись — в стиле sensors: так пользователь опознаёт
-                 * сенсор по тому же имени, что и в своих conky-конфигах.
-                 * device в подписи НЕ показываем: он нужен в конфиге для
-                 * устойчивости, но пользователю это шум. */
-                char *label = g_strdup_printf("%s · %s", sname, r->label);
-                gboolean active = FALSE;
+                char *row_label = NULL;
                 GtkWidget *row = gtk_list_box_row_new();
-                GtkWidget *check = gtk_check_button_new_with_label(label);
+                GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+                GtkWidget *check;
+                GtkWidget *entry;
+                guint idx;
+                gboolean active;
 
-                for (guint k = 0; k < ctx->priv->row_sources->len; k++) {
-                    if (g_strcmp0(g_ptr_array_index(ctx->priv->row_sources, k),
-                                 source) == 0) {
-                        active = TRUE;
-                        break;
-                    }
-                }
-                /* Активацию делаем ДО подписки на сигнал: иначе
-                 * set_active сработает toggled на пустом списке строк. */
+                /* Имя сенсора в стиле sensors — чтобы опознать по conky.
+                 * device в подписи НЕ показываем: он нужен конфигу для
+                 * устойчивости, но пользователю это шум. */
+                idx = sen_row_index(ctx->priv, source);
+                if (idx != SEN_ROW_NONE)
+                    row_label = g_strdup(g_ptr_array_index(ctx->priv->rows, idx));
+                else
+                    row_label = g_strdup_printf("%s · %s", sname, r->label);
+                active = idx != SEN_ROW_NONE;
+
+                check = gtk_check_button_new();
+                g_object_set_data_full(G_OBJECT(check), "xs-source",
+                                       g_strdup(source), g_free);
+                g_object_set_data_full(G_OBJECT(check), "xs-label",
+                                       g_strdup(row_label), g_free);
                 gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), active);
-                g_object_set_data_full(G_OBJECT(check), "xs-source", source,
-                                       g_free);
-                g_object_set_data_full(G_OBJECT(check), "xs-label", label,
-                                       g_free);
                 g_signal_connect(check, "toggled",
                                  G_CALLBACK(sen_row_toggled), ctx);
-                gtk_container_add(GTK_CONTAINER(row), check);
+
+                entry = gtk_entry_new();
+                gtk_entry_set_text(GTK_ENTRY(entry), row_label);
+                /* Тултип объясняет, что это за сенсор: подпись меняется,
+                 * а исходное имя нужно помнить. */
+                gtk_widget_set_tooltip_text(entry, sname);
+                g_object_set_data_full(G_OBJECT(entry), "xs-source", source,
+                                       g_free);
+                /* Исходная подпись: откат для пустого поля и запас на
+                 * случай, если пользователь стирает всё. */
+                g_object_set_data_full(G_OBJECT(entry), "xs-row-label",
+                                       g_strdup(row_label), g_free);
+
+                gtk_box_pack_start(GTK_BOX(box), check, FALSE, FALSE, 0);
+                gtk_box_pack_start(GTK_BOX(box), entry, TRUE, TRUE, 0);
+                g_signal_connect(entry, "changed",
+                                 G_CALLBACK(sen_label_changed), ctx);
+                gtk_container_add(GTK_CONTAINER(row), box);
                 gtk_list_box_insert(GTK_LIST_BOX(list), row, -1);
+                g_free(row_label);
+                /* source НЕ освобождаем: владение им уже у entry
+                 * (g_object_set_data_full с g_free). Второй free того же
+                 * указателя ломал кучу — демон падал с «corrupted size vs.
+                 * prev_size» при закрытии Properties, потому что GTK
+                 * уничтожал виджеты и вызывал g_free повторно. */
             }
             g_free(sname);
         }
@@ -1018,7 +1103,8 @@ static GtkWidget *sen_sensor_list(SenDialogContext *ctx)
 
         gtk_container_add(GTK_CONTAINER(list), empty);
     }
-    return scrolled;
+    ctx->building = FALSE;
+    return list;
 }
 
 /* Привязать обработчики по ключу. Рекурсивный обход вместо ручного:
@@ -1061,7 +1147,7 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
 {
     SenPriv *priv = p ? p->priv : NULL;
     SenDialogContext *ctx;
-    GtkWidget *page, *scroller, *frame;
+    GtkWidget *page, *scroller, *inner, *frame;
     SenGrid g;
     int pos_max;
 
@@ -1075,15 +1161,24 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
 
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     scroller = gtk_scrolled_window_new(NULL, NULL);
+    /* Скроллер ограничен по высоте и НЕ сообщает своё содержимое вверх:
+     * с propagate=TRUE он требует, чтобы страница была размером со все
+     * секции, и окно диалога вырастает до размера всего содержимого. */
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    /* Без propagate=FALSE скроллер сообщает странице её полный размер,
-     * и окно диалога растёт под каждую строку. */
     gtk_scrolled_window_set_propagate_natural_width(
         GTK_SCROLLED_WINDOW(scroller), FALSE);
     gtk_scrolled_window_set_propagate_natural_height(
         GTK_SCROLLED_WINDOW(scroller), FALSE);
-    gtk_container_add(GTK_CONTAINER(page), scroller);
+    /* Содержимое живёт ВНУТРИ скроллера. Раньше секции добавлялись в
+     * page после скроллера, и тот оставался пустым: диалог не
+     * прокручивался, а секции Вид/Раскладка/Окно уезжали за край окна. */
+    inner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_start(inner, 8);
+    gtk_widget_set_margin_end(inner, 8);
+    gtk_widget_set_margin_bottom(inner, 8);
+    gtk_container_add(GTK_CONTAINER(scroller), inner);
+    gtk_box_pack_start(GTK_BOX(page), scroller, TRUE, TRUE, 0);
 
     /* --- Сенсоры --- */
     frame = gtk_frame_new("Показывать");
@@ -1098,7 +1193,7 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
         g.row = 1;
         gtk_container_add(GTK_CONTAINER(frame), g.grid);
     }
-    gtk_box_pack_start(GTK_BOX(page), frame, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Вид --- общие настройки для меток и чисел, без исключений */
     frame = gtk_frame_new("Вид");
@@ -1125,7 +1220,7 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
         sen_row(&g, "Единицы", combo);
     }
     gtk_container_add(GTK_CONTAINER(frame), g.grid);
-    gtk_box_pack_start(GTK_BOX(page), frame, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Раскладка --- */
     frame = gtk_frame_new("Раскладка");
@@ -1139,7 +1234,7 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
     sen_row(&g, "Шаг строк", sen_spin("line_step", priv->line_step, 1,
                                      pos_max));
     gtk_container_add(GTK_CONTAINER(frame), g.grid);
-    gtk_box_pack_start(GTK_BOX(page), frame, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Окно --- */
     frame = gtk_frame_new("Окно");
@@ -1157,12 +1252,14 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
     sen_row(&g, "Рамка",
             sen_color_button("border_color", priv->border_color));
     gtk_container_add(GTK_CONTAINER(frame), g.grid);
-    gtk_box_pack_start(GTK_BOX(page), frame, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
-    sen_connect_children(scroller, ctx);
+    sen_connect_children(page, ctx);
 
-    /* Минимальный размер страницы — окно диалога вырастет под него. */
-    gtk_widget_set_size_request(page, 480, 700);
+    /* Высота страницы — это высота ОКНА диалога, а не содержимого:
+     * содержимое прокручивается внутри. Запрос 700 растягивал окно на
+     * две трети экрана ради контента, который прокручивается. */
+    gtk_widget_set_size_request(page, 520, 620);
     gtk_notebook_append_page(notebook, page, gtk_label_new("Sensors"));
     /* Контекст живёт до конца окна: контролы переживают properties(). */
     g_object_set_data_full(G_OBJECT(page), "xs-sen-ctx", ctx,

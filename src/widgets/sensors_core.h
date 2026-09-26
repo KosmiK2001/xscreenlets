@@ -150,5 +150,9 @@ char *sensor_format_value(gdouble celsius, gboolean fahrenheit,
  * пробелы в подписях, в отличие от запятой. */
 GPtrArray *sensor_config_list(const char *text);   /* char* */
 char      *sensor_config_join(const GPtrArray *items); /* g_free */
+/* Склейка пар «подпись|источник» в значение ключа rows. Подпись
+ * редактирует пользователь, источник обязан остаться тем же. */
+char      *sensor_config_join_pair(const GPtrArray *labels,
+                                   const GPtrArray *sources); /* g_free */
 
 #endif /* SENSORS_CORE_H */

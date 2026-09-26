@@ -767,6 +767,34 @@ cairo_region_t *sensor_rounded_region(int width, int height, int radius)
 /* Разделитель «;» вместо «,»: подписи вроде «Package id 1» пробелов не
  * содержат, но «Sensor 1» — да, и запятая внутри элемента сделала бы
  * список неоднозначным. */
+/* Склейка пар «подпись|источник».
+ *
+ * Два массива, а не один: источник нужен для поиска в sysfs и меняться
+ * не должен никогда, а подпись пользователь правит свободно. Склеивать
+ * их где-то ещё (в init и в обработчике галочек) означало две
+ * расходящиеся версии формата — и обработчик затирал источники, стоило
+ * один раз двинуть галочку. */
+char *sensor_config_join_pair(const GPtrArray *labels,
+                              const GPtrArray *sources)
+{
+    GString *s = g_string_new(NULL);
+    guint n = labels ? labels->len : 0;
+
+    for (guint i = 0; i < n; i++) {
+        const char *label = g_ptr_array_index(labels, i);
+        const char *source = (sources && i < sources->len)
+                           ? g_ptr_array_index(sources, i) : NULL;
+
+        if (i > 0)
+            g_string_append_c(s, ';');
+        if (source && *source)
+            g_string_append_printf(s, "%s|%s", label, source);
+        else
+            g_string_append(s, label);
+    }
+    return g_string_free(s, FALSE);
+}
+
 GPtrArray *sensor_config_list(const char *text)
 {
     GPtrArray *out = g_ptr_array_new_with_free_func(g_free);
