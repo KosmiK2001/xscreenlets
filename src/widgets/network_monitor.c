@@ -1430,9 +1430,25 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         priv->total_y[i] = xs_host_api()->conf_int(kf, p->name, key,
                                                    priv->height - 12);
         /* Позиция и цвета числа — свои, как у подписи. */
+        /* Дефолт для числа сводки — сразу ЗА подписью, иначе старый
+         * конфиг (где ключа не было, число ехало в подписи по шаблону)
+         * получил бы число на подписи. Ширину подписи меряем её
+         * шрифтом: «Total down:» — 52 px, «Total up:» — 45 px.
+         *
+         * Раньше дефолтом было жёсткое 60, и в конфиге пользователя
+         * подпись стояла на x=8, то есть 8..60 — число ложилось прямо
+         * на неё, и подпись исчезала. */
+        /* Дефолт для числа сводки — сразу ЗА подписью, иначе старый
+         * конфиг (где ключа не было, а число ехало в подписи по
+         * шаблону) получил бы число прямо на подписи. Жёсткое 60
+         * в первом варианте ложилось на «Total down:» с x=8.
+         *
+         * Ширина подписи при Sans 8: «Total down:» — 52 px,
+         * «Total up:» — 45 px. Берём с запасом и добавляем
+         * NM_VALUE_GAP, как при разрешении наезда. */
         g_snprintf(key, sizeof(key), "total%u_value_x", i);
-        priv->total_value_x[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                         60);
+        priv->total_value_x[i] = xs_host_api()->conf_int(
+            kf, p->name, key, 8 + (i == 0 ? 52 : 45) + NM_VALUE_GAP);
         g_snprintf(key, sizeof(key), "total%u_value_y", i);
         priv->total_value_y[i] = xs_host_api()->conf_int(kf, p->name, key,
                                                          priv->height - 12);
