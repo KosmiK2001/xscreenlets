@@ -2289,9 +2289,13 @@ static void nm_grid_add_widget(NmGrid *g, GtkWidget *w)
  * Label X/Y разворачивали каждую секцию серии вчетверо и делали диалог
  * вчетверо длиннее; в строке "X / Y" те же восемь значений занимают
  * две строки на серию. */
-static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
-                      const char *label, const char *key_x, const char *key_y,
-                      int value_x, int value_y, int max)
+/* Пара координат. Возвращает Y-спин, чтобы вызывающий спрятал его
+ * вместе с Placement: снаружи высота элемента считается по фазе, и
+ * ручной Y там ломал бы симметрию отступов. */
+static GtkWidget *nm_add_xy(NmGrid *g, NmDialogContext *ctx,
+                            const char *label,
+                            const char *key_x, const char *key_y,
+                            int value_x, int value_y, int max)
 {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     GtkWidget *sx = gtk_spin_button_new_with_range(0, max, 1);
@@ -2317,6 +2321,7 @@ static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
     nm_grid_add_widget(g, box);
     nm_bind_keyed_descendants(sx, ctx);
     nm_bind_keyed_descendants(sy, ctx);
+    return sy;
 }
 
 
@@ -2580,12 +2585,16 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
 
     /* --- Серии --- по схеме Placement / Label / Value / Graph color.
      *
-     * У каждой серии четыре настройки, и каждая в своей строке: так
-     * видно, что за что отвечает, и ни одна не теряется в общей строке.
+     * Каждая настройка в своей строке. Важно: координаты НЕ дублируются.
+     * Раньше строка Placement рисовала X/Y сама (через nm_add_pos), и
+     * ниже стоял ещё один nm_add_xy с теми же ключами series%d_label_x/y.
+     * Два виджета на один ключ: меняешь число в верхнем — нижнее до
+     * переоткрытия диалога показывает старое, и наоборот. Это ровно тот
+     * баг, что был с кнопкой цвета заливки.
      *
-     * Y показывается только при Placement = Inside graph. Для внешних
-     * полос высота элемента считается по фазе, и ручной Y ломал бы
-     * симметрию отступов: сдвинь его — элемент наедет на соседний. */
+     * Теперь Placement — только выпадающий список, а X/Y живут в своей
+     * строке рядом с тем элементом, который двигают: подпись — с Label,
+     * число — с Value. Y прячется снаружи, как и раньше. */
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char title[32];
         char kx[40], ky[40], key[40];
@@ -2594,32 +2603,24 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         static const char *placements[] = {"Inside graph", "Outside top",
                                         "Outside bottom", NULL};
         gboolean inside = priv->label_placement[i] == NM_LABEL_INSIDE;
-        GtkWidget *ly;
+        GtkWidget *ly, *vy;
 
         g_snprintf(title, sizeof(title), "%s:",
                    i == 0 ? "Download" : "Upload");
         frame = nm_section(page, title);
         g = nm_grid_new();
 
-        /* Placement. Y-спин подписи создаётся ДО комбо: комбо получает
-         * его указателем и прячет поле сразу при переключении. */
+        /* Label: текст, шрифт, цвет — одной строкой, X/Y — следующей.
+         *
+         * X/Y идут ПЕРЕД Placement, потому что Placement прячет Y-спин
+         * подписи, а значит должен получить его указатель. Раньше Placement
+         * стоял первым и рисовал X/Y сам, а ниже был второй X/Y на тех же
+         * ключах — два виджета на один ключ. */
         g_snprintf(kx, sizeof(kx), "series%d_label_x", i);
         g_snprintf(ky, sizeof(ky), "series%d_label_y", i);
-        ly = g_object_ref_sink(
-            nm_add_pos(g, ctx, "Placement", kx, ky, priv->series_label_x[i],
-                       priv->series_label_y[i],
-                       MAX(priv->design_width, priv->design_height) - 1,
-                       inside));
         g_snprintf(key, sizeof(key), "series%d_placement", i);
-        nm_add_combo(g, ctx, key, "Placement", placements,
-                     (int) priv->label_placement[i], ly);
-        g_object_unref(ly);
-        /* show_all в конце nm_properties отменяет скрытие, поэтому
-         * прячем повторно — см. блок после gtk_notebook_append_page. */
-        priv->series_y_spin[i] = g_object_ref_sink(ly);
-        g_object_unref(priv->series_y_spin[i]);
 
-        /* Label: текст, шрифт, цвет — одной строкой */
+        /* Label: текст, шрифт, цвет — одной строкой, X/Y — следующей */
         g_snprintf(k_lbl, sizeof(k_lbl), "series%d_label", i);
         g_snprintf(k_lblf, sizeof(k_lblf), "series%d_label_font", i);
         g_snprintf(k_lblc, sizeof(k_lblc), "series%d_label_color", i);
@@ -2627,11 +2628,19 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                            k_lblf, priv->series_label_font[i], k_lblc,
                            priv->series_label_color[i],
                            "Цвет подписи «Down:» / «Up:»");
-        nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->series_label_x[i],
-                  priv->series_label_y[i],
-                  MAX(priv->design_width, priv->design_height) - 1);
+        ly = nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->series_label_x[i],
+                       priv->series_label_y[i],
+                       MAX(priv->design_width, priv->design_height) - 1);
+        nm_pos_set_y_visible(ly, inside);
+        priv->series_y_spin[i] = g_object_ref_sink(ly);
+        g_object_unref(priv->series_y_spin[i]);
 
-        /* Value: шрифт и цвет — той же строкой, текста у числа нет */
+        /* Placement — после X/Y: комбо получает указатель на Y-спин
+         * подписи и прячет его, когда выбрано «Outside top/bottom». */
+        nm_add_combo(g, ctx, key, "Placement", placements,
+                     (int) priv->label_placement[i], priv->series_y_spin[i]);
+
+        /* Value: шрифт и цвет той же строкой, текста у числа нет */
         g_snprintf(k_valf, sizeof(k_valf), "series%d_value_font", i);
         g_snprintf(k_valc, sizeof(k_valc), "series%d_value_color", i);
         nm_add_inline_text(g, ctx, "Value", NULL, NULL, k_valf,
@@ -2640,9 +2649,10 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                            "Цвет числа скорости");
         g_snprintf(kx, sizeof(kx), "series%d_x", i);
         g_snprintf(ky, sizeof(ky), "series%d_y", i);
-        nm_add_xy(g, ctx, "Value X/Y", kx, ky, priv->series_x[i],
-                  priv->series_y[i],
-                  MAX(priv->design_width, priv->design_height) - 1);
+        vy = nm_add_xy(g, ctx, "Value X/Y", kx, ky, priv->series_x[i],
+                       priv->series_y[i],
+                       MAX(priv->design_width, priv->design_height) - 1);
+        nm_pos_set_y_visible(vy, TRUE);
 
         /* Graph color */
         g_snprintf(k_fill, sizeof(k_fill), "series%d_color", i);
@@ -2738,18 +2748,12 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         frame = nm_section(page, title);
         g = nm_grid_new();
 
-        /* Placement */
+        /* X/Y идут перед Placement: Placement прячет Y-спин подписи, а
+         * значит должен получить его указатель. Дублировать координаты в
+         * двух строках нельзя — это два виджета на одни ключи, и нижний
+         * показывал бы старое значение до переоткрытия диалога. */
         g_snprintf(kx, sizeof(kx), "total%u_x", i);
         g_snprintf(ky, sizeof(ky), "total%u_y", i);
-        ly = g_object_ref_sink(
-            nm_add_pos(g, ctx, "Placement", kx, ky, priv->total_x[i],
-                       priv->total_y[i],
-                       MAX(priv->design_width, priv->design_height) - 1,
-                       inside));
-        g_snprintf(key, sizeof(key), "total%u_placement", i);
-        nm_add_combo(g, ctx, key, "Placement", placements,
-                     (int) priv->total_placement[i], ly);
-        g_object_unref(ly);
 
         /* Label: текст, шрифт, цвет */
         g_snprintf(k_lbl, sizeof(k_lbl), "total%u_label", i);
@@ -2758,9 +2762,15 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_inline_text(g, ctx, "Label", k_lbl, priv->total_label[i],
                            k_lblf, priv->total_label_font[i], k_lblc,
                            priv->total_color[i], "Цвет подписи сводки");
-        nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->total_x[i],
-                  priv->total_y[i],
-                  MAX(priv->design_width, priv->design_height) - 1);
+        ly = nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->total_x[i],
+                       priv->total_y[i],
+                       MAX(priv->design_width, priv->design_height) - 1);
+        nm_pos_set_y_visible(ly, inside);
+
+        /* Placement — только список */
+        g_snprintf(key, sizeof(key), "total%u_placement", i);
+        nm_add_combo(g, ctx, key, "Placement", placements,
+                     (int) priv->total_placement[i], ly);
 
         /* Value: необязательный текст, шрифт, цвет */
         g_snprintf(k_val, sizeof(k_val), "total%u_value", i);
