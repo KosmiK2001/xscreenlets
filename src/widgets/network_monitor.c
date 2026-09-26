@@ -2195,6 +2195,17 @@ static void nm_series_font_set(GtkFontButton *button, gpointer data)
                 priv->total_value_font[series_index] = g_strdup(value);
             }
         }
+    } else if (!strcmp(key, "label_font")) {
+        /* Шрифт шапки: имя интерфейса и адрес.
+         *
+         * Ключ не начинается ни с «series», ни с «total», поэтому раньше
+         * он не попадал ни в одну ветку выше. Строка записи в файл ниже
+         * общая и срабатывала, но priv->label_font в памяти оставался
+         * прежним — applet рисовал «wan0» и IP старым шрифтом до
+         * перезапуска демона. Ровно то, на что жаловался пользователь:
+         * «header шрифт и размер шрифта не влияют на заголовок». */
+        g_free(priv->label_font);
+        priv->label_font = g_strdup(value);
     }
     g_key_file_set_string(priv->kf, p->name, key, value);
     xs_core_plugin_conf_flush(p->name);
