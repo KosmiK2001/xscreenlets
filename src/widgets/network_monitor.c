@@ -672,7 +672,17 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
             }
         }
         graph_y = NM_GRAPH_TOP + top_band;
-        graph_h = MAX(1, height - graph_y - bot_band);
+        /* График должен оставаться выше двух: ниже этого значение
+     * становится отрицательным в nm_draw_series и в cairo_rectangle,
+     * где передаётся graph_h - 2 (рама занимает по 1 px сверху и снизу).
+     *
+     * Раньше здесь стоял MAX(1, ...), и при сильном сжатии график
+     * получал высоту 1, то есть graph_h - 2 = -1. cairo это молча
+     * принимает, но nm_rounded_path_at с rh = -1 даёт отрицательный
+     * радиус дуги — контур и клип становились мусором. Сценарий
+     * достижим легально: NM_MIN_WINDOW_HEIGHT = 60, а шесть внешних
+     * элементов по NM_ROW_H_MIN требуют заметно больше. */
+        graph_h = MAX(3, height - graph_y - bot_band);
     }
 
     /* Скругление окна не меньше скругления графика. */
