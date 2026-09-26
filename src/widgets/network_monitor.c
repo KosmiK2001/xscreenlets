@@ -1220,6 +1220,33 @@ static void nm_grid_add_widget(NmGrid *g, GtkWidget *w)
     g->row++;
 }
 
+/* Пара координат в ОДНОЙ строке. Восемь отдельных полей Position X/Y и
+ * Label X/Y разворачивали каждую секцию серии вчетверо и делали диалог
+ * вчетверо длиннее; в строке "X / Y" те же восемь значений занимают
+ * две строки на серию. */
+static void nm_add_xy(NmGrid *g, NmDialogContext *ctx,
+                      const char *label, const char *key_x, const char *key_y,
+                      int value_x, int value_y, int max)
+{
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *sx = gtk_spin_button_new_with_range(0, max, 1);
+    GtkWidget *sy = gtk_spin_button_new_with_range(0, max, 1);
+
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(sx), value_x);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(sy), value_y);
+    gtk_widget_set_size_request(sx, 72, -1);
+    gtk_widget_set_size_request(sy, 72, -1);
+    g_object_set_data(G_OBJECT(sx), "xs-key", (gpointer) key_x);
+    g_object_set_data(G_OBJECT(sy), "xs-key", (gpointer) key_y);
+    gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(box), gtk_label_new("/"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), sy, TRUE, TRUE, 0);
+    nm_grid_add_label(g, label);
+    nm_grid_add_widget(g, box);
+    nm_bind_keyed_descendants(sx, ctx);
+    nm_bind_keyed_descendants(sy, ctx);
+}
+
 static void nm_add_int(NmGrid *g, NmDialogContext *ctx, const char *key,
                        const char *label, int value, int min, int max)
 {
@@ -1377,18 +1404,20 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_snprintf(key, sizeof(key), "series%d_placement", i);
         nm_add_combo(g, ctx, key, "Placement", placements,
                      priv->label_placement[i] == NM_LABEL_OUTSIDE ? 1 : 0);
-        g_snprintf(key, sizeof(key), "series%d_x", i);
-        nm_add_int(g, ctx, key, "Position X", priv->series_x[i], 0,
-                   priv->design_width - 1);
-        g_snprintf(key, sizeof(key), "series%d_y", i);
-        nm_add_int(g, ctx, key, "Position Y", priv->series_y[i], 0,
-                   priv->design_height - 1);
-        g_snprintf(key, sizeof(key), "series%d_label_x", i);
-        nm_add_int(g, ctx, key, "Label X", priv->series_label_x[i], 0,
-                   priv->design_width - 1);
-        g_snprintf(key, sizeof(key), "series%d_label_y", i);
-        nm_add_int(g, ctx, key, "Label Y", priv->series_label_y[i], 0,
-                   priv->design_height - 1);
+        {
+            char key_x[40], key_y[40];
+
+            g_snprintf(key_x, sizeof(key_x), "series%d_x", i);
+            g_snprintf(key_y, sizeof(key_y), "series%d_y", i);
+            nm_add_xy(g, ctx, "Position", key_x, key_y, priv->series_x[i],
+                      priv->series_y[i], MAX(priv->design_width,
+                                             priv->design_height) - 1);
+            g_snprintf(key_x, sizeof(key_x), "series%d_label_x", i);
+            g_snprintf(key_y, sizeof(key_y), "series%d_label_y", i);
+            nm_add_xy(g, ctx, "Label pos.", key_x, key_y,
+                      priv->series_label_x[i], priv->series_label_y[i],
+                      MAX(priv->design_width, priv->design_height) - 1);
+        }
         gtk_container_add(GTK_CONTAINER(frame), g->grid);
         g_free(g);
     }
@@ -1401,24 +1430,24 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     nm_add_color(g, ctx, "text_color", "Text", priv->text_color, FALSE);
     nm_add_color(g, ctx, "border_color", "Graph border", priv->border, TRUE);
     nm_add_font(g, ctx, "label_font", "Header font", priv->label_font);
-    nm_add_int(g, ctx, "header_x", "Header X", priv->header_x, 0,
-               priv->design_width - 1);
-    nm_add_int(g, ctx, "header_y", "Header Y", priv->header_y, 0,
-               priv->design_height - 1);
-    nm_add_int(g, ctx, "total_x", "Total X", priv->total_x, 0,
-               priv->design_width - 1);
-    nm_add_int(g, ctx, "total_y", "Total Y", priv->total_y, 0,
-               priv->design_height - 1);
+    nm_add_xy(g, ctx, "Header", "header_x", "header_y", priv->header_x,
+              priv->header_y, MAX(priv->design_width, priv->design_height) - 1);
+    nm_add_xy(g, ctx, "Total", "total_x", "total_y", priv->total_x,
+              priv->total_y, MAX(priv->design_width, priv->design_height) - 1);
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 
     /* --- Окно --- */
     frame = nm_section(page, "Window");
     g = nm_grid_new();
-    nm_add_int(g, ctx, "window_width", "Width", priv->width,
-               NM_MIN_WINDOW_WIDTH, 1600);
-    nm_add_int(g, ctx, "window_height", "Height", priv->height,
-               NM_MIN_WINDOW_HEIGHT, 1200);
+    {
+        /* Ширина и высота несут разные минимумы, поэтому пара
+         * nm_add_xy с общим максимумом тут не годится. */
+        nm_add_int(g, ctx, "window_width", "Width", priv->width,
+                   NM_MIN_WINDOW_WIDTH, 1600);
+        nm_add_int(g, ctx, "window_height", "Height", priv->height,
+                   NM_MIN_WINDOW_HEIGHT, 1200);
+    }
     nm_add_int(g, ctx, "corner_radius", "Corner radius", priv->corner_radius,
                0, 200);
     nm_add_int(g, ctx, "update_ms", "Update (ms)", priv->update_ms, 100,
