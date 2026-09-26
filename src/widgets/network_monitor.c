@@ -182,6 +182,11 @@ typedef struct {
     char *total_label[NM_SERIES_MAX];
     char *total_font[NM_SERIES_MAX];
     int total_x[NM_SERIES_MAX], total_y[NM_SERIES_MAX];
+    /* Цвет сводки («Total down: 47 GiB»). Своя на каждое направление:
+     * сводка рисуется третьим элементом серии, и её цвет не должен
+     * зависеть от цвета подписи или числа. По умолчанию берёт общий
+     * текст серии, как было до разделения. */
+    gdouble total_color[NM_SERIES_MAX][4];
     /* У каждой серии три независимых цвета: заливка графика, цвет
      * подписи («Down:») и цвет числа скорости. Раньше подпись и число
      * брали цвет заливки, и разделить их было нельзя.
@@ -1073,7 +1078,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                                 top_rows);
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          NM_MARGIN_TOP + slot * row_h,
-                         total_text[i], priv->series_text_color[i], width,
+                         total_text[i], priv->total_color[i], width,
                          0, top_band, FALSE);
             break;
         case NM_LABEL_OUTSIDE_BOTTOM:
@@ -1083,12 +1088,12 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                                 bot_rows);
             nm_show_text(cr, layout, priv->total_font[i], tx,
                          graph_y + graph_h + NM_MARGIN_TOP + slot * row_h,
-                         total_text[i], priv->series_text_color[i], width,
+                         total_text[i], priv->total_color[i], width,
                          graph_y + graph_h, bot_band, FALSE);
             break;
         default:
             nm_show_text(cr, layout, priv->total_font[i], tx, ty,
-                         total_text[i], priv->series_text_color[i], width,
+                         total_text[i], priv->total_color[i], width,
                          graph_y, graph_h, TRUE);
             break;
         }
@@ -1387,6 +1392,15 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         g_snprintf(key, sizeof(key), "series%u_value_color", i);
         nm_read_color(priv, key, priv->series_text_color[i],
                       priv->series_value_color[i]);
+    }
+
+    /* Сводка — отдельный элемент, свой цвет на каждое направление. */
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char key[40];
+
+        g_snprintf(key, sizeof(key), "total%u_color", i);
+        nm_read_color(priv, key, priv->series_text_color[i],
+                      priv->total_color[i]);
     }
 
     /* Имя интерфейса и адрес — два элемента, у каждого свой цвет. */
@@ -1909,6 +1923,11 @@ static void nm_color_set(GtkColorButton *button, gpointer data)
         }
     } else if (!strcmp(key, "graph_background_color")) {
         memcpy(priv->graph_bg, out, sizeof(gdouble) * 4);
+    } else if (!strcmp(key, "window_background_color")) {
+        /* Кнопка была в диалоге с самого начала, а ветки в обработчике
+         * не было: priv->window_bg обновлялся только при перезапуске
+         * applet, то есть по кнопке фон окна не менялся. */
+        memcpy(priv->window_bg, out, sizeof(gdouble) * 4);
     } else if (!strcmp(key, "border_color")) {
         memcpy(priv->border, out, sizeof(gdouble) * 4);
     } else if (!strcmp(key, "text_color")) {
@@ -1921,6 +1940,12 @@ static void nm_color_set(GtkColorButton *button, gpointer data)
         memcpy(priv->header_ifname_color, out, sizeof(gdouble) * 4);
     } else if (!strcmp(key, "header_ip_color")) {
         memcpy(priv->header_ip_color, out, sizeof(gdouble) * 4);
+    } else if (g_str_has_prefix(key, "total")) {
+        /* Цвет сводки: total<N>_color, своя на направление. */
+        unsigned n = 0;
+
+        if (sscanf(key, "total%u_color", &n) == 1 && n < NM_SERIES_MAX)
+            memcpy(priv->total_color[n], out, sizeof(gdouble) * 4);
     }
     g_key_file_set_string(priv->kf, p->name, key, nm_format_rgba(out));
     xs_core_plugin_conf_flush(p->name);
@@ -2185,49 +2210,6 @@ static GtkWidget *nm_color_button(const char *key, const gdouble color[4],
     return cb;
 }
 
-static void nm_add_font_color(NmGrid *g, NmDialogContext *ctx,
-                              const char *font_key, const char *color_key,
-                              const char *font, const gdouble color[4],
-                              gboolean with_alpha,
-                              const char *text_color_key,
-                              const gdouble text_color[4])
-{
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *holder = gtk_fixed_new();
-    GtkWidget *fb = gtk_font_button_new_with_font(font ? font : "Sans 8");
-    GtkWidget *cb;
-
-    gtk_widget_set_size_request(fb, 180, -1);
-    gtk_widget_set_size_request(holder, 180, -1);
-    gtk_widget_set_hexpand(holder, FALSE);
-    gtk_fixed_put(GTK_FIXED(holder), fb, 0, 0);
-    g_object_set_data_full(G_OBJECT(fb), "xs-key", g_strdup(font_key), g_free);
-
-    cb = gtk_color_button_new_with_rgba(&(GdkRGBA) {
-        color[0], color[1], color[2], color[3] });
-    gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(cb), with_alpha);
-    if (!with_alpha)
-        g_object_set_data(G_OBJECT(cb), "xs-rgb-only", GINT_TO_POINTER(1));
-    g_object_set_data_full(G_OBJECT(cb), "xs-key", g_strdup(color_key), g_free);
-
-    gtk_box_pack_start(GTK_BOX(row), holder, FALSE, TRUE, 0);
-    gtk_box_pack_start(GTK_BOX(row), cb, FALSE, TRUE, 0);
-
-    /* Кнопка «общий текст» — только если ключ передан. */
-    if (text_color_key && text_color) {
-        GtkWidget *tb = nm_color_button(text_color_key, text_color,
-                                        with_alpha,
-                                        "Общий цвет текста");
-        gtk_box_pack_start(GTK_BOX(row), tb, FALSE, TRUE, 0);
-    }
-
-    /* Без подписи: секция уже названа по роли серии, а «Font»/«Color»
-     * в каждой строке только съедали высоту. */
-    nm_grid_add_widget(g, row);
-    nm_bind_keyed_descendants(fb, ctx);
-    nm_bind_keyed_descendants(cb, ctx);
-}
-
 static void nm_add_font(NmGrid *g, NmDialogContext *ctx, const char *key,
                         const char *label, const char *value)
 {
@@ -2338,53 +2320,62 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_snprintf(key, sizeof(key), "series%d_label", i);
         nm_add_text(g, ctx, key, "Label", priv->series_label[i]);
         {
-            char key_font[40], key_color[40], key_text_color[40];
-            gdouble color[4], text_color[4];
+            char key_font[40];
 
-            memcpy(color, priv->series_color[i], sizeof(color));
-            memcpy(text_color, priv->series_text_color[i], sizeof(text_color));
             g_snprintf(key_font, sizeof(key_font), "series%d_font", i);
-            g_snprintf(key_color, sizeof(key_color), "series%d_color", i);
-            g_snprintf(key_text_color, sizeof(key_text_color),
-                       "series%d_text_color", i);
-            nm_add_font_color(g, ctx, key_font, key_color,
-                              priv->series_font[i], color, FALSE,
-                              key_text_color, text_color);
+            nm_add_font(g, ctx, key_font, "Font", priv->series_font[i]);
         }
-        /* Отдельные цвета подписи и числа. В ту же строку, что шрифт, они
-         * не влезают: четыре кнопки в ряд занимали бы всю ширину.
-         * Поэтому своя строка с тремя короткими подписями. */
+        /* Цвета серии — одной строкой, каждая кнопка подписана своим
+         * элементом, который она красит.
+         *
+         * Раньше здесь стоял nm_add_font_color() с кнопкой цвета заливки
+         * ВНУТРИ строки шрифта, и вторая такая же кнопка добавлялась ниже.
+         * Два виджета на один ключ: меняешь цвет в одном — второй остаётся
+         * показывать старое значение до переоткрытия диалога.
+         *
+         * Четыре кнопки с подписями «Заливка / Текст / Метка / Число»:
+         *   series<N>_color        заливка графика
+         *   series<N>_text_color    общий текст серии
+         *   series<N>_label_color   подпись «Down:» / «Up:»
+         *   series<N>_value_color   число скорости
+         *
+         * Текст, метка и число по умолчанию равны общему тексту серии,
+         * заливка ни от чего не зависит. */
         {
-            char k_fill[40], k_label[40], k_value[40];
-            gdouble fill[4], label_c[4], value_c[4];
-            GtkWidget *row;
+            char k_fill[40], k_text[40], k_lblc[40], k_valc[40];
+            gdouble fill[4], text_c[4], lbl_c[4], val_c[4];
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+            gint w = 0;
 
             memcpy(fill, priv->series_color[i], sizeof(fill));
-            memcpy(label_c, priv->series_label_color[i], sizeof(label_c));
-            memcpy(value_c, priv->series_value_color[i], sizeof(value_c));
+            memcpy(text_c, priv->series_text_color[i], sizeof(text_c));
+            memcpy(lbl_c, priv->series_label_color[i], sizeof(lbl_c));
+            memcpy(val_c, priv->series_value_color[i], sizeof(val_c));
             g_snprintf(k_fill, sizeof(k_fill), "series%d_color", i);
-            g_snprintf(k_label, sizeof(k_label), "series%d_label_color", i);
-            g_snprintf(k_value, sizeof(k_value), "series%d_value_color", i);
+            g_snprintf(k_text, sizeof(k_text), "series%d_text_color", i);
+            g_snprintf(k_lblc, sizeof(k_lblc), "series%d_label_color", i);
+            g_snprintf(k_valc, sizeof(k_valc), "series%d_value_color", i);
 
-            row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-            gtk_box_pack_start(GTK_BOX(row),
-                               gtk_label_new("Заливка"), FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX(row),
-                               nm_color_button(k_fill, fill, FALSE,
-                                               "Цвет заливки графика"),
-                               FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX(row),
-                               gtk_label_new("Метка"), FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX(row),
-                               nm_color_button(k_label, label_c, FALSE,
-                                               "Цвет подписи"),
-                               FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX(row),
-                               gtk_label_new("Число"), FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX(row),
-                               nm_color_button(k_value, value_c, FALSE,
-                                               "Цвет числа скорости"),
-                               FALSE, FALSE, 0);
+#define NM_CBROW(btn, label_txt, key_txt, rgba, tip_txt)                 \
+            do {                                                          \
+                gtk_box_pack_start(GTK_BOX(row),                           \
+                                   gtk_label_new(label_txt), FALSE,        \
+                                   FALSE, 0);                              \
+                gtk_box_pack_start(GTK_BOX(row),                           \
+                                   nm_color_button((key_txt), (rgba),      \
+                                                   FALSE, (tip_txt)),     \
+                                   FALSE, FALSE, 0);                       \
+                w += 1;                                                    \
+            } while (0)
+
+            NM_CBROW(NULL, "Заливка", k_fill, fill, "Цвет заливки графика");
+            NM_CBROW(NULL, "Текст", k_text, text_c,
+                     "Общий цвет текста серии. Значение по умолчанию для "
+                     "метки и числа");
+            NM_CBROW(NULL, "Метка", k_lblc, lbl_c, "Цвет подписи «Down:»");
+            NM_CBROW(NULL, "Число", k_valc, val_c, "Цвет числа скорости");
+#undef NM_CBROW
+
             nm_grid_add_widget(g, row);
             nm_bind_keyed_descendants(row, ctx);
         }
@@ -2430,12 +2421,6 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                  priv->window_bg, TRUE);
     nm_add_color(g, ctx, "text_color", "Text", priv->text_color, FALSE);
     nm_add_color(g, ctx, "border_color", "Graph border", priv->border, TRUE);
-    /* Цвета шапки: имя интерфейса и адрес рисуются отдельно, каждый со
-     * своим цветом. Общий text_color остаётся их значением по умолчанию. */
-    nm_add_color(g, ctx, "header_ifname_color", "Header name",
-                 priv->header_ifname_color, FALSE);
-    nm_add_color(g, ctx, "header_ip_color", "Header IP",
-                 priv->header_ip_color, FALSE);
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 
@@ -2461,6 +2446,32 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
                      (int) priv->header_placement, hy);
         g_object_unref(hy);
     }
+    /* Цвета шапки — здесь же, а не в Appearance. Шапка состоит из двух
+     * элементов, и каждый красится своим цветом:
+     *   header_ifname_color  имя интерфейса, слева
+     *   header_ip_color      адрес, прижат к правому краю
+     * Оба по умолчанию берут общий text_color, который остаётся здесь
+     * как значение по умолчанию для всего неописанного текста. */
+    {
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
+        gtk_box_pack_start(GTK_BOX(row), gtk_label_new("Имя"), FALSE,
+                           FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(row),
+                           nm_color_button("header_ifname_color",
+                                           priv->header_ifname_color, FALSE,
+                                           "Цвет имени интерфейса"),
+                           FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(row), gtk_label_new("IP"), FALSE,
+                           FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(row),
+                           nm_color_button("header_ip_color",
+                                           priv->header_ip_color, FALSE,
+                                           "Цвет адреса"),
+                           FALSE, FALSE, 0);
+        nm_grid_add_widget(g, row);
+        nm_bind_keyed_descendants(row, ctx);
+    }
     gtk_container_add(GTK_CONTAINER(frame), g->grid);
     g_free(g);
 
@@ -2479,6 +2490,14 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_text(g, ctx, key_lbl, "Format", priv->total_label[i]);
         g_snprintf(key_font, sizeof(key_font), "total%u_font", i);
         nm_add_font(g, ctx, key_font, "Font", priv->total_font[i]);
+        /* Свой цвет сводки. По умолчанию берёт общий текст серии. */
+        {
+            char k_color[40];
+
+            g_snprintf(k_color, sizeof(k_color), "total%u_color", i);
+            nm_add_color(g, ctx, k_color, "Color", priv->total_color[i],
+                         FALSE);
+        }
         g_snprintf(key_x, sizeof(key_x), "total%u_x", i);
         g_snprintf(key_y, sizeof(key_y), "total%u_y", i);
         {

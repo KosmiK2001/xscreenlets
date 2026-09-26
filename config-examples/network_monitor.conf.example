@@ -65,6 +65,10 @@ series1_color=rgba(64,217,89,255)
 # цвет. По умолчанию оба берут text_color.
 #header_ifname_color=rgba(220,220,220,255)
 #header_ip_color=rgba(150,150,150,255)
+# Цвет сводки — свой на каждое направление. По умолчанию берёт
+# series<N>_text_color.
+#total0_color=rgba(255,0,255,255)
+#total1_color=rgba(255,200,0,255)
 text_color=rgba(255,255,255,255)
 graph_background_color=rgba(5,8,13,255)
 border_color=rgba(140,148,158,255)
