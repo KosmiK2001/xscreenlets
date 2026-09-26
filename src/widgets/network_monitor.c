@@ -35,9 +35,6 @@
 /* Нижний предел строки: нулевая высота схлопнула бы отступ, и график
  * наехал бы на текст. */
 #define NM_ROW_H_MIN 8
-/* Скругление окна не может быть меньше скругления графика: иначе рамка
- * окна срезала бы скруглённые углы графика по диагонали. */
-#define NM_WINDOW_RADIUS_MIN_GRAPH 1
 #define NM_BORDER_PATH_INSET 0.5
 /* Сколько значений усреднять: 1 = мгновенная скорость (поведение conky
  * по умолчанию), больше — сглаживает всплески. */
@@ -856,10 +853,10 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
         header_text = g_strdup(priv->ifname ? priv->ifname : "");
     /* Сводуется каждое направление своей строкой, а не общей "rx / tx":
      * подписи, шрифт, цвет и позиция у них настраиваются отдельно. */
-    total_text[0] = g_strdup_printf(priv->total_label[0],
-                                     nm_format_bytes(priv->total_bytes[0]));
-    total_text[1] = g_strdup_printf(priv->total_label[1],
-                                     nm_format_bytes(priv->total_bytes[1]));
+    total_text[0] = nm_format_label(priv->total_label[0],
+                                    nm_format_bytes(priv->total_bytes[0]));
+    total_text[1] = nm_format_label(priv->total_label[1],
+                                    nm_format_bytes(priv->total_bytes[1]));
 
     for (i = 0; i < NM_SERIES_MAX; i++) {
         int sx = nm_scale_position(priv->series_x[i], dw, width, width - 1);
@@ -1205,7 +1202,6 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         static const char *default_labels[NM_SERIES_MAX] = {
             "Total: %s", "Total: %s"
         };
-        char *fmt;
 
         g_snprintf(key, sizeof(key), "total%u_label", i);
         priv->total_label[i] = xs_host_api()->conf_str(kf, p->name, key,
@@ -1219,7 +1215,6 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         g_snprintf(key, sizeof(key), "total%u_y", i);
         priv->total_y[i] = xs_host_api()->conf_int(kf, p->name, key,
                                                    priv->height - 12);
-        (void) fmt;
     }
 
     nm_read_color(priv, "graph_background_color", nm_graph_bg_default,

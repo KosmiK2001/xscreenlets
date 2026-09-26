@@ -751,6 +751,44 @@ static void test_corner_radius(void)
     check(nm_corner_radius_value(8) == 8.0, "значение радиуса");
 }
 
+static void test_format_label(void)
+{
+    char *r;
+
+    /* Обычный случай: единственный %s подставляется. */
+    r = nm_format_label("Total: %s", "1.5 MiB");
+    check(r && !strcmp(r, "Total: 1.5 MiB"), "тот же %s");
+    g_free(r);
+
+    /* Нет спецификатора: значение дописывается, а не теряется. */
+    r = nm_format_label("Total", "1.5 MiB");
+    check(r && !strcmp(r, "Total: 1.5 MiB"), "формата без %s");
+    g_free(r);
+
+    /* Ревью нашло: «Total %d: %s» печатал мусор из стека. */
+    r = nm_format_label("Total %d: %s", "1.5 MiB");
+    check(r && strstr(r, "1.5 MiB") != NULL, "%%d не роняет значение");
+    check(r && strstr(r, "Total %d: %s") != NULL, "%%d остаётся в тексте");
+    g_free(r);
+
+    r = nm_format_label("100% done: %s", "1.5 MiB");
+    check(r && strstr(r, "1.5 MiB") != NULL, "процент перед %s");
+    g_free(r);
+
+    /* Хвостовой процент без спецификатора. */
+    r = nm_format_label("итого %", "1.5 MiB");
+    check(r && strstr(r, "1.5 MiB") != NULL, "хвостовой процент");
+    g_free(r);
+
+    /* Пустой формат. */
+    r = nm_format_label("", "1.5 MiB");
+    check(r && !strcmp(r, "1.5 MiB"), "пустой формат");
+    g_free(r);
+    r = nm_format_label(NULL, "1.5 MiB");
+    check(r && !strcmp(r, "1.5 MiB"), "NULL-формат");
+    g_free(r);
+}
+
 int main(void)
 {
     printf("== парсер /proc/net/dev ==\n");
@@ -789,6 +827,7 @@ int main(void)
     test_independent_bands();
     test_placement_combo_mapping();
     test_label_and_value_positions();
+    test_format_label();
     test_split_geometry();
     test_window_radius_floor();
     test_config_key_is_copied();
