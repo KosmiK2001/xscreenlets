@@ -871,7 +871,6 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                  * lx + w + NM_VALUE_GAP. */
                 value_x = MAX(sx, lx + w + NM_VALUE_GAP);
             }
-            value_x = sx;
             full = g_strdup(rate_text[i]);
         } else {
             /* Снаружи: подпись уходит в полосу, значение остаётся в
@@ -898,6 +897,7 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                          ? graph_y + graph_h : 0,
                          priv->label_placement[i] == NM_LABEL_OUTSIDE_BOTTOM
                          ? bot_band : top_band);
+            value_x = sx;
             full = g_strdup(rate_text[i]);
         }
         nm_show_text(cr, layout, priv->series_font[i], value_x, sy, full,
