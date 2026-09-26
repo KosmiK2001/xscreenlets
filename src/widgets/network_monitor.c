@@ -105,6 +105,18 @@ static int nm_band_slot(NmBandPhase phase, int series_index,
     return slot;
 }
 
+/* Индекс комбо Placement -> значение. Вынесено отдельно, потому что
+ * именно тут легко оставить одну ветку на старом булевом виде и
+ * получить «снаружи» вместо «снизу» только для сводок. */
+static NmLabelPlacement nm_placement_from_combo(gint active)
+{
+    if (active == 1)
+        return NM_LABEL_OUTSIDE_TOP;
+    if (active == 2)
+        return NM_LABEL_OUTSIDE_BOTTOM;
+    return NM_LABEL_INSIDE;
+}
+
 static const char *nm_placement_to_string(NmLabelPlacement pl)
 {
     switch (pl) {
@@ -1430,8 +1442,7 @@ static void nm_placement_changed(GtkComboBox *combo, gpointer data)
         return;
     active = gtk_combo_box_get_active(combo);
 
-    place = (active == 1) ? NM_LABEL_OUTSIDE_TOP :
-            (active == 2) ? NM_LABEL_OUTSIDE_BOTTOM : NM_LABEL_INSIDE;
+    place = nm_placement_from_combo(active);
     inside = (place == NM_LABEL_INSIDE);
     if (!strcmp(key, "header_placement")) {
         priv->header_placement = place;
@@ -1448,8 +1459,7 @@ static void nm_placement_changed(GtkComboBox *combo, gpointer data)
         if (sscanf(key, "total%d_", &idx) != 1 || idx < 0 ||
             idx >= NM_SERIES_MAX)
             return;
-        priv->total_placement[idx] = inside ? NM_LABEL_INSIDE
-                                           : NM_LABEL_OUTSIDE;
+        priv->total_placement[idx] = place;
     } else {
         return;
     }

@@ -571,6 +571,43 @@ static void test_independent_bands(void)
           "старый шаг по NM_ROW_H_MIN обрезал бы последнюю строку");
 }
 
+/* Индекс комбо Placement -> значение.
+ *
+ * Здесь был баг, который тесты рендера не видели: в обработчике для
+ * сводок стоял остаток от старого булева вида,
+ *   total_placement[idx] = inside ? INSIDE : OUTSIDE
+ * и «снизу» превращалось в «сверху». Все три ключа обязаны идти через
+ * один маппинг, иначе они разъезжаются. */
+typedef enum {
+    T_INSIDE = 0,
+    T_OUT_TOP,
+    T_OUT_BOTTOM,
+} TPlacement;
+
+static TPlacement t_from_combo(int active)
+{
+    if (active == 1)
+        return T_OUT_TOP;
+    if (active == 2)
+        return T_OUT_BOTTOM;
+    return T_INSIDE;
+}
+
+static void test_placement_combo_mapping(void)
+{
+    check(t_from_combo(0) == T_INSIDE, "комбо 0 — внутри");
+    check(t_from_combo(1) == T_OUT_TOP, "комбо 1 — снаружи сверху");
+    check(t_from_combo(2) == T_OUT_BOTTOM, "комбо 2 — снаружи снизу");
+    check(t_from_combo(-1) == T_INSIDE, "комбо без выбора — внутри");
+
+    /* Все три ключа используют один маппинг, значит «снизу» доезжает
+     * и до сводок, и до подписей, и до заголовка. */
+    check(t_from_combo(2) != t_from_combo(1),
+          "снизу и сверху — разные значения, не схлопываются в одно");
+    check(t_from_combo(2) != t_from_combo(0),
+          "снизу не превращается во внутри");
+}
+
 static void test_split_geometry(void)
 {
     /* Две половины не должны смыкаться: зазор обязателен, иначе две
@@ -676,6 +713,7 @@ int main(void)
     test_outside_margins();
     test_text_clip_offsets();
     test_independent_bands();
+    test_placement_combo_mapping();
     test_split_geometry();
     test_window_radius_floor();
     test_config_key_is_copied();
