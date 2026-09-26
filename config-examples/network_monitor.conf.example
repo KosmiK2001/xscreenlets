@@ -41,6 +41,13 @@ series1_y=26
 series1_label_x=156
 series1_label_y=23
 series1_placement=inside
+# Цвета принимаются в двух форматах:
+#   rgba(r,g,b,a) и rgb(r,g,b) — значения 0..255, как пишет GtkColorButton;
+#   0.2,0.75,1.0,1.0            — значения 0..1, в этом виде ключ
+#                                переписывает сам диалог.
+# Оба работают одновременно. Цвет серии берётся из series<N>_color;
+# rx_color и tx_color читаются только если series<N>_color отсутствует
+# (старые конфиги, где серии назывались по направлению).
 series0_color=rgba(51,191,255,255)
 series1_color=rgba(64,217,89,255)
 text_color=rgba(255,255,255,255)
