@@ -1287,10 +1287,25 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
             g_free(probe);
         }
     }
+    /* Цвет ТЕКСТА серии. По умолчанию он совпадает с цветом заливки
+     * графика — так было раньше, и это же поведение при отсутствии
+     * ключа в конфиге. Но ключ series<N>_text_color позволяет задать
+     * текст отдельно: например, держать подпись «Down:» белым, а
+     * заливку графика голубой.
+     *
+     * Ключа не было в UI, и в nm_init он не читался, так что ветка
+     * обработчика была мёртвой. Теперь она живая. */
     memcpy(priv->series_text_color[0], priv->series_color[0],
            sizeof(gdouble) * 4);
     memcpy(priv->series_text_color[1], priv->series_color[1],
            sizeof(gdouble) * 4);
+    for (i = 0; i < NM_SERIES_MAX; i++) {
+        char text_key[40];
+
+        g_snprintf(text_key, sizeof(text_key), "series%u_text_color", i);
+        nm_read_color(priv, text_key, priv->series_color[i],
+                      priv->series_text_color[i]);
+    }
 
     g_key_file_set_string(kf, p->name, "ifname", priv->ifname);
     g_key_file_set_string(kf, p->name, "font", priv->font);
@@ -2045,7 +2060,9 @@ static void nm_add_text(NmGrid *g, NmDialogContext *ctx, const char *key,
 static void nm_add_font_color(NmGrid *g, NmDialogContext *ctx,
                               const char *font_key, const char *color_key,
                               const char *font, const gdouble color[4],
-                              gboolean with_alpha)
+                              gboolean with_alpha,
+                              const char *text_color_key,
+                              const gdouble text_color[4])
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     GtkWidget *holder = gtk_fixed_new();
@@ -2067,6 +2084,23 @@ static void nm_add_font_color(NmGrid *g, NmDialogContext *ctx,
 
     gtk_box_pack_start(GTK_BOX(row), holder, FALSE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(row), cb, FALSE, TRUE, 0);
+
+    /* Вторая кнопка — цвет ТЕКСТА серии. Может отсутствовать, если ключ
+     * не передан: тогда строка остаётся как раньше, одна кнопка цвета. */
+    if (text_color_key && text_color) {
+        GtkWidget *tb = gtk_color_button_new_with_rgba(&(GdkRGBA) {
+            text_color[0], text_color[1], text_color[2], text_color[3] });
+
+        gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(tb), with_alpha);
+        if (!with_alpha)
+            g_object_set_data(G_OBJECT(tb), "xs-rgb-only", GINT_TO_POINTER(1));
+        g_object_set_data_full(G_OBJECT(tb), "xs-key", g_strdup(text_color_key),
+                               g_free);
+        gtk_widget_set_tooltip_text(tb, "Цвет текста: подпись и число");
+        gtk_box_pack_start(GTK_BOX(row), tb, FALSE, TRUE, 0);
+        nm_bind_keyed_descendants(tb, ctx);
+    }
+
     /* Без подписи: секция уже названа по роли серии, а «Font»/«Color»
      * в каждой строке только съедали высоту. */
     nm_grid_add_widget(g, row);
@@ -2184,14 +2218,18 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_snprintf(key, sizeof(key), "series%d_label", i);
         nm_add_text(g, ctx, key, "Label", priv->series_label[i]);
         {
-            char key_font[40], key_color[40];
-            gdouble color[4];
+            char key_font[40], key_color[40], key_text_color[40];
+            gdouble color[4], text_color[4];
 
             memcpy(color, priv->series_color[i], sizeof(color));
+            memcpy(text_color, priv->series_text_color[i], sizeof(text_color));
             g_snprintf(key_font, sizeof(key_font), "series%d_font", i);
             g_snprintf(key_color, sizeof(key_color), "series%d_color", i);
+            g_snprintf(key_text_color, sizeof(key_text_color),
+                       "series%d_text_color", i);
             nm_add_font_color(g, ctx, key_font, key_color,
-                              priv->series_font[i], color, FALSE);
+                              priv->series_font[i], color, FALSE,
+                              key_text_color, text_color);
         }
         {
             char key_x[40], key_y[40];
