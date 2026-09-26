@@ -946,10 +946,23 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
                 pango_layout_get_pixel_size(layout, &value_w, NULL);
 
                 value_x = sx;
-                /* Наезд: число кончается правее, чем начинается подпись.
-                 * Подпись уводим вправо за число — иначе координата
-                 * Position X снова перестала бы действовать. */
-                if (value_x + value_w + NM_VALUE_GAP > lx)
+                /* Наезд: сдвигается ПОДПИСЬ, число остаётся на своей
+                 * координате — это и было целью правки.
+                 *
+                 * Условие проверяет пересечение по левому краю подписи:
+                 * если подпись кончается правее начала числа, она
+                 * заезжает на число, и тогда уводим её за число.
+                 *
+                 * Раньше здесь стояло обратное:
+                 *     if (value_x + value_w + GAP > lx)
+                 * то есть «правый край числа правее левого края
+                 * подписи». Это верно почти всегда, даже когда
+                 * подпись и число не пересекаются: подпись на 3..25, число
+                 * на 51..96 — между ними 26 px свободного места, но
+                 * условие всё равно срабатывало и уводило подпись за
+                 * число. На экране выходило «59.4 KiB/s Down» вместо
+                 * «Down: 59.4 KiB/s». */
+                if (lx + label_w + NM_VALUE_GAP > value_x)
                     lx = value_x + value_w + NM_VALUE_GAP;
 
                 nm_show_text(cr, layout, priv->series_font[i], lx, ly,
@@ -1229,14 +1242,17 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
     priv->font = xs_host_api()->conf_str(kf, p->name, "font", NM_DEFAULT_FONT);
     priv->label_font = xs_host_api()->conf_str(kf, p->name, "label_font",
                                                priv->font);
-    {
-        char *rx = xs_host_api()->conf_str(kf, p->name, "rx_label", "Down");
-        char *tx = xs_host_api()->conf_str(kf, p->name, "tx_label", "Up");
-        priv->series_label[0] = rx;
-        priv->series_label[1] = tx;
-    }
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char key[32];
+        /* Подпись серии. Канонический ключ — series<N>_label, его пишет
+         * диалог. Раньше здесь читались rx_label/tx_label, которых в
+         * конфиге нет: пользователь правил series0_label=Down: через
+         * Properties, а при старте applet подставлял дефолт «Down» и
+         * молчал. Поэтому ключи разошлись, и настройка не работала
+         * вообще — до первого открытия диалога. */
+        g_snprintf(key, sizeof(key), "series%u_label", i);
+        priv->series_label[i] = xs_host_api()->conf_str(
+            kf, p->name, key, i == 0 ? "Down" : "Up");
         g_snprintf(key, sizeof(key), "series%u_font", i);
         priv->series_font[i] = xs_host_api()->conf_str(kf, p->name, key,
                                                        priv->font);
