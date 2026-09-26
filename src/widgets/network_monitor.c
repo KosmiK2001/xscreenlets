@@ -888,22 +888,43 @@ static cairo_surface_t *nm_render(PrivData *priv, int width, int height)
              * Ширина подписи нужна, чтобы число не налезало на текст,
              * когда координаты сведены близко. */
             {
-                int w = 0;
                 PangoFontDescription *fd =
                     pango_font_description_from_string(priv->series_font[i]);
+                int label_w = 0, value_w = 0;
+                char *value_text = g_strdup(rate_text[i]);
 
+                /* Число получает свою координату безусловно: это то,
+                 * что задаёт Position, и уступать оно не должно.
+                 *
+                 * Раньше здесь стояло value_x = MAX(sx, lx + w + GAP).
+                 * Из-за этого series<N>_x не работал, пока он меньше
+                 * конца подписи: значения 10, 20 и 30 давали на экране
+                 * одно и то же, потому что все подпадали под MAX и
+                 * вставали на lx + w + GAP. Пользователь двигал Position X
+                 * и ничего не получал.
+                 *
+                 * Теперь при наезде двигается ПОДПИСЬ, а не число: она
+                 * второстепенна, сдвинуть её можно почти всегда, и обе
+                 * настройки получают независимый смысл. */
                 pango_layout_set_font_description(layout, fd);
                 pango_layout_set_text(layout, priv->series_label[i], -1);
-                pango_layout_get_pixel_size(layout, &w, NULL);
-                pango_font_description_free(fd);
+                pango_layout_get_pixel_size(layout, &label_w, NULL);
+                pango_layout_set_text(layout, value_text, -1);
+                pango_layout_get_pixel_size(layout, &value_w, NULL);
+
+                value_x = sx;
+                /* Наезд: число кончается правее, чем начинается подпись.
+                 * Подпись уводим вправо за число — иначе координата
+                 * Position X снова перестала бы действовать. */
+                if (value_x + value_w + NM_VALUE_GAP > lx)
+                    lx = value_x + value_w + NM_VALUE_GAP;
+
                 nm_show_text(cr, layout, priv->series_font[i], lx, ly,
                              priv->series_label[i],
                              priv->series_text_color[i],
                              width, graph_y, graph_h, TRUE);
-                /* Если число настроено левее конца подписи, не даём ему
-                 * наехать на текст: сдвигаем вправо, но не дальше
-                 * lx + w + NM_VALUE_GAP. */
-                value_x = MAX(sx, lx + w + NM_VALUE_GAP);
+                pango_font_description_free(fd);
+                g_free(value_text);
             }
             full = g_strdup(rate_text[i]);
         } else {
