@@ -30,13 +30,13 @@ label_font=Sans 8
 rx_label=Down
 tx_label=Up
 series0_font=Sans 8
-series0_x=7
+series0_x=34
 series0_y=10
 series0_label_x=6
 series0_label_y=23
 series0_placement=inside
 series1_font=Sans 8
-series1_x=1
+series1_x=184
 series1_y=26
 series1_label_x=156
 series1_label_y=23
@@ -85,3 +85,16 @@ total0_placement=bottom
 total1_placement=bottom
 series0_label=Down:
 series1_label=Up:
+
+# Про зазор между подписью и числом.
+#
+# Подпись («Down:») при Sans 8 шириной около 22 px. Если series<N>_label_x
+# и series<N>_x сведены так, что подпись кончается правее начала числа,
+# подпись уезжает вправо за число — так число сохраняет свою
+# координату, а оно уступать не должно. Чтобы подпись осталась СЛЕВА от
+# числа, оставляйте между концом подписи и началом числа хотя бы 6-8 px:
+#   series0_label_x=6, ширина 22 -> конец на 28
+#   series0_x=34                  -> начало числа на 34, зазор 6
+#
+# Это не ограничение, а разумное требование: свести координаты
+# настолько, что места между элементами не остаётся, нельзя.
