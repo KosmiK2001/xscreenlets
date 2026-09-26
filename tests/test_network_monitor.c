@@ -371,46 +371,6 @@ static void test_config_key_is_copied(void)
     g_key_file_free(kf);
 }
 
-/* Геометрия внешней полосы (вариант А). Полоса появляется, если хотя бы
- * у одной серии выбрано «снаружи», и включает строку заголовка, иначе
- * первая подпись серии встала бы ровно на IP. */
-#define T_OUTSIDE_ROW_H 14
-
-static int t_band(int height, int outside_rows)
-{
-    int band = 0;
-    if (outside_rows > 0) {
-        band = (outside_rows + 1) * T_OUTSIDE_ROW_H;
-        if (band > 0 && height - band < height / 3)
-            band = MAX(0, height - MAX(1, height / 3));
-    }
-    return band;
-}
-
-static void test_outside_band(void)
-{
-    int h = 140, band, graph_y, graph_h;
-
-    check(t_band(h, 0) == 0, "без внешних подписей полосы нет");
-    check(t_band(h, 1) == 2 * T_OUTSIDE_ROW_H,
-          "одна внешняя подпись: полоса из двух строк (заголовок + подпись)");
-    check(t_band(h, 2) == 3 * T_OUTSIDE_ROW_H,
-          "две внешние подписи: полоса из трёх строк");
-
-    band = t_band(h, 2);
-    graph_y = band;
-    graph_h = MAX(1, h - graph_y - 2);
-    check(graph_y > 0, "график опущен ниже полосы");
-    check(graph_y + graph_h <= h, "график не выходит за окно");
-    check(graph_h > 0, "график не схлопнулся в ноль");
-
-    /* Полоса не должна съесть окно: график получает минимум треть. */
-    check(t_band(40, 2) <= 40 - MAX(1, 40 / 3),
-          "в низком окне полоса урезается, график сохраняет треть высоты");
-    check(t_band(10, 2) >= 0, "в очень низком окне полоса не даёт отрицательную высоту");
-    check(t_band(10, 2) < 10, "полоса меньше окна даже в 10px");
-}
-
 /* Скругление окна не меньше скругления графика: иначе рамка окна срежет
  * скруглённые углы графика по диагонали. */
 static void test_window_radius_floor(void)
@@ -424,6 +384,78 @@ static void test_window_radius_floor(void)
     win = MAX(4, corner);
     check(win >= corner, "кламп поднимает окно до скругления графика");
     check(MAX(0, corner) == corner, "скругление графика не изменяется клампом");
+}
+
+/* Отступы между окном и графиком. Считаются по реальной высоте шрифта
+ * того элемента, который выбран «снаружи» (если таких несколько — по
+ * наибольшей), плюс поля сверху и снизу. Модель повторяет nm_render(). */
+#define T_MARGIN_TOP    2
+#define T_MARGIN_BOTTOM 2
+#define T_ROW_H_MIN     8
+
+/* Сколько внешних элементов выбрано снаружи: header, серии, сводки. */
+typedef struct {
+    int hdr, s0, s1, t0, t1;
+} TOutside;
+
+static int t_band(const TOutside *o, int font_px)
+{
+    int row_h = 0;
+    int top = 0, bot = 0;
+    int h, gy, gh;
+
+    if (font_px <= 0)
+        font_px = T_ROW_H_MIN;
+    if (o->hdr) row_h = MAX(row_h, font_px);
+    if (o->s0) row_h = MAX(row_h, font_px);
+    if (o->s1) row_h = MAX(row_h, font_px);
+    if (o->t0) row_h = MAX(row_h, font_px);
+    if (o->t1) row_h = MAX(row_h, font_px);
+    if (row_h > 0) {
+        row_h = MAX(row_h, T_ROW_H_MIN);
+        top = row_h + T_MARGIN_TOP + T_MARGIN_BOTTOM;
+        bot = top;
+    }
+    /* Нижний отступ есть только если сводки снаружи: они внизу. */
+    if (!o->t0 && !o->t1)
+        bot = 0;
+
+    h = 160;
+    gy = top;
+    gh = MAX(1, h - gy - bot);
+    if (gh < h / 3 && h - top - bot > 0) {
+        int room = MAX(1, h / 3);
+        int overflow = top + bot - (h - room);
+
+        top = MAX(0, top - overflow);
+        bot = MAX(0, bot - overflow);
+        gy = top;
+        gh = MAX(1, h - gy - bot);
+    }
+    return top + bot;
+}
+
+static void test_outside_margins(void)
+{
+
+    check(t_band(&(TOutside){0,0,0,0,0}, 13) == 0,
+          "без внешних элементов отступов нет");
+    check(t_band(&(TOutside){1,0,0,0,0}, 13) == 13 + 4,
+          "заголовок снаружи: отступ = высота шрифта + поля");
+    check(t_band(&(TOutside){0,0,0,1,1}, 13) == 2 * (13 + 4),
+          "обе сводки снаружи: отступ есть и сверху, и снизу");
+    check(t_band(&(TOutside){1,1,1,1,1}, 13) == 2 * (13 + 4),
+          "все снаружи: отступ не растёт от их количества");
+
+    /* Отступ считается по НАИБОЛЬШЕМУ шрифту из выбранных наружу. */
+    check(t_band(&(TOutside){0,1,0,0,0}, 8) == 8 + 4,
+          "мелкий шрифт даёт маленький верхний отступ");
+    check(t_band(&(TOutside){0,1,0,0,0}, 20) == 20 + 4,
+          "крупный шрифт даёт большой верхний отступ");
+    check(t_band(&(TOutside){0,1,0,0,0}, 0) == T_ROW_H_MIN + 4,
+          "шрифт нулевой высоты поднимается до минимума");
+    check(t_band(&(TOutside){0,0,0,0,0}, 40) == 0,
+          "крупный ВНУТРЕННИЙ шрифт отступ не создаёт");
 }
 
 static void test_split_geometry(void)
@@ -528,8 +560,8 @@ int main(void)
     test_format_rate();
     test_format_bytes();
     test_corner_radius();
+    test_outside_margins();
     test_split_geometry();
-    test_outside_band();
     test_window_radius_floor();
     test_config_key_is_copied();
 
