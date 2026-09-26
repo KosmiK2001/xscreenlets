@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect x="5" y="5" width="54" height="54" rx="10" fill="#191919" stroke="#737373" stroke-width="2"/>
+  <!-- термометр -->
+  <g stroke="#FFA500" stroke-width="4" stroke-linecap="round" fill="none">
+    <path d="M25 15v27"/>
+  </g>
+  <circle cx="25" cy="47" r="8" fill="#FFA500"/>
+  <g fill="#FFA500">
+    <rect x="30" y="18" width="16" height="4" rx="2"/>
+    <rect x="30" y="25" width="11" height="4" rx="2"/>
+    <rect x="30" y="32" width="19" height="4" rx="2"/>
+    <rect x="30" y="39" width="9" height="4" rx="2"/>
+  </g>
+  <g fill="#5382BA">
+    <rect x="43" y="19" width="5" height="23" rx="1"/>
+  </g>
+</svg>

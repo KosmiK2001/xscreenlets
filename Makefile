@@ -25,6 +25,7 @@ TARGET_CPU_PLUGIN = $(BUILD_DIR)/cpu_monitor.so
 TARGET_MEMORY_PLUGIN = $(BUILD_DIR)/memory_monitor.so
 TARGET_DISK_PLUGIN = $(BUILD_DIR)/disk_monitor.so
 TARGET_NETWORK_PLUGIN = $(BUILD_DIR)/network_monitor.so
+TARGET_SENSORS_PLUGIN = $(BUILD_DIR)/sensors.so
 TARGET_PROCESS_PLUGIN = $(BUILD_DIR)/process_list.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
@@ -51,7 +52,7 @@ OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_DISK_PLUGIN) $(TARGET_NETWORK_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_DISK_PLUGIN) $(TARGET_NETWORK_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE) $(TARGET_SENSORS_PLUGIN)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -104,6 +105,13 @@ $(BUILD_DIR)/network_monitor.o: src/widgets/network_monitor.c src/widgets/networ
 $(TARGET_NETWORK_PLUGIN): $(BUILD_DIR) build/network_monitor.o build/network_monitor_core.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/network_monitor.o build/network_monitor_core.o $(LDFLAGS_PLUGIN)
 
+$(BUILD_DIR)/sensors_core.o: src/widgets/sensors_core.c src/widgets/sensors_core.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+$(BUILD_DIR)/sensors.o: src/widgets/sensors.c src/widgets/sensors_core.h include/xs_api.h src/core/common.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+$(TARGET_SENSORS_PLUGIN): $(BUILD_DIR) build/sensors.o build/sensors_core.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/sensors.o build/sensors_core.o $(LDFLAGS_PLUGIN)
+
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
@@ -124,11 +132,14 @@ $(BUILD_DIR)/test_disk_monitor: tests/test_disk_monitor.c src/widgets/disk_monit
 
 $(BUILD_DIR)/test_network_monitor: tests/test_network_monitor.c src/widgets/network_monitor_core.c src/widgets/network_monitor_core.h
 	$(CC) $(CFLAGS) -o $@ tests/test_network_monitor.c src/widgets/network_monitor_core.c $(LDFLAGS_PLUGIN)
+$(BUILD_DIR)/test_sensors: tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_core.h
+	$(CC) $(CFLAGS) -o $@ tests/test_sensors.c src/widgets/sensors_core.c $(LDFLAGS_PLUGIN)
 
-test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor
+test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors
 	$(BUILD_DIR)/test_memory_monitor
 	$(BUILD_DIR)/test_disk_monitor
 	$(BUILD_DIR)/test_network_monitor
+	$(BUILD_DIR)/test_sensors
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -146,6 +157,7 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_MEMORY_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/memory_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_DISK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/disk_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_NETWORK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/network_monitor.so
+	$(INSTALL) -m 0755 $(TARGET_SENSORS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/sensors.so
 	$(INSTALL) -m 0755 $(TARGET_PROCESS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/process_list.so
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
 	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg

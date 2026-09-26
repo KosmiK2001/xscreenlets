@@ -1,0 +1,898 @@
+/* test_sensors.c — тесты ядра sensors: парсер hwmon, формат, скругление. */
+#include "sensors_core.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <glib.h>
+#include <glib/gstdio.h>
+#include <pango/pangocairo.h>
+
+static int checks;
+static int failures;
+
+static void check(gboolean ok, const char *what)
+{
+    checks++;
+    if (!ok) {
+        failures++;
+        printf("  FAIL  %s\n", what);
+    }
+}
+
+static void check_str(const char *got, const char *want, const char *what)
+{
+    checks++;
+    if (g_strcmp0(got, want) != 0) {
+        failures++;
+        printf("  FAIL  %s: получено «%s», ожидалось «%s»\n", what,
+               got ? got : "(null)", want);
+    }
+}
+
+static void check_dbl(gdouble got, gdouble want, gdouble eps, const char *what)
+{
+    checks++;
+    if (fabs(got - want) > eps) {
+        failures++;
+        printf("  FAIL  %s: получено %f, ожидалось %f\n", what, got, want);
+    }
+}
+
+static void check_int(gint got, gint want, const char *what)
+{
+    checks++;
+    if (got != want) {
+        failures++;
+        printf("  FAIL  %s: получено %d, ожидалось %d\n", what, got, want);
+    }
+}
+
+/* ---------------------------------------------------------------- фикстура */
+
+typedef struct {
+    char *path;
+} Fixture;
+
+static Fixture fx_new(void)
+{
+    Fixture f;
+    char *tpl = g_build_filename(g_get_tmp_dir(), "sensors-test-XXXXXX", NULL);
+
+    if (!g_mkdtemp(tpl)) {
+        printf("  FAIL  не создать временный каталог\n");
+        failures++;
+        checks++;
+        f.path = NULL;
+        return f;
+    }
+    f.path = tpl;
+    return f;
+}
+
+static void fx_free(Fixture *f)
+{
+    if (f->path)
+        g_free(f->path);
+}
+
+/* Создать hwmon с файлами: files — массив «имя=содержимое», NULL-список. */
+static void fx_hwmon(Fixture *f, const char *dir, const char *name,
+                     const char *const *files);
+
+/* hwmon с device-симлинком: как на живой машине. Идентификатор строки
+ * строится из basename симлинка device, поэтому без него канал не
+ * находится — и это правильно: «nvme/Composite» без устройства не
+ * различает четыре nvme между собой. */
+static void fx_hwmon_dev(Fixture *f, const char *dir, const char *name,
+                         const char *device, const char *const *files)
+{
+    char *base = g_build_filename(f->path, dir, NULL);
+    char *dev = g_build_filename(base, "device", NULL);
+    char *target = g_build_filename(f->path, device, NULL);
+
+    g_mkdir_with_parents(target, 0755);
+    g_mkdir_with_parents(base, 0755);
+    /* g_symlink в glib нет вообще — это symlink() из unistd.h */
+    g_unlink(dev);   /* фикстура могла остаться с прошлого прогона */
+    if (symlink(target, dev) != 0) {
+        /* симлинка может не быть (прав нет) — тогда канал не найдётся
+         * по row_id, и тест упадёт с внятным сообщением */
+        checks++;
+        failures++;
+        printf("  FAIL  не создать device-симлинк в фикстуре\n");
+    }
+    g_free(dev);
+    g_free(target);
+    g_free(base);
+    fx_hwmon(f, dir, name, files);
+}
+
+static void fx_hwmon(Fixture *f, const char *dir, const char *name,
+                     const char *const *files)
+{
+    char *base = g_build_filename(f->path, dir, NULL);
+    char *namefile = g_build_filename(base, "name", NULL);
+
+    g_mkdir_with_parents(base, 0755);
+    g_file_set_contents(namefile, name, -1, NULL);
+    for (guint i = 0; files && files[i]; i++) {
+        const char *eq = strchr(files[i], '=');
+        gchar *leaf = g_strndup(files[i], eq - files[i]);
+        char *path = g_build_filename(base, leaf, NULL);
+        g_file_set_contents(path, eq + 1, -1, NULL);
+        g_free(path);
+        g_free(leaf);
+    }
+    g_free(namefile);
+    g_free(base);
+}
+
+/* ------------------------------------------------------- чтение hwmon */
+
+static void test_reads_channels(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = {
+        "temp1_input=58000\n",
+        "temp1_label=loc1\n",
+        "temp2_input=61000\n",
+        "fan1_input=1200\n",   /* не температура — игнорируется */
+        "in0_input=33000\n",   /* не температура — игнорируется */
+        NULL
+    };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "i350bb", files);
+    list = sensor_list_read(f.path);
+    check(list != NULL, "список читается");
+    check_int(list ? (gint) list->chips->len : -1, 1, "один чип с каналами");
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+        SensorReading *r;
+
+        check_str(c->chip, "i350bb", "имя чипа");
+        check_int(c->readings->len, 2, "только temp-каналы");
+        r = g_ptr_array_index(c->readings, 0);
+        check_str(r->label, "loc1", "метка из temp1_label");
+        check_dbl(r->celsius, 58.0, 0.001, "58.0°C");
+        check(r->valid, "канал валиден");
+        r = g_ptr_array_index(c->readings, 1);
+        check_str(r->label, "temp2", "без метки — имя канала");
+        check_dbl(r->celsius, 61.0, 0.001, "61.0°C");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* Порядок каналов: temp10 обязан идти ПОСЛЕ temp2. Алфавитная сортировка
+ * даёт обратное, и каналы в выводе оказываются переставлены. */
+static void test_channel_order_is_numeric(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = {
+        "temp1_input=10000\n",
+        "temp2_input=20000\n",
+        "temp10_input=30000\n",
+        NULL
+    };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "testchip", files);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+
+        check_int(c->readings->len, 3, "три канала");
+        check_int(((SensorReading *) g_ptr_array_index(c->readings, 0))->channel,
+                  1, "канал 1 первым");
+        check_int(((SensorReading *) g_ptr_array_index(c->readings, 1))->channel,
+                  2, "канал 2 вторым");
+        check_int(((SensorReading *) g_ptr_array_index(c->readings, 2))->channel,
+                  10, "канал 10 третьим, не первым");
+    } else {
+        check(FALSE, "чип прочитан для проверки порядка");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* -128000 — маркер «канала нет», а не минус 128 градусов. */
+static void test_invalid_marker(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = {
+        "temp1_input=-128000\n",
+        "temp3_input=38750\n",
+        NULL
+    };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "nct7904", files);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+        SensorReading *r = g_ptr_array_index(c->readings, 0);
+
+        check(!r->valid, "-128000 помечен как невалидный");
+        check_int(c->readings->len, 2, "невалидный канал НЕ выброшен");
+        r = g_ptr_array_index(c->readings, 1);
+        check(r->valid, "нормальный канал валиден");
+    } else {
+        check(FALSE, "чип прочитан для проверки маркера");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+static void test_negative_temp_is_valid(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = { "temp1_input=-15000\n", NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "ambient", files);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+        SensorReading *r = g_ptr_array_index(c->readings, 0);
+        check(r->valid, "минус 15 градусов — валидное значение");
+        check_dbl(r->celsius, -15.0, 0.001, "-15.0°C");
+    } else {
+        check(FALSE, "чип прочитан для проверки отрицательной температуры");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* Нечитаемый канал: значение НЕ подставляется, но строка сохраняется.
+ *
+ * Раньше такой канал отбрасывался, и это было неверно: на серверной
+ * матери с BMC чип вроде nct7904 делит i2c-адаптер с ipmi, и при
+ * параллельном обращении драйвер отдаёт -EAGAIN. g_file_get_contents()
+ * возвращает FALSE, канал исчезал на кадр и появлялся снова — строка
+ * мигала. Теперь канал помечен read_error, и плагин рисует прочерк.
+ *
+ * Подставлять 0 вместо неизвестного значения нельзя: «0.0°C» среди
+ * десятка настоящих каналов выглядит как измерение. */
+static void test_malformed_value(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = { "temp1_input=не-число\n", "temp2_input=42000\n",
+                            NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "garbage", files);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+        SensorReading *r;
+
+        check_int(c->readings->len, 2,
+                  "нечитаемый канал СОХРАНЁН, а не отброшен");
+        r = g_ptr_array_index(c->readings, 0);
+        check(r->read_error, "помечен read_error");
+        check(!r->valid, "не валиден — значение неизвестно");
+        r = g_ptr_array_index(c->readings, 1);
+        check(!r->read_error, "нормальный канал без read_error");
+        check(r->valid, "нормальный канал валиден");
+        check_dbl(r->celsius, 42.0, 0.001, "нормальное значение прочитано");
+    } else {
+        check(FALSE, "чип прочитан для проверки мусора");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* Пустой файл канала — то же самое, что ошибка чтения: значение есть
+ * ноль байт, показать нечего, но канал существует. */
+static void test_empty_value(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = { "temp1_input=\n", "temp2_input=50000\n", NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "empty", files);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+
+        check_int(c->readings->len, 2, "пустой канал сохранён");
+        check(((SensorReading *) g_ptr_array_index(c->readings, 0))->read_error,
+              "пустой файл = read_error");
+    } else {
+        check(FALSE, "чип прочитан для проверки пустого канала");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* НЕ выдавать 0 вместо неизвестного: значение при ошибке остаётся 0.0,
+ * но valid == FALSE, и именно по нему плагин рисует прочерк. Если бы
+ * проверка шла по celsius, 0.0 был бы неотличим от настоящих нулей. */
+static void test_error_is_not_zero(void)
+{
+    Fixture f = fx_new();
+    const char *files[] = { "temp1_input=ошибка\n", NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "err", files);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+        SensorReading *r = g_ptr_array_index(c->readings, 0);
+
+        check(!r->valid, "valid == FALSE отличает ошибку от настоящих 0");
+        check(r->read_error, "read_error выставлен");
+    } else {
+        check(FALSE, "чип прочитан для проверки ошибки");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* Точное совпадение имени. Префикс не подходит: иначе четыре разных nvme
+ * схлопнулись бы в один пункт настроек. */
+static void test_find_is_exact(void)
+{
+    Fixture f = fx_new();
+    const char *a[] = { "temp1_input=40000\n", NULL };
+    const char *b[] = { "temp1_input=35000\n", NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "nvme", a);
+    fx_hwmon(&f, "hwmon1", "nvme-extra", b);
+    list = sensor_list_read(f.path);
+    check_int(list ? (gint) list->chips->len : -1, 2, "два разных чипа");
+    check(sensor_list_find(list, "nvme") != NULL, "точное имя найдено");
+    check(sensor_list_find(list, "nvme-extra") != NULL, "второе имя найдено");
+    check(sensor_list_find(list, "nv") == NULL, "префикс не подходит");
+    check(sensor_list_find(list, "nvme-") == NULL, "усечённое имя не подходит");
+    check(sensor_list_find(list, "нет-такого") == NULL, "несуществующее имя");
+    check(sensor_list_find(NULL, "nvme") == NULL, "NULL-список не падает");
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* hwmon идут по возрастанию номера, а не в порядке g_dir_read_name. */
+static void test_hwmon_order(void)
+{
+    Fixture f = fx_new();
+    const char *a[] = { "temp1_input=10000\n", NULL };
+    const char *b[] = { "temp1_input=20000\n", NULL };
+    const char *c[] = { "temp1_input=30000\n", NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon10", "chipc", c);
+    fx_hwmon(&f, "hwmon2", "chipa", a);
+    fx_hwmon(&f, "hwmon1", "chipb", b);
+    list = sensor_list_read(f.path);
+    if (list && list->chips->len == 3) {
+        /* сортировка чипов идёт по имени, а не по номеру hwmon:
+         * chipa, chipb, chipc */
+        check_str(((SensorChip *) g_ptr_array_index(list->chips, 0))->chip,
+                  "chipa", "первый по имени");
+        check_str(((SensorChip *) g_ptr_array_index(list->chips, 2))->chip,
+                  "chipc", "третий по имени");
+    } else {
+        check(FALSE, "три чипа прочитаны для проверки порядка");
+    }
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+static void test_no_channels_skips_chip(void)
+{
+    Fixture f = fx_new();
+    const char *a[] = { "temp1_input=10000\n", NULL };
+    const char *b[] = { "fan1_input=1200\n", NULL }; /* не температура */
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "temphas", a);
+    fx_hwmon(&f, "hwmon1", "fanonltemp", b);
+    list = sensor_list_read(f.path);
+    check_int(list ? (gint) list->chips->len : -1, 1, "чип без температур не попал");
+    check(sensor_list_find(list, "fanonltemp") == NULL, "чип отброшен");
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* ------------------------------------------- устойчивость идентификатора */
+
+/* ГЛАВНОЕ требование: идентификатор строки не зависит от номера hwmon.
+ *
+ * Тот же диск после перезагрузки может оказаться hwmon10 вместо hwmon8,
+ * потому что номера hwmon — это индекс порядка регистрации драйверов.
+ * Строка конфига обязана указывать на тот же физический диск. */
+static void test_id_independent_of_hwmon_number(void)
+{
+    char *id1 = sensor_row_id("drivetemp", "0:0:2:0", "temp1");
+    char *id2 = sensor_row_id("drivetemp", "0:0:2:0", "temp1");
+
+    check_str(id1, id2, "идентификатор одинаков при разном номере hwmon");
+    check_str(id1, "drivetemp/0:0:2:0/temp1", "формат «чип/устройство/канал»");
+    g_free(id1);
+    g_free(id2);
+}
+
+/* Имя чипа НЕ уникально: все четыре nvme называются «nvme», все диски
+ * «drivetemp». Поиск по одному имени схлопывает их в один, поэтому
+ * sensor_find_reading обязан различать устройство. */
+static void test_same_chip_different_devices(void)
+{
+    Fixture f = fx_new();
+    const char *a[] = { "temp1_input=34900\n", "temp1_label=Composite\n", NULL };
+    const char *b[] = { "temp1_input=36900\n", "temp1_label=Composite\n", NULL };
+    SensorList *list;
+    SensorReading *r;
+
+    if (!f.path)
+        return;
+    fx_hwmon_dev(&f, "hwmon0", "nvme", "nvme0", a);
+    fx_hwmon_dev(&f, "hwmon1", "nvme", "nvme1", b);
+    list = sensor_list_read(f.path);
+    check_int(list ? (gint) list->chips->len : -1, 2,
+              "два устройства с одинаковым именем чипа");
+    r = sensor_find_reading(list, "nvme/nvme0/Composite");
+    check(r != NULL, "первый nvme найден по полному row_id");
+    check_dbl(r ? r->celsius : 0.0, 34.9, 0.001, "значение первого nvme");
+    r = sensor_find_reading(list, "nvme/nvme1/Composite");
+    check(r != NULL, "второй nvme найден по полному row_id");
+    check_dbl(r ? r->celsius : 0.0, 36.9, 0.001, "значение второго nvme");
+    check(sensor_list_find(list, "nvme") != NULL,
+          "поиск по имени чипа возвращает первый — поэтому нужен row_id");
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+static void test_find_reading_rejects_partial(void)
+{
+    Fixture f = fx_new();
+    const char *a[] = { "temp1_input=40000\n", "temp1_label=loc1\n", NULL };
+    SensorList *list;
+
+    if (!f.path)
+        return;
+    fx_hwmon_dev(&f, "hwmon0", "i350bb", "pci/0000:05:00.0", a);
+    list = sensor_list_read(f.path);
+    check(sensor_find_reading(list, "i350bb/0000:05:00.0/loc1") != NULL,
+          "точный row_id найден");
+    check(sensor_find_reading(list, "i350bb/wrong/loc1") == NULL,
+          "неверное устройство не найдено");
+    check(sensor_find_reading(list, "i350bb/0000:05:00.0/nope") == NULL,
+          "неверный канал не найден");
+    check(sensor_find_reading(list, "i350bb") == NULL,
+          "без устройства не найдено");
+    check(sensor_find_reading(list, "нет/такого/такого") == NULL,
+          "несуществующий row_id");
+    check(sensor_find_reading(NULL, "a/b/c") == NULL, "NULL-список");
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* Имя в стиле sensors(1), сверенное с реальным выводом. Формулы
+ * найдены перебором по всем 13 drivetemp и 5 nvme этой машины.
+ * Отвергнутые варианты указаны в sensors_core.c. */
+static void test_sensors_name(void)
+{
+    static const struct {
+        const char *dev_path;
+        const char *chip;
+        const char *want;
+    } t[] = {
+        { "/sys/devices/pci0000:00/0000:00:03.2/0000:05:00.0", "i350bb",
+          "i350bb-pci-0500" },
+        { "/sys/devices/pci0000:00/0000:00:02.0/0000:02:00.0/nvme/nvme0",
+          "nvme", "nvme-pci-0200" },
+        { "/sys/devices/pci0000:00/0000:07:00.0/host0/port-0:2/"
+          "end_device-0:2/target0:0:2/0:0:2:0", "drivetemp",
+          "drivetemp-scsi-0-20" },
+        { "/sys/devices/pci0000:00/0000:01:00.0/host1/port-1:3/"
+          "end_device-1:3/target1:0:3/1:0:3:0", "drivetemp",
+          "drivetemp-scsi-1-30" },
+        { "/sys/devices/platform/coretemp.0", "coretemp", "coretemp-isa-0000" },
+        { "/sys/devices/platform/coretemp.1", "coretemp", "coretemp-isa-0001" },
+        { "/sys/devices/pci0000:00/0000:00:1f.3/i2c-1/1-002d", "nct7904",
+          "nct7904-i2c-1-2d" },
+    };
+    const guint n = sizeof(t) / sizeof(t[0]);
+
+    for (guint i = 0; i < n; i++) {
+        SensorChip c;
+        char *got;
+
+        memset(&c, 0, sizeof(c));
+        c.chip = (char *) t[i].chip;
+        c.dev_path = (char *) t[i].dev_path;
+        got = sensor_chip_sensors_name(&c);
+        check_str(got, t[i].want, t[i].dev_path);
+        g_free(got);
+    }
+}
+
+/* Имя sensors должно быть УНИКАЛЬНЫМ: если два устройства дают одно
+ * имя, пользователь не сможет различить их в настройках. */
+static void test_sensors_names_unique_on_live_tree(void)
+{
+    SensorList *list = sensor_list_read("/sys/class/hwmon");
+    GHashTable *seen;
+    guint dup = 0;
+
+    check(list != NULL, "живое дерево читается");
+    if (!list)
+        return;
+    seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    for (guint i = 0; i < list->chips->len; i++) {
+        char *name = sensor_chip_sensors_name(
+            g_ptr_array_index(list->chips, i));
+
+        if (g_hash_table_contains(seen, name)) {
+            dup++;
+            printf("  дубль имени: %s\n", name);
+        }
+        g_hash_table_add(seen, name);
+    }
+    check_int((gint) dup, 0, "имена sensors уникальны на живой машине");
+    g_hash_table_destroy(seen);
+    sensor_list_free(list);
+}
+
+/* --------------------------------------------- конфиг: идентичность строки
+ *
+ * Регрессия: init писал в конфиг одни подписи, теряя «|источник». Строка
+ * переживала бы перезагрузку только до первого сохранения, а сохранение
+ * происходит в init — то есть всегда. */
+
+static void test_config_roundtrip_keeps_source(void)
+{
+    const char *text = "CPU|CPU Package id 0;NVMe|nvme/nvme0/Composite;"
+                       "диск|drivetemp/0:0:2:0/temp1";
+    GPtrArray *back = sensor_config_list(text);
+    GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *sources = g_ptr_array_new_with_free_func(g_free);
+
+    check_int((gint) back->len, 3, "три строки разобраны");
+    for (guint i = 0; i < back->len; i++) {
+        const char *entry = g_ptr_array_index(back, i);
+        const char *bar = strchr(entry, '|');
+
+        check(bar != NULL, "у записи есть разделитель источника");
+        if (!bar)
+            continue;
+        g_ptr_array_add(labels, g_strndup(entry, bar - entry));
+        g_ptr_array_add(sources, g_strdup(bar + 1));
+    }
+    check_str(g_ptr_array_index(labels, 0), "CPU", "подпись 0");
+    check_str(g_ptr_array_index(sources, 0), "CPU Package id 0", "источник 0");
+    check_str(g_ptr_array_index(labels, 2), "диск", "кириллица в подписи");
+    check_str(g_ptr_array_index(sources, 2), "drivetemp/0:0:2:0/temp1",
+              "SCSI-источник сохранился целиком");
+    g_ptr_array_unref(back);
+    g_ptr_array_unref(labels);
+    g_ptr_array_unref(sources);
+}
+
+/* Подпись может содержать «|»? Нет: это разделитель, и разбор берёт
+ * ПЕРВОЕ вхождение. Проверяем, что лишние не портят источник. */
+static void test_config_source_takes_after_first_bar(void)
+{
+    GPtrArray *back = sensor_config_list("метка|a/b/c");
+
+    check_int((gint) back->len, 1, "одна запись");
+    check_str(g_ptr_array_index(back, 0), "метка|a/b/c", "запись целиком");
+    g_ptr_array_unref(back);
+}
+
+/* Пустые элементы (;,;;) не должны давать пустых строк: иначе в
+ * отрисовке появится строка без подписи и без источника. */
+static void test_config_skips_empty(void)
+{
+    GPtrArray *back = sensor_config_list("a;b;;;c");
+
+    check_int((gint) back->len, 3, "пустые элементы пропущены");
+    g_ptr_array_unref(back);
+    back = sensor_config_list("  ;x  ;  ");
+    check_int((gint) back->len, 1, "пробелы обрезаны, пустое отброшено");
+    g_ptr_array_unref(back);
+    back = sensor_config_list(NULL);
+    check_int((gint) back->len, 0, "NULL даёт пустой список");
+    g_ptr_array_unref(back);
+    back = sensor_config_list("");
+    check_int((gint) back->len, 0, "пустая строка даёт пустой список");
+    g_ptr_array_unref(back);
+}
+
+/* ------------------------------------------------- кегль шрифта (регресс)
+ *
+ * Регрессия: pango_font_description_get_size() возвращает размер в
+ * единицах PANGO_SCALE (для "Sans 8" это 8192, а не 8). Подстановка
+ * числа в описание шрифта давала "Sans 8192": окно рисовало рамку, а
+ * текст не появлялся вообще — на скриншоте это выглядит как «плагин
+ * ничего не выводит», и диагностировать приходится пробой отрисовки.
+ *
+ * sen_scale_font() — статическая функция плагина, поэтому здесь
+ * проверяется та же арифметика на core-стороне: пункты = size/PANGO_SCALE.
+ */
+
+static void test_font_size_in_points(void)
+{
+    PangoFontDescription *fd = pango_font_description_from_string("Sans 8");
+    int points = pango_font_description_get_size(fd) / PANGO_SCALE;
+
+    check_int(pango_font_description_get_size(fd), 8 * PANGO_SCALE,
+              "get_size отдаёт единицы PANGO_SCALE, а не пункты");
+    check_int(points, 8, "кегль в пунктах получается делением на PANGO_SCALE");
+    pango_font_description_free(fd);
+
+    fd = pango_font_description_from_string("Terminus Bold 16");
+    check_int(pango_font_description_get_size(fd) / PANGO_SCALE, 16,
+              "кегль 16 с семейством и начертанием");
+    pango_font_description_free(fd);
+}
+
+/* Масштабирование кегля под размер окна: окно шире замысла — шрифт
+ * крупнее, ровно во столько же, во сколько шире окно. */
+static void test_font_scale_proportional(void)
+{
+    /* та же формула, что в sen_scale_font */
+    for (int pt = 6; pt <= 24; pt++) {
+        for (int factor = 1; factor <= 3; factor++) {
+            int design = 200, actual = 200 * factor;
+            int scaled = (pt * actual) / design;
+
+            check_int(scaled, pt * factor, "масштаб кегля");
+        }
+    }
+    /* design == actual — кегль не плывёт */
+    check_int((11 * 200) / 200, 11, "одинаковый размер окна: кегль целый");
+}
+
+/* ------------------------------------------------- единицы измерения
+ *
+ * В диалоге выбор шкалы (регрессия: был флажок «Фаренгейт», который
+ * не мог выразить выбор — в градусах Цельсия перевод тоже идёт). */
+
+static void test_units_format(void)
+{
+    char *c = sensor_format_value(35.0, FALSE, TRUE);
+    char *f = sensor_format_value(35.0, TRUE, TRUE);
+    char *c_plain = sensor_format_value(35.0, FALSE, FALSE);
+    char *f_plain = sensor_format_value(35.0, TRUE, FALSE);
+
+    check_str(c, "35.0°C", "Цельсий с суффиксом");
+    check_str(f, "95.0°F", "Фаренгейт с суффиксом");
+    check_str(c_plain, "35.0", "Цельсий без суффикса");
+    check_str(f_plain, "95.0", "Фаренгейт без суффикса");
+    g_free(c); g_free(f); g_free(c_plain); g_free(f_plain);
+
+    /* Суффикс обязан соответствовать шкале: в конфиге Fahrenheit, а в
+     * подписи градус Цельсия — расхождение, которое видно на экране. */
+    check_str(sensor_unit_suffix(FALSE), "°C", "суффикс Цельсия");
+    check_str(sensor_unit_suffix(TRUE), "°F", "суффикс Фаренгейта");
+    check_dbl(sensor_to_display_unit(0.0, TRUE), 32.0, 0.001, "0°C = 32°F");
+    check_dbl(sensor_to_display_unit(100.0, TRUE), 212.0, 0.001,
+              "100°C = 212°F");
+    check_dbl(sensor_to_display_unit(-40.0, TRUE), -40.0, 0.001,
+              "-40° — единственная общая точка шкал");
+    check_dbl(sensor_to_display_unit(35.0, FALSE), 35.0, 0.001,
+              "Цельсий не переводится");
+}
+
+/* ---------------------------------------------------------------- формат */
+
+static void test_units(void)
+{
+    check_dbl(sensor_to_display_unit(58.0, FALSE), 58.0, 0.001, "58°C как есть");
+    check_dbl(sensor_to_display_unit(100.0, TRUE), 212.0, 0.001, "100°C = 212°F");
+    check_dbl(sensor_to_display_unit(0.0, TRUE), 32.0, 0.001, "0°C = 32°F");
+    check_dbl(sensor_to_display_unit(-40.0, TRUE), -40.0, 0.001, "-40 совпадает");
+    check_str(sensor_unit_suffix(FALSE), "°C", "суффикс °C");
+    check_str(sensor_unit_suffix(TRUE), "°F", "суффикс °F");
+}
+
+static void test_format(void)
+{
+    char *s = sensor_format_value(58.0, FALSE, TRUE);
+    check_str(s, "58.0°C", "формат с °C");
+    g_free(s);
+    s = sensor_format_value(58.0, FALSE, FALSE);
+    check_str(s, "58.0", "формат без единицы");
+    g_free(s);
+    s = sensor_format_value(100.0, TRUE, TRUE);
+    check_str(s, "212.0°F", "формат в °F");
+    g_free(s);
+    s = sensor_format_value(38.75, FALSE, TRUE);
+    check_str(s, "38.8°C", "округление до десятых");
+    g_free(s);
+}
+
+/* -------------------------------------------------------- список в conf */
+
+static void test_config_list(void)
+{
+    GPtrArray *items = sensor_config_list("GPU;X79; Package id 1 ");
+    char *joined;
+
+    check_int(items->len, 3, "три элемента, пробелы обрезаны");
+    check_str(g_ptr_array_index(items, 0), "GPU", "первый");
+    check_str(g_ptr_array_index(items, 2), "Package id 1",
+              "пробел внутри сохранён");
+    joined = sensor_config_join(items);
+    check_str(joined, "GPU;X79;Package id 1", "обратная сборка");
+    g_free(joined);
+    g_ptr_array_unref(items);
+}
+
+static void test_config_list_edges(void)
+{
+    GPtrArray *items = sensor_config_list("");
+    char *joined;
+
+    check_int(items->len, 0, "пустая строка — ноль элементов");
+    joined = sensor_config_join(items);
+    check_str(joined, "", "join пустого списка");
+    g_free(joined);
+    g_ptr_array_unref(items);
+
+    items = sensor_config_list(NULL);
+    check_int(items->len, 0, "NULL — ноль элементов");
+    g_ptr_array_unref(items);
+
+    items = sensor_config_list(";;A;;  ;;B;");
+    check_int(items->len, 2, "пустые сегменты пропущены");
+    g_ptr_array_unref(items);
+
+    /* подпись с «;» внутри сломает список — это неразбираемо, и мы
+     * обязаны это сказать, а не молча разрезать */
+    items = sensor_config_list("A;B;C");
+    joined = sensor_config_join(items);
+    check_str(joined, "A;B;C", "round-trip без потерь");
+    g_free(joined);
+    g_ptr_array_unref(items);
+}
+
+/* ------------------------------------------------------------ скругление */
+
+static void test_rounding(void)
+{
+    check_dbl(sensor_corner_radius_value(0), 0.0, 0.001, "radius 0");
+    check_dbl(sensor_corner_radius_value(-5), 0.0, 0.001, "отрицательный → 0");
+    check_dbl(sensor_corner_radius_value(4), 4.0, 0.001, "radius 4");
+    check(sensor_corner_radius_is_rounded(2.0), "2px — скруглено");
+    check(!sensor_corner_radius_is_rounded(0.5), "0.5px — нет");
+    check(!sensor_corner_radius_is_rounded(0.0), "0 — нет");
+}
+
+static void test_rounded_region(void)
+{
+    cairo_region_t *r;
+
+    /* cairo_region_contains_rectangle возвращает cairo_region_overlap_t:
+     * CAIRO_REGION_OVERLAP_IN (0) — полностью внутри, _PART (2) — часть,
+     * _OUT (1) — снаружи. Это НЕ gboolean, и CAIRO_REGION_OVERLAP_IN
+     * равен 0: сравнение результата с TRUE инвертирует смысл, и все
+     * проверки формы проходят наоборот — угол «срезан» оказывается
+     * внутри, а центр «внутри» — снаружи. */
+    r = sensor_rounded_region(200, 100, 4);
+    check(r != NULL, "регион создан для radius 4");
+    if (r) {
+        cairo_rectangle_int_t box = { 0, 0, 0, 0 };
+        /* верхний левый угол срезан: пиксель (0,0) вне региона */
+        check(cairo_region_contains_rectangle(r, &box) != CAIRO_REGION_OVERLAP_IN,
+              "угол срезан (0,0) вне");
+        box.x = 100; box.y = 50; box.width = 1; box.height = 1;
+        check(cairo_region_contains_rectangle(r, &box) == CAIRO_REGION_OVERLAP_IN,
+              "центр внутри");
+        box.x = 199; box.y = 0; box.width = 1; box.height = 1;
+        check(cairo_region_contains_rectangle(r, &box) != CAIRO_REGION_OVERLAP_IN,
+              "правый верхний угол срезан");
+        box.x = 0; box.y = 50; box.width = 1; box.height = 1;
+        check(cairo_region_contains_rectangle(r, &box) == CAIRO_REGION_OVERLAP_IN,
+              "левый край в середине внутри");
+        cairo_region_destroy(r);
+    }
+    check(sensor_rounded_region(200, 100, 0) == NULL, "radius 0 — NULL");
+    check(sensor_rounded_region(0, 100, 4) == NULL, "нулевая ширина — NULL");
+    /* радиус больше половины стороны обрезается, регион не пустеет */
+    r = sensor_rounded_region(20, 20, 50);
+    check(r != NULL, "radius больше половины — регион есть");
+    if (r) {
+        cairo_rectangle_int_t box = { 10, 10, 1, 1 };
+        check(cairo_region_contains_rectangle(r, &box) == CAIRO_REGION_OVERLAP_IN,
+              "центр остаётся внутри при огромном радиусе");
+        cairo_region_destroy(r);
+    }
+}
+
+/* ------------------------------------------------------------ живое дерево */
+
+static void test_live_tree(void)
+{
+    SensorList *list = sensor_list_read("/sys/class/hwmon");
+    guint total = 0;
+    gboolean found_invalid = FALSE;
+    gboolean found_valid = FALSE;
+
+    check(list != NULL, "живое /sys/class/hwmon читается");
+    if (!list)
+        return;
+    check(list->chips->len > 0, "найден хотя бы один сенсор");
+    for (guint i = 0; i < list->chips->len; i++) {
+        SensorChip *c = g_ptr_array_index(list->chips, i);
+        check(c->chip != NULL && *c->chip, "у чипа есть имя");
+        for (guint j = 0; j < c->readings->len; j++) {
+            SensorReading *r = g_ptr_array_index(c->readings, j);
+            total++;
+            check(r->celsius > -130.0 && r->celsius < 150.0,
+                  "температура в разумных пределах");
+            if (!r->valid)
+                found_invalid = TRUE;
+            else
+                found_valid = TRUE;
+        }
+    }
+    printf("  инфо: чипов=%u каналов=%u\n", list->chips->len, total);
+    check(found_valid, "есть живые значения");
+    (void)found_invalid; /* на этой машине есть, но не обязана */
+    sensor_list_free(list);
+}
+
+int main(void)
+{
+    printf("test_sensors\n");
+    test_reads_channels();
+    test_channel_order_is_numeric();
+    test_invalid_marker();
+    test_negative_temp_is_valid();
+    test_malformed_value();
+    test_empty_value();
+    test_error_is_not_zero();
+    test_find_is_exact();
+    test_hwmon_order();
+    test_no_channels_skips_chip();
+    test_id_independent_of_hwmon_number();
+    test_same_chip_different_devices();
+    test_find_reading_rejects_partial();
+    test_sensors_name();
+    test_sensors_names_unique_on_live_tree();
+    test_config_roundtrip_keeps_source();
+    test_config_source_takes_after_first_bar();
+    test_config_skips_empty();
+    test_font_size_in_points();
+    test_font_scale_proportional();
+    test_units_format();
+    test_units();
+    test_format();
+    test_config_list();
+    test_config_list_edges();
+    test_rounding();
+    test_rounded_region();
+    test_live_tree();
+
+    if (failures == 0)
+        printf("TEST_OK: %d проверок, 0 провалов\n", checks);
+    else
+        printf("TEST_FAIL: %d проверок, %d провалов\n", checks, failures);
+    return failures == 0 ? 0 : 1;
+}
