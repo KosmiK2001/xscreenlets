@@ -38,6 +38,7 @@
 /* Максимум строк в апплете. 21 чип на этой машине даёт 46 каналов —
  * больше 40 строк в окно не влезет, и лишнее просто не рисуется. */
 #define SEN_MAX_ROWS        40
+#define SEN_VALUE_GAP     6   /* зазор подпись->число, как в network_monitor */
 #define SEN_MARGIN          6
 #define SEN_LABEL_GAP       4
 #define SEN_DIALOG_FONT     180
@@ -54,6 +55,7 @@ typedef struct {
     GKeyFile *kf;
 
     int width, height;
+    gboolean height_auto;   /* высоту не задавали — считаем по строкам */
     int design_width, design_height;
     int corner_radius;      /* окно; содержимое скругляется тем же */
     int update_ms;
@@ -472,6 +474,8 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     priv->height = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_height",
                                                SEN_DEFAULT_HEIGHT),
                          SEN_MIN_HEIGHT, 1200);
+    priv->height_auto = xs_host_api()->conf_int(kf, p->name, "window_height",
+                                                -1) < 0;
     priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                                         "corner_radius",
                                                         SEN_DEFAULT_RADIUS),
@@ -501,7 +505,15 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
                                                "Sans 8");
 
     priv->label_x = xs_host_api()->conf_int(kf, p->name, "label_x", SEN_MARGIN);
-    priv->value_x = xs_host_api()->conf_int(kf, p->name, "value_x", 110);
+    /* Позиция числа по умолчанию — за самой длинной подписью.
+     *
+     * Фиксированное 110 рассчитано на «coretemp Core 0», а подпись в
+     * стиле sensors («nvme-pci-0300 · Sensor 1») шире, и число ложилось
+     * прямо на неё. Ровно тот же дефект, что был с итоговой строкой в
+     * network_monitor: дефолт обязан считаться по содержимому, а не
+     * быть зашитым числом. Пользовательский value_x из конфига
+     * уважается — правится только дефолт. */
+    priv->value_x = xs_host_api()->conf_int(kf, p->name, "value_x", -1);
     priv->first_row_y = xs_host_api()->conf_int(kf, p->name, "first_row_y", 4);
     priv->line_step = xs_host_api()->conf_int(kf, p->name, "line_step", 12);
 
@@ -513,23 +525,118 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     priv->row_sources = g_ptr_array_new_with_free_func(g_free);
     if (rows_text && *rows_text) {
         GPtrArray *raw = sensor_config_list(rows_text);
+        gboolean orphan = FALSE;   /* нашлась строка без источника */
+
         for (guint i = 0; i < raw->len; i++) {
             const char *entry = g_ptr_array_index(raw, i);
             const char *semi = strchr(entry, '|');
 
             if (!semi || semi == entry || !semi[1]) {
-                /* строка без источника: подпись есть, значение нет */
                 g_ptr_array_add(priv->rows, g_strdup(entry));
                 g_ptr_array_add(priv->row_sources, g_strdup(""));
+                orphan = TRUE;
                 continue;
             }
-            g_ptr_array_add(priv->rows,
-                            g_strndup(entry, semi - entry));
+            g_ptr_array_add(priv->rows, g_strndup(entry, semi - entry));
             g_ptr_array_add(priv->row_sources, g_strdup(semi + 1));
         }
         g_ptr_array_unref(raw);
+
+        /* Миграция: строка без источника не находит значение и рисует одну
+         * подпись без числа. Источник восстанавливается по подписи среди
+         * найденных сенсоров: «nvme-pci-0300 · Composite» указывает на
+         * канал однозначно. Такой конфиг остался от прежнего обработчика
+         * галочек, который писал одни подписи, — восстановить один раз при
+         * старте дешевле, чем годами показывать строки без чисел. */
+        if (orphan) {
+            SensorList *found = sensor_list_read("/sys/class/hwmon");
+            guint fixed = 0;
+
+            if (found) {
+                for (guint i = 0; i < priv->rows->len; i++) {
+                    const char *cur = g_ptr_array_index(priv->row_sources, i);
+                    const char *label = g_ptr_array_index(priv->rows, i);
+                    gboolean done = FALSE;
+
+                    if (cur && *cur)
+                        continue;
+                    for (guint k = 0; k < found->chips->len && !done; k++) {
+                        SensorChip *c =
+                            g_ptr_array_index(found->chips, k);
+                        char *sname = sensor_chip_sensors_name(c);
+
+                        for (guint m = 0; m < c->readings->len; m++) {
+                            SensorReading *r =
+                                g_ptr_array_index(c->readings, m);
+                            char *want = g_strdup_printf("%s · %s", sname,
+                                                         r->label);
+                            gboolean hit;
+
+                            /* Сначала имя в стиле sensors, затем старый
+                             * формат «чип + канал» из ранних сборок.
+                             * Второе совпадение неоднозначно — у coretemp
+                             * два устройства с каналом «Core 1», — поэтому
+                             * берём первое и предупреждаем в лог. */
+                            if (g_strcmp0(want, label) == 0) {
+                                hit = TRUE;
+                            } else {
+                                char *legacy = g_strdup_printf("%s %s",
+                                                               c->chip,
+                                                               r->label);
+                                hit = g_strcmp0(legacy, label) == 0;
+                                if (hit)
+                                    p->host->log("sensors: подпись «%s» "
+                                                 "неоднозначна, взят первый "
+                                                 "совпавший канал", label);
+                                g_free(legacy);
+                            }
+                            g_free(want);
+                            if (!hit)
+                                continue;
+                            g_free(g_ptr_array_index(priv->row_sources, i));
+                            g_ptr_array_index(priv->row_sources, i) =
+                                sen_source_key(c->chip, c->device, r->label);
+                            fixed++;
+                            done = TRUE;
+                            break;
+                        }
+                        g_free(sname);
+                    }
+                }
+                sensor_list_free(found);
+            }
+            if (fixed)
+                p->host->log("sensors: восстановлено источников: %d", fixed);
+        }
     }
+
     priv->values = g_ptr_array_new_with_free_func(g_free);
+
+    /* Дефолт позиции числа — за самой длинной подписью. Считаем по
+     * Pango на том же поверхностном контексте, что и отрисовка, иначе
+     * ширина отличается от фактической и число снова ляжет на текст. */
+    if (priv->value_x < 0) {
+        cairo_surface_t *probe =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t *pcr = cairo_create(probe);
+        const char *font = priv->label_font;
+        int widest = 0;
+
+        for (guint i = 0; i < priv->rows->len; i++) {
+            int w = sen_text_width(pcr, g_ptr_array_index(priv->rows, i),
+                                   font);
+            if (w > widest)
+                widest = w;
+        }
+        cairo_destroy(pcr);
+        cairo_surface_destroy(probe);
+        priv->value_x = priv->label_x + widest + SEN_VALUE_GAP;
+        /* Не даём колонке чисел уехать за окно: сжатие делает sen_show_text,
+         * но лучше сдвинуть колонку целиком. */
+        if (priv->value_x > priv->width - SEN_MARGIN - 40)
+            priv->value_x = MAX(priv->label_x + widest + SEN_VALUE_GAP,
+                                priv->width - 60);
+    }
 
     /* Цвета. ЧИТАЕМЫЕ ЗДЕСЬ КЛЮЧИ ОБЯЗАНЫ СОВПАДАТЬ с теми, что пишет
      * обработчик: расхождение ключей — самый частый дефект этого класса,
@@ -588,6 +695,18 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
             }
             sensor_list_free(list);
         }
+    }
+
+    /* Высота по числу строк, если пользователь её не задавал. Длина
+     * строки задаётся line_step, а не размером окна: 12 строк в окне
+     * 100px обрезаются по нижнему краю, и последняя температура не
+     * видна вообще. Пользовательская высота уважается. */
+    if (priv->height_auto) {
+        int need = priv->first_row_y + (int) priv->rows->len * priv->line_step
+                 + SEN_MARGIN * 2;
+
+        if (need > priv->height)
+            priv->height = CLAMP(need, SEN_MIN_HEIGHT, 1200);
     }
 
     priv->design_width = priv->width;
