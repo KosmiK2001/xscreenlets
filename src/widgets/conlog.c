@@ -89,6 +89,12 @@ struct _ConlogPriv {
 
     cairo_surface_t *cache;
     int          cache_width, cache_height;
+
+    /* Кэш авто-ширины: измерение 200 строк через Pango дорого, а тик
+     * тикает постоянно. Пересчёт — только когда буфер изменился. */
+    int          widest_cached;
+    gboolean     widest_valid;
+    guint64      seen_cached;
 };
 
 /* Живая таблица инстансов: контекст диалога переживает properties(),
@@ -472,19 +478,13 @@ static void cl_rebuild_cache(ConlogPriv *priv, int w, int h)
 /* Пересчитать размеры окна по содержимому. */
 static void cl_recalc_size(ConlogPriv *priv)
 {
-    cairo_surface_t *probe;
-    cairo_t *pcr;
-    int step, need_h, need_w, widest = 0;
+    int step, need_h, widest = 0;
 
     if (!priv)
         return;
-    probe = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    pcr = cairo_create(probe);
     step = conlog_line_height(priv->row_font);
     if (priv->line_step > step)
         step = priv->line_step;
-    cairo_destroy(pcr);
-    cairo_surface_destroy(probe);
 
     if (priv->height_auto) {
         /* Все строки, а не только видимые: иначе окно «прыгало» бы
@@ -494,19 +494,32 @@ static void cl_recalc_size(ConlogPriv *priv)
         priv->height = CLAMP(need_h, CONLOG_MIN_HEIGHT, 1200);
     }
     if (priv->width_auto) {
-        for (guint i = 0; i < conlog_len(priv->buf); i++) {
+        guint64 seen = conlog_total_seen(priv->buf);
+
+        /* Шрифт и размер окна тоже влияют на измерение, поэтому при их
+         * смене кэш сбрасывается принудительно. */
+        if (!priv->widest_valid || priv->seen_cached != seen) {
             cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
             cairo_t *c = cairo_create(s);
-            int w = cl_text_width(c, priv->row_font, conlog_text(priv->buf, i));
 
+            for (guint i = 0; i < conlog_len(priv->buf); i++) {
+                int w = cl_text_width(c, priv->row_font, conlog_text(priv->buf, i));
+
+                if (w > widest)
+                    widest = w;
+            }
             cairo_destroy(c);
             cairo_surface_destroy(s);
-            if (w > widest)
-                widest = w;
+            priv->widest_cached = widest;
+            priv->widest_valid = TRUE;
+            priv->seen_cached = seen;
         }
+        widest = priv->widest_cached;
         if (widest < 120)
             widest = 120;
         priv->width = CLAMP(widest + 20, CONLOG_MIN_WIDTH, 1200);
+    } else {
+        priv->widest_valid = FALSE;
     }
 }
 
@@ -676,6 +689,7 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
                                                CONLOG_DEFAULT_FONT);
     priv->row_font = xs_host_api()->conf_str(kf, p->name, "row_font",
                                              CONLOG_DEFAULT_FONT);
+    priv->widest_valid = FALSE;   /* шрифт из конфига — считаем заново */
     priv->colorize = xs_host_api()->conf_int(kf, p->name, "colorize", 1) != 0;
     priv->wrap = xs_host_api()->conf_int(kf, p->name, "wrap", 0) != 0;
     priv->strip_ansi = xs_host_api()->conf_int(kf, p->name, "strip_ansi",
@@ -719,6 +733,7 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     }
 
     conlog_start(priv);
+    priv->widest_valid = FALSE;   /* первый расчёт ширины — по факту */
 
     x = xs_host_api()->conf_int(kf, p->name, "x", 80);
     y = xs_host_api()->conf_int(kf, p->name, "y", 80);
@@ -736,7 +751,12 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     priv->design_height = priv->height;
     cl_rebuild_cache(priv, priv->width, priv->height);
     xs_host_api()->set_opacity(p, CLAMP(priv->opacity, 0.1, 1.0));
-    xs_host_api()->set_tick(p, 500);
+    /* Тик НЕ нужен часто: содержимое приходит событием от GIOChannel,
+     * которое само вызывает перерисовку. Тик нужен только чтобы
+     * поймать смену размера окна, а 500 мс на это — в 10 раз больше
+     * нужного. При max_lines=200 старый интервал давал 200 измерений
+     * текста через Pango дважды в секунду. */
+    xs_host_api()->set_tick(p, 5000);
     return 0;
 }
 
@@ -836,6 +856,7 @@ static void cl_cmd_changed(GtkEditable *e, gpointer data)
     conlog_clear(priv->buf);
     priv->scroll_top = 0;
     conlog_start(priv);
+    priv->widest_valid = FALSE;   /* первый расчёт ширины — по факту */
     cl_save(priv);
     cl_rebuild_cache(priv, priv->cache_width, priv->cache_height);
     if (priv->plugin->win)
