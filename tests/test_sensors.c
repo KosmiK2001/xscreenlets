@@ -997,6 +997,10 @@ static void test_every_config_row_has_reading(void)
         total++;
         r = sensor_find_reading(found, source);
         found_any = r != NULL;
+        /* Тестовая строка не привязана к датчику, ей всегда есть что
+         * показать: проверять её на живость нечего и не нужно. */
+        if (g_strcmp0(source, SEN_DUMMY_SOURCE) == 0)
+            found_any = TRUE;
         /* Источник NVIDIA лежит не в hwmon, а в NVML, и проверять его
          * нужно тем же способом, каким плагин его читает: поиск по
          * дереву для «nvidia/…» всегда даёт «нет», и строка карты
@@ -1634,6 +1638,147 @@ static void test_nvml_live_if_present(void)
     sensor_list_free(list);
 }
 
+/* Тестовая строка «dummy»: константы, значение, отсутствие в дереве.
+ *
+ * Пока пользователь ничего не выбрал, апплет обязан показать ровно одну
+ * строку «dummy» с фиксированным 36.6 °C, а не угадывать за него первые
+ * четыре найденных сенсора. Источник dummy не существует ни в sysfs, ни
+ * в NVML — это не датчик, и проверять его на живость нельзя. */
+static void test_dummy_row_constants(void)
+{
+    check_str(SEN_DUMMY_LABEL, "dummy", "подпись тестовой строки");
+    check_str(SEN_DUMMY_SOURCE, "dummy", "источник тестовой строки");
+    check_dbl(SEN_DUMMY_CELSIUS, 36.6, 0.0001, "значение тестовой строки");
+
+    /* Метка и источник совпадают намеренно: в таблице настроек строка
+     * dummy не показывается вовсе, а в конфиг пишется как «dummy|dummy».
+     * Разные строки дали бы строку, которую нечем включить обратно. */
+    check_str(SEN_DUMMY_LABEL, SEN_DUMMY_SOURCE,
+              "подпись и источник dummy совпадают");
+
+    /* Источник dummy не должен совпасть ни с одним реальным: иначе
+     * тестовая строка незаметно превратилась бы в данные датчика. */
+    {
+        SensorList *found = sensor_list_read("/sys/class/hwmon");
+
+        if (found) {
+            check_int(sensor_find_reading(found, SEN_DUMMY_SOURCE) != NULL, 0,
+                      "dummy не находится среди реальных сенсоров");
+            sensor_list_free(found);
+        }
+    }
+    check_int(nvml_source_is_nvidia(SEN_DUMMY_SOURCE), 0,
+              "dummy не считается источником NVIDIA");
+}
+
+/* Значение тестовой строки форматируется как обычное число — с единицей
+ * измерения и пересчётом в Fahrenheit, когда он выбран. Иначе строка,
+ * задуманная как проверка вывода, показывала бы «36.6» без градусов и
+ * не доказывала бы, что форматирование работает. */
+static void test_dummy_value_formatting(void)
+{
+    char *c = sensor_format_value(SEN_DUMMY_CELSIUS, FALSE, TRUE);
+    char *f = sensor_format_value(SEN_DUMMY_CELSIUS, TRUE, TRUE);
+
+    check_str(c, "36.6°C", "dummy в Цельсиях с единицей");
+    check_str(f, "97.9°F", "dummy в Фаренгейтах с единицей");
+    g_free(c);
+    g_free(f);
+}
+
+/* Регрессия: value_x обязан считаться ПОСЛЕ формирования списка строк.
+ *
+ * Дефолт из одной строки «dummy» выявил настоящий баг: расчёт позиции
+ * числа стоял ВЫШЕ добавления дефолтных строк, поэтому цикл измерял
+ * пустой список, widest оставался 0, и value_x схлопывался на label_x.
+ * На экране число ложилось прямо на подпись: «dummy: 36.6°C» превращалось
+ * в кашу в углу. С прежним дефолтом из четырёх сенсоров расчёт попадал на
+ * заполненный список лишь потому, что те добавлялись раньше, — работало
+ * случайно, и баг был не виден.
+ *
+ * Здесь воспроизведён именно тот расчёт, что в плагине: измеряем
+ * подписи списка и считаем позицию числа. Пустой список обязан дать
+ * value_x == label_x (это и есть исходная ошибка), непустой — строго
+ * правее. */
+
+/* Регрессия: value_x обязан считаться ПОСЛЕ формирования списка строк.
+ *
+ * Дефолт из одной строки «dummy» выявил настоящий баг: расчёт позиции
+ * числа стоял ВЫШЕ добавления дефолтных строк, поэтому цикл измерял
+ * пустой список, widest оставался 0, и value_x схлопывался на label_x.
+ * На экране число ложилось прямо на подпись: «dummy: 36.6°C» превращалось
+ * в кашу в углу. С прежним дефолтом из четырёх сенсоров расчёт попадал на
+ * заполненный список лишь потому, что те добавлялись раньше, — работало
+ * случайно, и баг был не виден.
+ *
+ * Здесь воспроизведён именно тот расчёт, что в плагине: измеряем
+ * подписи списка и считаем позицию числа. Пустой список обязан дать
+ * value_x == label_x (это и есть исходная ошибка), непустой — строго
+ * правее. */
+static int sen_test_text_width(cairo_t *cr, const char *text, const char *font)
+{
+    PangoFontDescription *fd = pango_font_description_from_string(font);
+    PangoRectangle logical;
+    PangoLayout *layout;
+    int width;
+
+    layout = pango_cairo_create_layout(cr);
+    pango_layout_set_font_description(layout, fd);
+    pango_layout_set_text(layout, text, -1);
+    pango_layout_get_extents(layout, NULL, &logical);
+    width = logical.width / PANGO_SCALE;
+    g_object_unref(layout);
+    pango_font_description_free(fd);
+    return width;
+}
+
+/* Позиция значения по списку подписей — копия формулы плагина. */
+static int sen_test_value_x(GPtrArray *labels, int label_x, const char *font)
+{
+    cairo_surface_t *probe =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *pcr = cairo_create(probe);
+    int widest = 0;
+
+    for (guint i = 0; i < labels->len; i++) {
+        int w = sen_test_text_width(pcr, g_ptr_array_index(labels, i), font);
+
+        if (w > widest)
+            widest = w;
+    }
+    cairo_destroy(pcr);
+    cairo_surface_destroy(probe);
+    return label_x + widest + 6;   /* SEN_VALUE_GAP = 6 */
+}
+
+static void test_default_value_x_after_rows(void)
+{
+    GPtrArray *empty = g_ptr_array_new();
+    GPtrArray *with_dummy = g_ptr_array_new();
+    int x_empty, x_dummy;
+
+    g_ptr_array_add(with_dummy, g_strdup(SEN_DUMMY_LABEL));
+
+    x_empty = sen_test_value_x(empty, 4, "Sans 8");
+    x_dummy = sen_test_value_x(with_dummy, 4, "Sans 8");
+
+    /* Пустой список — это исходная ошибка: widest=0, и число встаёт в
+     * label_x + зазор, то есть вплотную к подписи (в плагине это давало
+     * наложение «dummy» и «36.6°C»). Важно, что позиция НЕ зависит от
+     * содержимого строк, — тогда она совпадает для всех подписей. */
+    check_int(x_empty < x_dummy, 1,
+              "пустой список жмёт число к подписи (источник наложения)");
+    /* С добавленной строкой число обязано уйти вправо. */
+    check_int(x_dummy > 4, 1, "непустой список двигает value_x правее label_x");
+    /* И главное: добавление строки обязано МЕНЯТЬ позицию. Если бы
+     * расчёт шёл по пустому списку, x_dummy == x_empty. */
+    check_int(x_dummy != x_empty, 1,
+              "позиция зависит от строк — расчёт идёт по заполненному списку");
+
+    g_ptr_array_unref(empty);
+    g_ptr_array_free(with_dummy, TRUE);
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -1667,6 +1812,9 @@ int main(void)
     test_rounding();
     test_rounded_region();
     test_live_tree();
+    test_dummy_row_constants();
+    test_dummy_value_formatting();
+    test_default_value_x_after_rows();
     test_nvml_source_prefix();
     test_nvml_bus_slot();
     test_nvml_read_unknown_is_nan();

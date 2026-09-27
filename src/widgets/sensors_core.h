@@ -118,6 +118,17 @@ SensorList *sensor_list_read(const char *root);
  * схлопнутся четыре разных nvme в один пункт настроек. */
 SensorChip *sensor_list_find(const SensorList *list, const char *chip);
 
+/* Тестовая строка по умолчанию.
+ *
+ * Пока пользователь не выбрал ни одного сенсора, апплет показывает
+ * ровно одну строку «dummy» с ФИКСТИРОВНЫМ значением 36.6 °C. Она не
+ * читается ниоткуда: это маркер «плагин работает, значение выводится»,
+ * а не данные какого-то датчика. Любая настоящая температура появляется
+ * только когда пользователь отметил её галочкой в Настройках. */
+#define SEN_DUMMY_LABEL  "dummy"
+#define SEN_DUMMY_SOURCE "dummy"
+#define SEN_DUMMY_CELSIUS 36.6
+
 /* Устойчивый идентификатор строки: «<chip>/<device>». По нему ищем
  * канал, он не зависит от номера hwmon. */
 char *sensor_chip_id(const SensorChip *chip);

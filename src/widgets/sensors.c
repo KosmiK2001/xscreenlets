@@ -404,6 +404,16 @@ static void sen_read_values(SenPriv *priv)
         SensorReading *r;
         char *text = NULL;
 
+        /* Тестовая строка: значение фиксированное и НЕ читается с
+         * датчиков. Отдельная ветка обязательна — иначе источник
+         * «dummy» не нашёлся бы ни в sysfs, ни в NVML, и пользователь
+         * увидел бы прочерк вместо проверки, что вывод работает. */
+        if (g_strcmp0(row_id, SEN_DUMMY_SOURCE) == 0) {
+            g_ptr_array_index(priv->values, i) =
+                sensor_format_value(SEN_DUMMY_CELSIUS, priv->fahrenheit, TRUE);
+            continue;
+        }
+
         /* NVIDIA не отдаёт hwmon-узел, её каналы лежат в NVML. Сначала
          * пробуем sysfs, и только если источник помечен как nvidia/ —
          * идём в NVML: иначе строка с карты вечно давала бы прочерк. */
@@ -719,9 +729,10 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
                     const char *src = g_ptr_array_index(priv->row_sources,
                                                         i);
 
-                    if (src && *src && (sensor_find_reading(now, src)
+                    if (src && *src && (g_strcmp0(src, SEN_DUMMY_SOURCE) == 0
+                                        || sensor_find_reading(now, src)
                                         || nvml_source_is_nvidia(src)))
-                        continue;   /* строка жива (hwmon или NVML) */
+                        continue;   /* строка жива (hwmon, NVML или dummy) */
                     g_ptr_array_remove_index(priv->rows, i);
                     g_ptr_array_remove_index(priv->row_sources, i);
                     i--;   /* remove_index сдвинул хвост на себя */
@@ -736,32 +747,6 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     }
 
     priv->values = g_ptr_array_new_with_free_func(g_free);
-
-    /* Дефолт позиции числа — за самой длинной подписью. Считаем по
-     * Pango на том же поверхностном контексте, что и отрисовка, иначе
-     * ширина отличается от фактической и число снова ляжет на текст. */
-    if (priv->value_x < 0) {
-        cairo_surface_t *probe =
-            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-        cairo_t *pcr = cairo_create(probe);
-        const char *font = priv->label_font;
-        int widest = 0;
-
-        for (guint i = 0; i < priv->rows->len; i++) {
-            int w = sen_text_width(pcr, g_ptr_array_index(priv->rows, i),
-                                   font);
-            if (w > widest)
-                widest = w;
-        }
-        cairo_destroy(pcr);
-        cairo_surface_destroy(probe);
-        priv->value_x = priv->label_x + widest + SEN_VALUE_GAP;
-        /* Не даём колонке чисел уехать за окно: сжатие делает sen_show_text,
-         * но лучше сдвинуть колонку целиком. */
-        if (priv->value_x > priv->width - SEN_MARGIN - 40)
-            priv->value_x = MAX(priv->label_x + widest + SEN_VALUE_GAP,
-                                priv->width - 60);
-    }
 
     /* Цвета. ЧИТАЕМЫЕ ЗДЕСЬ КЛЮЧИ ОБЯЗАНЫ СОВПАДАТЬ с теми, что пишет
      * обработчик: расхождение ключей — самый частый дефект этого класса,
@@ -795,32 +780,52 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
             memcpy(priv->border_color, border_def, sizeof(border_def));
     }
 
-    /* Дефолт строк: если ключа нет, берём первые найденные каналы, иначе
-     * апплет открывается пустым и выглядит сломанным. */
+    /* Дефолт: НИ ОДНОГО реального сенсора.
+     *
+     * Апплет не должен угадывать за пользователя, что показывать. Если
+     * строки не выбраны, показываем одну тестовую строку «dummy» с
+     * фиксированным значением: она доказывает, что плагин жив, окно
+     * нарисовано и текст виден, не выдавая себя за реальные данные.
+     * Прежнее поведение (первые 4 найденных канала) было хуже пустого:
+     * пользователь получал в выводе четыре сенсора, которых он не
+     * выбирал, и не мог отличить их от намеренно выбранных. */
     if (priv->rows->len == 0) {
-        SensorList *list = sensor_list_read("/sys/class/hwmon");
-        if (list) {
-            guint taken = 0;
-            for (guint i = 0; i < list->chips->len && taken < 4; i++) {
-                SensorChip *c = g_ptr_array_index(list->chips, i);
-                for (guint j = 0; j < c->readings->len && taken < 4; j++) {
-                    SensorReading *r = g_ptr_array_index(c->readings, j);
-                    char *label = g_strdup_printf("%s %s", c->chip,
-                                                  r->label);
-                    char *source = sen_source_key(c->chip, c->device,
-                                                r->label);
-                    char *entry = g_strdup_printf("%s|%s", label, source);
-
-                    g_ptr_array_add(priv->rows, label);
-                    g_ptr_array_add(priv->row_sources, source);
-                    g_ptr_array_add(priv->values, NULL);
-                    g_free(entry);
-                    taken++;
-                }
-            }
-            sensor_list_free(list);
-        }
+        g_ptr_array_add(priv->rows, g_strdup(SEN_DUMMY_LABEL));
+        g_ptr_array_add(priv->row_sources, g_strdup(SEN_DUMMY_SOURCE));
+        g_ptr_array_add(priv->values, NULL);
     }
+
+    /* Дефолт позиции числа — за самой длинной подписью.
+     *
+     * Считается ПОСЛЕ формирования списка строк, и это не стилистика:
+     * пока строк нет, цикл выше измеряет пустоту, widest остаётся 0, и
+     * value_x схлопывается на label_x. На пустом дефолте число ложилось
+     * прямо на подпись. С дефолтом из четырёх сенсоров расчёт попадал
+     * на заполненный список только потому, что те добавлялись раньше —
+     * работало случайно. */
+    if (priv->value_x < 0) {
+        cairo_surface_t *probe =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t *pcr = cairo_create(probe);
+        const char *font = priv->label_font;
+        int widest = 0;
+
+        for (guint i = 0; i < priv->rows->len; i++) {
+            int w = sen_text_width(pcr, g_ptr_array_index(priv->rows, i),
+                                   font);
+            if (w > widest)
+                widest = w;
+        }
+        cairo_destroy(pcr);
+        cairo_surface_destroy(probe);
+        priv->value_x = priv->label_x + widest + SEN_VALUE_GAP;
+        /* Не даём колонке чисел уехать за окно: сжатие делает sen_show_text,
+         * но лучше сдвинуть колонку целиком. */
+        if (priv->value_x > priv->width - SEN_MARGIN - 40)
+            priv->value_x = MAX(priv->label_x + widest + SEN_VALUE_GAP,
+                                priv->width - 60);
+    }
+
 
     /* Высота по числу строк, если пользователь её не задавал. Длина
      * строки задаётся line_step, а не размером окна: 12 строк в окне
