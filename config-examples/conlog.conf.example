@@ -1,0 +1,57 @@
+# Пример конфига апплета conlog — вывод команды.
+# Скопируй в ~/.config/xscreenlets/.plugins/conlog-<id>-<имя>.conf
+# и создай symlink с таким же именем в ~/.config/xscreenlets/plugins_on/
+
+[conlog-c4d1a2b3-console]
+type=conlog
+xs_type=conlog
+
+# Команда, вывод которой показывается. Запускается один раз, без
+# оболочки: аргументы разбираются из строки и передаются процессу.
+# После завершения автоматического перезапуска нет — поменяй команду,
+# чтобы запустить заново.
+command=journalctl -f -n 20
+
+# Сколько строк хранить. Старые вытесняются по мере роста.
+max_lines=200
+
+# --- геометрия ---
+# width_auto / height_auto: -1 = считать по содержимому,
+# любое другое значение = использовать заданный размер вручную.
+width_auto=-1
+height_auto=-1
+window_width=420
+window_height=200
+x=320
+y=60
+corner_radius=3
+opacity=1.0
+
+# --- текст ---
+# line_step = 0 берёт шаг по фактической высоте шрифта; ненулевое
+# значение увеличивает интервал (в пикселях).
+row_font=Monospace 9
+title_font=Monospace 9
+first_row_y=6
+line_step=14
+
+# --- поведение ---
+# Подсветка по уровню сообщения: error / warning / debug / info.
+colorize=1
+# Перенос длинных строк по ширине окна.
+wrap=0
+# Вырезать escape-последовательности (цвета ls, ip и systemctl).
+strip_ansi=1
+# Следовать за хвостом: при новых строках показывать конец журнала.
+autoscroll=1
+
+# --- цвета (rgba) ---
+row_color=rgba(217,217,217,255)
+title_color=rgba(217,217,217,255)
+background_color=rgba(25,25,25,74)
+border_color=rgba(115,115,115,255)
+color_normal=rgba(217,217,217,255)
+color_warn=rgba(255,204,77,255)
+color_error=rgba(255,107,107,255)
+color_info=rgba(140,217,255,255)
+color_debug=rgba(158,158,179,255)

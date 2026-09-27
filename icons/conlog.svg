@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- conlog: терминал с потоком строк -->
+  <rect x="4" y="7" width="40" height="34" rx="4" ry="4"
+        fill="#1a1a1a" stroke="#8f8f8f" stroke-width="2"/>
+  <rect x="9" y="14" width="22" height="3" rx="1.5" fill="#9fd8e8"/>
+  <rect x="9" y="21" width="30" height="3" rx="1.5" fill="#8f8f8f"/>
+  <rect x="9" y="28" width="16" height="3" rx="1.5" fill="#ff6666"/>
+  <rect x="9" y="35" width="26" height="3" rx="1.5" fill="#ffcc4d"/>
+  <rect x="9" y="15" width="7" height="2" rx="1" fill="#1a1a1a"/>
+</svg>

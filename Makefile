@@ -26,6 +26,7 @@ TARGET_MEMORY_PLUGIN = $(BUILD_DIR)/memory_monitor.so
 TARGET_DISK_PLUGIN = $(BUILD_DIR)/disk_monitor.so
 TARGET_NETWORK_PLUGIN = $(BUILD_DIR)/network_monitor.so
 TARGET_SENSORS_PLUGIN = $(BUILD_DIR)/sensors.so
+TARGET_CONLOG_PLUGIN = $(BUILD_DIR)/conlog.so
 TARGET_PROCESS_PLUGIN = $(BUILD_DIR)/process_list.so
 TARGET_STANDALONE = $(BUILD_DIR)/xclock
 
@@ -113,6 +114,13 @@ $(BUILD_DIR)/sensors.o: src/widgets/sensors.c src/widgets/sensors_core.h src/wid
 $(TARGET_SENSORS_PLUGIN): $(BUILD_DIR) build/sensors.o build/sensors_core.o build/sensors_nvml.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/sensors.o build/sensors_core.o build/sensors_nvml.o $(LDFLAGS_PLUGIN) -ldl
 
+$(BUILD_DIR)/conlog_core.o: src/widgets/conlog_core.c src/widgets/conlog_core.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+$(BUILD_DIR)/conlog.o: src/widgets/conlog.c src/widgets/conlog_core.h include/xs_api.h src/core/common.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+$(TARGET_CONLOG_PLUGIN): $(BUILD_DIR) build/conlog.o build/conlog_core.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/conlog.o build/conlog_core.o $(LDFLAGS_PLUGIN)
+
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
@@ -135,12 +143,15 @@ $(BUILD_DIR)/test_network_monitor: tests/test_network_monitor.c src/widgets/netw
 	$(CC) $(CFLAGS) -o $@ tests/test_network_monitor.c src/widgets/network_monitor_core.c $(LDFLAGS_PLUGIN)
 $(BUILD_DIR)/test_sensors: tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_core.h src/widgets/sensors_nvml.c src/widgets/sensors_nvml.h
 	$(CC) $(CFLAGS) -o $@ tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_nvml.c $(LDFLAGS_PLUGIN) -ldl
+$(BUILD_DIR)/test_conlog: tests/test_conlog.c src/widgets/conlog_core.c src/widgets/conlog_core.h
+	$(CC) $(CFLAGS) -o $@ tests/test_conlog.c src/widgets/conlog_core.c $(LDFLAGS_PLUGIN)
 
-test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors
+test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors $(BUILD_DIR)/test_conlog
 	$(BUILD_DIR)/test_memory_monitor
 	$(BUILD_DIR)/test_disk_monitor
 	$(BUILD_DIR)/test_network_monitor
 	$(BUILD_DIR)/test_sensors
+	$(BUILD_DIR)/test_conlog
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -159,6 +170,7 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_DISK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/disk_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_NETWORK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/network_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_SENSORS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/sensors.so
+	$(INSTALL) -m 0755 $(TARGET_CONLOG_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/conlog.so
 	$(INSTALL) -m 0755 $(TARGET_PROCESS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/process_list.so
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
 	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg

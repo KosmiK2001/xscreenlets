@@ -1,0 +1,598 @@
+/* Тесты conlog_core: границы порций, лимит строк, разбор уровней. */
+#include <glib.h>
+#include <stdio.h>
+#include <string.h>
+#include "conlog_core.h"
+
+static int checks;
+static int failures;
+
+static void check(gboolean ok, const char *what)
+{
+    checks++;
+    if (!ok) {
+        failures++;
+        printf("  FAIL  %s\n", what);
+    }
+}
+
+static void t_basic(void)
+{
+    printf("=== базовые операции ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    check(conlog_len(b) == 0, "новый буфер пуст");
+    check(conlog_max_lines(b) == 100, "лимит из конструктора");
+
+    conlog_append(b, "строка один", CONLOG_LEVEL_NORMAL);
+    conlog_append(b, "строка два", CONLOG_LEVEL_ERROR);
+    check(conlog_len(b) == 2, "две строки добавлены");
+    check(g_strcmp0(conlog_text(b, 0), "строка один") == 0,
+          "текст первой строки сохранён");
+    check(conlog_level(b, 1) == CONLOG_LEVEL_ERROR,
+          "уровень второй строки — ошибка");
+    check(conlog_text(b, 2) == NULL, "индекс за пределами даёт NULL");
+    check(conlog_get(b, 999) == NULL, "get за пределами даёт NULL");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_chunk_split(void)
+{
+    printf("=== порция режется по переводу строки ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    conlog_append_chunk(b, "одна\nдва\nтри\n", -1);
+    check(conlog_len(b) == 3, "три строки из трёх переводов");
+    check(g_strcmp0(conlog_text(b, 0), "одна") == 0, "строка 1");
+    check(g_strcmp0(conlog_text(b, 1), "два") == 0, "строка 2");
+    check(g_strcmp0(conlog_text(b, 2), "три") == 0, "строка 3");
+    check(!conlog_has_pending(b), "хвоста нет — всё завершено");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+/* Главный случай: порция приходит посреди строки. */
+static void t_chunk_boundary(void)
+{
+    printf("=== граница порции посреди строки ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    conlog_append_chunk(b, "первая\nвто", -1);   /* до конца строки */
+    check(conlog_len(b) == 1, "показана только завершённая строка");
+    check(conlog_has_pending(b), "хвост «вто» ждёт продолжения");
+    check(conlog_text(b, 1) == NULL, "незавершённая строка НЕ показана");
+
+    /* Порция доносит «вторая» и добавляет «третью»: всего 3 строки. */
+    conlog_append_chunk(b, "рая\nтретья\n", -1);
+    check(conlog_len(b) == 3, "после склейки три строки");
+    check(g_strcmp0(conlog_text(b, 1), "вторая") == 0,
+          "строка склеена из двух порций без разрыва");
+    check(g_strcmp0(conlog_text(b, 2), "третья") == 0, "третья строка на месте");
+    check(!conlog_has_pending(b), "хвоста больше нет");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_chunk_byte_at_a_time(void)
+{
+    printf("=== вывод по одному байту ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+    const char *src = "alpha\nbeta\ngamma\n";
+
+    for (gsize i = 0; i < strlen(src); i++)
+        conlog_append_chunk(b, src + i, 1);
+
+    check(conlog_len(b) == 3, "три строки из побайтовой передачи");
+    check(g_strcmp0(conlog_text(b, 0), "alpha") == 0, "alpha цела");
+    check(g_strcmp0(conlog_text(b, 1), "beta") == 0, "beta цела");
+    check(g_strcmp0(conlog_text(b, 2), "gamma") == 0, "gamma цела");
+    check(!conlog_has_pending(b), "хвоста нет");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_crlf(void)
+{
+    printf("=== CRLF ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    conlog_append_chunk(b, "первая\r\nвторая\r\n", -1);
+    check(conlog_len(b) == 2, "две строки");
+    check(g_strcmp0(conlog_text(b, 0), "первая") == 0,
+          "CR убран из конца строки");
+    check(strchr(conlog_text(b, 0), '\r') == NULL, "нет символа CR в строке");
+    check(g_strcmp0(conlog_text(b, 1), "вторая") == 0, "вторая тоже без CR");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_no_trailing_newline(void)
+{
+    printf("=== вывод без перевода в конце ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    conlog_append_chunk(b, "есть\nнет перевода", -1);
+    check(conlog_len(b) == 1, "только завершённая строка");
+    check(conlog_has_pending(b), "хвост ждёт");
+
+    conlog_flush_pending(b);
+    check(conlog_len(b) == 2, "после flush хвост стал строкой");
+    check(g_strcmp0(conlog_text(b, 1), "нет перевода") == 0,
+          "хвост сохранён целиком");
+    check(!conlog_has_pending(b), "хвоста больше нет");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_empty_lines(void)
+{
+    printf("=== пустые строки ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    conlog_append_chunk(b, "\n\nсередина\n\n", -1);
+    check(conlog_len(b) == 4, "пустые строки считаются, а не теряются");
+    check(g_strcmp0(conlog_text(b, 0), "") == 0, "пустая строка пустая");
+    check(g_strcmp0(conlog_text(b, 2), "середина") == 0, "середина на месте");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_limit(void)
+{
+    printf("=== лимит строк ===\n");
+    ConLogBuffer *b = conlog_buffer_new(5);
+
+    for (int i = 0; i < 20; i++) {
+        char *s = g_strdup_printf("строка %d", i);
+        conlog_append(b, s, CONLOG_LEVEL_NORMAL);
+        g_free(s);
+    }
+    check(conlog_len(b) == 5, "буфер не растёт сверх лимита");
+    check(g_strcmp0(conlog_text(b, 0), "строка 15") == 0,
+          "остались последние 5 строк, а не первые");
+    check(g_strcmp0(conlog_text(b, 4), "строка 19") == 0, "последняя на месте");
+    check(conlog_total_seen(b) == 20,
+          "счётчик всего прочитанного не урезан лимитом");
+
+    /* Уменьшение лимита должно подрезать сразу. */
+    conlog_set_max_lines(b, 2);
+    check(conlog_len(b) == 2, "лимит уменьшен — буфер подрезан сразу");
+    check(g_strcmp0(conlog_text(b, 0), "строка 18") == 0,
+          "остались самые свежие");
+
+    conlog_set_max_lines(b, 1);
+    check(conlog_max_lines(b) == 1,
+          "ядро держит малый лимит: MIN_LINES — ограничение GUI, не ядра");
+    conlog_set_max_lines(b, 999999);
+    check(conlog_max_lines(b) == CONLOG_MAX_LINES, "лимит зажат максимумом");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_clear(void)
+{
+    printf("=== очистка ===\n");
+    ConLogBuffer *b = conlog_buffer_new(100);
+
+    conlog_append_chunk(b, "одна\nдве\n", -1);
+    conlog_append_chunk(b, "хвост", -1);
+    check(conlog_total_seen(b) == 2, "две строки до очистки");
+
+    conlog_clear(b);
+    check(conlog_len(b) == 0, "буфер пуст после очистки");
+    check(!conlog_has_pending(b), "недописанный хвост тоже сброшен");
+    check(conlog_total_seen(b) == 2,
+          "счётчик прочитанного пережил очистку");
+
+    conlog_append(b, "новая", CONLOG_LEVEL_NORMAL);
+    check(conlog_get(b, 0)->seq == 2,
+          "seq новой строки продолжает счёт, а не начинает с нуля");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_classify(void)
+{
+    printf("=== разбор уровней ===\n");
+
+    check(conlog_classify("error: something broke") == CONLOG_LEVEL_ERROR,
+          "«error:» — ошибка");
+    check(conlog_classify("kernel: EXT4-fs error") == CONLOG_LEVEL_ERROR,
+          "ошибка в сообщении ядра");
+    check(conlog_classify("CRITICAL: cannot continue") == CONLOG_LEVEL_ERROR,
+          "CRITICAL — ошибка");
+    check(conlog_classify("segfault at 0x0") == CONLOG_LEVEL_NORMAL,
+          "«segfault» без служебного слова — обычная строка");
+    check(conlog_classify("warning: deprecated option") == CONLOG_LEVEL_WARN,
+          "«warning:» — предупреждение");
+    check(conlog_classify("WARN deprecated") == CONLOG_LEVEL_WARN,
+          "WARN заглавными — предупреждение");
+    check(conlog_classify("info: listening") == CONLOG_LEVEL_INFO,
+          "«info:» — информация");
+    check(conlog_classify("debug: trace start") == CONLOG_LEVEL_DEBUG,
+          "«debug:» — отладка");
+    check(conlog_classify("eth0: link is up") == CONLOG_LEVEL_NORMAL,
+          "обычная строка без служебных слов");
+
+    /* Границы слова: это главная ловушка наивного поиска. */
+    check(conlog_classify("terror in the code") != CONLOG_LEVEL_ERROR,
+          "«terror» — не «error»");
+    check(conlog_classify("terrain mapping ok") != CONLOG_LEVEL_ERROR,
+          "«terrain» — не «err»");
+    check(conlog_classify("warningless setup") != CONLOG_LEVEL_WARN,
+          "«warningless» — не «warn»");
+    check(conlog_classify("errors=0 count") != CONLOG_LEVEL_ERROR,
+          "«errors=» — не «error»: справа знак «=»");
+    check(conlog_classify("") == CONLOG_LEVEL_NORMAL, "пустая строка — обычная");
+    check(conlog_classify(NULL) == CONLOG_LEVEL_NORMAL, "NULL — обычная");
+
+    printf("  ok\n");
+}
+
+static void t_colors(void)
+{
+    gdouble c[4];
+    printf("=== цвета уровней ===\n");
+
+    conlog_level_color(CONLOG_LEVEL_ERROR, c);
+    check(c[0] > c[1] && c[0] > c[2], "ошибка — преимущественно красная");
+    conlog_level_color(CONLOG_LEVEL_WARN, c);
+    check(c[0] > 0.8 && c[1] > 0.5 && c[2] < 0.5, "предупреждение — жёлтое");
+    conlog_level_color(CONLOG_LEVEL_NORMAL, c);
+    check(c[0] == c[1] && c[1] == c[2], "обычная строка — серая");
+    conlog_level_color(CONLOG_LEVEL_ERROR, NULL);   /* не должно падать */
+
+    printf("  ok\n");
+}
+
+static void t_metrics(void)
+{
+    printf("=== метрики текста ===\n");
+    int h = conlog_line_height("Monospace 9");
+    int h_big = conlog_line_height("Monospace 20");
+    int w = conlog_text_width("Monospace 9", "несколько символов");
+    int w_more = conlog_text_width("Monospace 9",
+                                   "намного больше символов здесь");
+
+    check(h >= 8, "высота строки разумная (не 0 и не тысячи)");
+    check(h < 1000, "высота в пикселях, а не в единицах Pango");
+    check(h_big > h, "крупный шрифт выше мелкого");
+    check(w > 0, "ширина непустой строки положительна");
+    check(w_more > w, "длинная строка шире короткой");
+    check(conlog_text_width("Monospace 9", "") == 0, "пустая строка — нулевая ширина");
+    check(conlog_text_width("Monospace 9", NULL) == 0, "NULL — нулевая ширина");
+
+    printf("  ok\n");
+}
+
+static void t_scroll(void)
+{
+    ConLogBuffer *b = conlog_buffer_new(100);
+    printf("=== нужна ли прокрутка ===\n");
+
+    for (int i = 0; i < 3; i++)
+        conlog_append(b, "строка", CONLOG_LEVEL_NORMAL);
+    /* 4 + 3*14 = 46 <= 100 — влезает; 46 > 50 — влезает;
+     * в окно 40 уже нет. */
+    check(!conlog_needs_scroll(b, 100, 4, 14),
+          "3 строки в окно 100px влезают");
+    check(!conlog_needs_scroll(b, 50, 4, 14),
+          "3 строки в окно 50px ещё влезают");
+    check(conlog_needs_scroll(b, 40, 4, 14),
+          "3 строки в окно 40px не влезают");
+    check(!conlog_needs_scroll(NULL, 50, 4, 14), "NULL-буфер не требует");
+    check(!conlog_needs_scroll(b, 50, 4, 0), "нулевой шаг не считается");
+
+    conlog_buffer_free(b);
+    printf("  ok\n");
+}
+
+static void t_null_safety(void)
+{
+    printf("=== NULL-безопасность ===\n");
+
+    conlog_buffer_free(NULL);
+    conlog_clear(NULL);
+    conlog_append(NULL, "x", CONLOG_LEVEL_NORMAL);
+    conlog_append_chunk(NULL, "x", 1);
+    conlog_flush_pending(NULL);
+    conlog_set_max_lines(NULL, 10);
+    check(conlog_len(NULL) == 0, "conlog_len(NULL) — 0");
+    check(conlog_max_lines(NULL) == 0, "conlog_max_lines(NULL) — 0");
+    check(conlog_total_seen(NULL) == 0, "conlog_total_seen(NULL) — 0");
+    check(conlog_text(NULL, 0) == NULL, "conlog_text(NULL) — NULL");
+    check(!conlog_has_pending(NULL), "conlog_has_pending(NULL) — FALSE");
+
+    printf("  ok\n");
+}
+
+/* Реальный сценарий: dmesg-подобный поток, где строки приходят
+ * неравномерно, а буфер ограничен. */
+static void t_realistic_stream(void)
+{
+    ConLogBuffer *b = conlog_buffer_new(50);
+    const char *chunks[] = {
+        "[    0.000000] Linux version 6.18",
+        " [    0.000001] Command line: BOOT_IMAGE=/vmlinuz root=/dev/sda\n",
+        "root=/dev/sda ro\n",
+        "[    1.234567] EXT4-fs error (device sda1): error 5\n"
+    };
+    int writes = 0;
+
+    printf("=== поток как из реальной команды ===\n");
+
+    for (gsize c = 0; c < G_N_ELEMENTS(chunks); c++)
+        for (int step = 0; step <= (int) strlen(chunks[c]); step += 7) {
+            int n = MIN(7, (int) strlen(chunks[c]) - step);
+
+            conlog_append_chunk(b, chunks[c] + step, n);
+            writes++;
+        }
+    conlog_flush_pending(b);
+
+    /* ТРИ строки, а не четыре: первые два фрагмента разделены лишь
+     * пробелом, между ними нет перевода строки. Ядро склеивает их в одну
+     * строку — и это правильно, именно для такого случания оно и нужно.
+     * Ошибка была в ожидании теста, а не в разборе. */
+    check(conlog_len(b) == 3, "собрано 3 строки из рваных порций");
+    check(g_str_has_prefix(conlog_text(b, 0), "[    0.000000] Linux version 6.18"),
+          "строка не потеряла начало из первой порции");
+    check(g_str_has_suffix(conlog_text(b, 0), "root=/dev/sda"),
+          "строка не потеряла хвост на стыке порций");
+    check(g_strcmp0(conlog_text(b, 1), "root=/dev/sda ro") == 0,
+          "следующая строка на месте");
+    check(conlog_level(b, 2) == CONLOG_LEVEL_ERROR,
+          "ошибка EXT4 распознана и покрашена");
+
+    /* Много строк при малом лимите — буфер не должен ни расти, ни падать.
+     * Строки завершаются переводом строки: без него накопленный хвост
+     * не является строкой и правильно не показывается. */
+    for (int i = 0; i < 5000; i++) {
+        char *s = g_strdup_printf("поток %d\n", i);
+        conlog_append_chunk(b, s, -1);
+        g_free(s);
+    }
+    check(conlog_len(b) == 50, "после 5000 строк буфер держит лимит");
+    check(conlog_total_seen(b) == 5003, "счётчик прочитанного честный");
+    check(!conlog_has_pending(b), "хвоста не осталось");
+    check(g_str_has_prefix(conlog_text(b, 0), "поток 495"),
+          "остались самые свежие строки, а не первые");
+
+    conlog_buffer_free(b);
+    printf("  %d записей порций\n", writes);
+    printf("  ok\n");
+}
+
+
+/* Регрессия: буфер порции НЕ NUL-терминирован (как после
+ * g_io_channel_read_chars). Сканер, полагающийся на strlen(), уходит за
+ * пределы порции, теряет переводы строк и копит «хвост» в мегабайты —
+ * на живом journalctl окно оставалось пустым. */
+static void t_no_nul_terminator(void)
+{
+    char *raw;
+    char *clean;
+    ConLogBuffer *b = conlog_buffer_new(50);
+    gsize n = 0;
+
+    /* Порция без NUL на конце, с тремя переводами строки внутри. */
+    raw = g_malloc(16);
+    memcpy(raw, "aaa\nbbb\nccc\n", 12);
+    n = 12;
+
+    clean = conlog_strip_ansi(raw, (gssize) n);
+    check(strcmp(clean, "aaa\nbbb\nccc\n") == 0,
+          "сканер не выходит за пределы порции");
+    g_free(clean);
+
+    conlog_append_chunk(b, raw, (gssize) n);
+    check(conlog_len(b) == 3, "все три строки из порции приняты");
+    check(conlog_get(b, 0) && strcmp(conlog_get(b, 0)->text, "aaa") == 0,
+          "первая строка цела");
+    check(conlog_get(b, 2) && strcmp(conlog_get(b, 2)->text, "ccc") == 0,
+          "третья строка цела");
+    check(!conlog_has_pending(b), "хвост пуст — переводы строк не потеряны");
+
+    g_free(raw);
+    conlog_buffer_free(b);
+    printf("  t_no_nul_terminator: ок\n");
+}
+
+/* Граница порции ровно на escape-последовательности: недописанный CSI
+ * не должен проглатывать следующую строку. */
+static void t_ansi_split_across_chunks(void)
+{
+    ConLogBuffer *b = conlog_buffer_new(50);
+    char *c1, *c2;
+
+    c1 = conlog_strip_ansi("\033[3", 4);
+    check(c1 && strcmp(c1, "") == 0, "недописанный CSI пока пуст");
+    g_free(c1);
+
+    /* Продолжение, склеенное с хвостом: в ядре такая склейка
+     * происходит в conlog_append_chunk(), поэтому собираем строку
+     * целиком и чистим её одной. */
+    c2 = conlog_strip_ansi("\033[31mкрасный\n", -1);
+    check(c2 && strcmp(c2, "красный\n") == 0,
+          "полная CSI убирает и остаток строки");
+    g_free(c2);
+
+    conlog_buffer_free(b);
+    printf("  t_ansi_split_across_chunks: ок\n");
+}
+
+/* Регрессия: очистка применяется к СОБРАННОЙ строке. Порция с
+ * недописанным CSI, пришедшая границами чтения, не должна оставлять
+ * на экране мусор вида «31mкрасный». */
+static void t_strip_on_assembled_line(void)
+{
+    ConLogBuffer *b = conlog_buffer_new(50);
+    char *c;
+
+    conlog_buffer_set_strip_ansi(b, TRUE);
+    /* Первая порция обрывается на середине последовательности. */
+    conlog_append_chunk(b, "\033[", 2);
+    /* Вторая дописывает остаток и саму строку. */
+    /* -1, а не счёт символов: порция измеряется в БАЙТАХ, и «красный»
+     * — это 14 байт, а не 7. Ошибка на пару байт тихо оставляла строку
+     * недописанной, conlog_get() возвращал NULL — и тест падал в segfault
+     * вместо внятного сообщения. */
+    conlog_append_chunk(b, "31m\xd0\xba\xd1\x80\xd0\xb0\xd1\x81\xd0\xbd\xd1\x8b\xd0\xb9\n", -1);
+    check(conlog_len(b) == 1, "строка собрана из двух порций");
+
+    if (conlog_len(b) != 1) {
+        printf("  t_strip_on_assembled_line: ПРОВАЛ — строк %u, ожидалась 1\n",
+               conlog_len(b));
+        conlog_buffer_free(b);
+        return;
+    }
+    c = (char *) conlog_get(b, 0)->text;
+    check(strcmp(c, "красный") == 0, "CSI, разорванная порциями, убрана целиком");
+
+    conlog_buffer_free(b);
+    printf("  t_strip_on_assembled_line: ок\n");
+}
+
+
+/* Регрессия: char на платформе знаковый, а байты кириллицы в UTF-8
+ * лежат в 0xC0..0xFF и дают отрицательные значения. Условие
+ * «*p >= 0x20» на signed char выбрасывало ВЕСЬ русский текст —
+ * на живом журнале это выглядело почти правильно, потому что там
+ * почти нет управляющих символов, и дефект не бросался в глаза. */
+static void t_utf8_survives_filter(void)
+{
+    ConLogBuffer *b = conlog_buffer_new(50);
+    char *c;
+
+    c = conlog_strip_ansi("\xd0\xba\xd1\x80\xd0\xb0\xd1\x81\xd0\xbd\xd1\x8b\xd0\xb9", -1);
+    check(c && strlen(c) == 14, "кириллица проходит без искажений");
+    g_free(c);
+
+    /* Полная цветная последовательность вместе с русским текстом. */
+    c = conlog_strip_ansi("\033[31m\xd0\xba\xd1\x80\xd0\xb0\xd1\x81\xd0\xbd\xd1\x8b\xd0\xb9\n", -1);
+    check(c && strcmp(c, "\xd0\xba\xd1\x80\xd0\xb0\xd1\x81\xd0\xbd\xd1\x8b\xd0\xb9\n") == 0,
+          "escape убран, кириллица и перевод строки целы");
+    g_free(c);
+
+    /* Управляющие символы при этом всё-таки вырезаются. */
+    c = conlog_strip_ansi("a\001b\033c", -1);
+    check(c && strcmp(c, "ab") == 0, "управляющие символы вырезаны");
+    g_free(c);
+
+    conlog_buffer_free(b);
+    printf("  t_utf8_survives_filter: ок\n");
+}
+
+
+/* Регрессия отрисовки: при полном буфере и scroll_top == 0 ДОЛЖНА
+ * рисоваться первая строка. Прежняя проверка отсекала все строки
+ * условием «y - step >= first_row_y» (6 >= 6), и апплет показывал
+ * только подсказку «ожидание вывода…». */
+static void t_visible_lines(void)
+{
+    ConLogView v;
+
+    /* Полный буфер, окно 200 px, шаг 14, отступ 6. */
+    v = conlog_visible_lines(200, 6, 14, 200, 0);
+    check(v.first == 0, "первая строка — с начала");
+    check(v.count > 0, "хотя бы одна строка рисуется");
+    check(v.count == 14, "в окно 200 px помещается 14 строк при шаге 14");
+
+    /* Прокрутка в конец. */
+    /* Регрессия: базовая линия не должна зависеть от scroll_top,
+     * иначе прокрутка в конец выносила последние строки за окно и
+     * пользователь видел пустое окно вместо хвоста журнала. */
+    v = conlog_visible_lines(200, 6, 14, 200, 199);
+    check(v.first == 199, "прокрутка показывает последнюю строку");
+    check(v.count == 1, "последняя строка видна, а не пустое окно");
+
+    /* Пустой буфер. */
+    v = conlog_visible_lines(0, 6, 14, 200, 0);
+    check(v.count == 0, "пустой буфер не рисует ничего");
+
+    /* scroll_top за пределами буфона — не читаем за границей. */
+    v = conlog_visible_lines(5, 6, 14, 200, 100);
+    check(v.first == 4, "выход за конец зажат на последней строке");
+    check(v.count == 1, "из пяти строк видна одна");
+
+    printf("  t_visible_lines: ок\n");
+}
+
+
+/* Реальные формы окончаний. Матчер требует границу слова, поэтому
+ * «fail» не находит «failed», а «warn» — «warned»: строки systemd
+ * вида «FAILED to start …» оставались серыми, хотя это ошибки. */
+static void t_level_endings(void)
+{
+    struct { const char *line; ConLogLevel want; } cases[] = {
+        { "сен 27 xenoserver systemd[1]: FAILED to start NetworkManager",
+          CONLOG_LEVEL_ERROR },
+        { "сен 27 kernel: EXT4-fs error (device sda1): failed to read",
+          CONLOG_LEVEL_ERROR },
+        { "сен 27 dhcp[1200]: warning: lease expired",
+          CONLOG_LEVEL_WARN },
+        { "сен 27 kernel: CRITICAL: root filesystem readonly",
+          CONLOG_LEVEL_ERROR },
+        { "сен 27 app[900]: DEBUG entering dispatch loop",
+          CONLOG_LEVEL_DEBUG },
+        { "сен 27 xray[6928]: taking platform detour",
+          CONLOG_LEVEL_NORMAL },
+        /* Слова внутри других — не уровень: иначе «errorless» стал бы
+         * ошибкой, а это обычное сообщение. */
+        { "сен 27 app: errorless operation completed",
+          CONLOG_LEVEL_NORMAL },
+    };
+
+    for (guint i = 0; i < G_N_ELEMENTS(cases); i++) {
+        ConLogLevel got = conlog_classify(cases[i].line);
+
+        check(got == cases[i].want,
+              cases[i].want == CONLOG_LEVEL_NORMAL
+                  ? "обычная строка не окрашивается"
+                  : "уровень распознан по окончанию");
+        if (got != cases[i].want)
+            printf("    неверно для: %s\n", cases[i].line);
+    }
+    printf("  t_level_endings: ок\n");
+}
+
+int main(void)
+{
+    t_basic();
+    t_chunk_split();
+    t_chunk_boundary();
+    t_chunk_byte_at_a_time();
+    t_crlf();
+    t_no_trailing_newline();
+    t_empty_lines();
+    t_limit();
+    t_clear();
+    t_classify();
+    t_colors();
+    t_metrics();
+    t_scroll();
+    t_null_safety();
+    t_realistic_stream();
+    t_no_nul_terminator();
+    t_ansi_split_across_chunks();
+    t_strip_on_assembled_line();
+    t_utf8_survives_filter();
+    t_visible_lines();
+    t_level_endings();
+    printf("\n");
+    if (failures)
+        printf("CONLOG_FAIL: %d проверок, %d провалов\n", checks, failures);
+    else
+        printf("CONLOG_OK: %d проверок, 0 провалов\n", checks);
+    return failures ? 1 : 0;
+}
