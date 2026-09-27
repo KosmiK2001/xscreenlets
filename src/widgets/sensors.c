@@ -79,10 +79,6 @@ typedef struct {
 
     int label_x, value_x, first_row_y;
     gboolean value_align_right;   /* число прижато вправо (по умолчанию) */
-    /* Признак «пользователь что-то выбирал». Отличает первый запуск
-     * от состояния «всё снял»: в обоих случаях строк нет, но заглушка
-     * нужна только в первом. */
-    gboolean user_selected;
     int line_step;
 
     /* Список строк: «метка» = «чип/канал» (например «nvme0/Composite»),
@@ -674,8 +670,6 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     /* Строки: «метка;чип/канал;…». Читаются из одного ключа, потому что
      * метка не уникальна — четыре nvme дают четыре «Composite», и по
      * одной метке найти канал нельзя. */
-    priv->user_selected =
-        xs_host_api()->conf_int(kf, p->name, "selected", 0) != 0;
     rows_text = xs_host_api()->conf_str(kf, p->name, "rows", "");
     priv->rows = g_ptr_array_new_with_free_func(g_free);
     priv->row_sources = g_ptr_array_new_with_free_func(g_free);
@@ -864,7 +858,7 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * Прежнее поведение (первые 4 найденных канала) было хуже пустого:
      * пользователь получал в выводе четыре сенсора, которых он не
      * выбирал, и не мог отличить их от намеренно выбранных. */
-    if (priv->rows->len == 0 && !priv->user_selected) {
+    if (priv->rows->len == 0) {
         g_ptr_array_add(priv->rows, g_strdup(SEN_DUMMY_LABEL));
         g_ptr_array_add(priv->row_sources, g_strdup(SEN_DUMMY_SOURCE));
         g_ptr_array_add(priv->values, NULL);
@@ -949,8 +943,6 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
         else
             g_key_file_remove_key(kf, p->name, "rows", NULL);
         g_free(rows_text);
-        g_key_file_set_integer(kf, p->name, "selected",
-                               priv->user_selected ? 1 : 0);
     }
     g_key_file_set_integer(kf, p->name, "window_width", priv->width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->height);
@@ -1120,12 +1112,6 @@ static void sen_save(SenPriv *priv)
     else
         g_key_file_remove_key(priv->kf, priv->plugin->name, "rows", NULL);
     g_free(text);
-    /* Признак ставим ВСЕГДА, даже когда ключа rows нет: он и должен
-     * пережить момент, когда сенсоров не осталось ни одного. Иначе
-     * следующий старт не отличил бы «всё снял» от первого запуска и
-     * вернул бы заглушку. */
-    g_key_file_set_integer(priv->kf, priv->plugin->name, "selected",
-                           priv->user_selected ? 1 : 0);
     xs_core_plugin_conf_flush(priv->plugin->name);
 }
 
@@ -1484,7 +1470,6 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
              * значением. Убираем её здесь же, в момент включения, а не
              * при следующей записи в конфиг. */
             sen_drop_dummy_row(priv);
-            priv->user_selected = TRUE;
 
             g_ptr_array_add(priv->rows, g_strdup(use ? use : ""));
             g_ptr_array_add(priv->row_sources, g_strdup(source));
@@ -1499,6 +1484,18 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
             g_ptr_array_remove_index(priv->row_sources, idx);
             if (priv->values && idx < priv->values->len)
                 g_ptr_array_remove_index(priv->values, idx);
+            /* Снят последний сенсор — возвращаем заглушку сразу, при
+             * клике. Иначе окно осталось бы пустым до перезапуска
+             * демона, и пользователь решил бы, что апплет сломался:
+             * пустой список выглядит как «ничего не рисуется», а
+             * заглушка честно говорит «плагин жив, выбора нет». */
+            if (priv->rows->len == 0) {
+                g_ptr_array_add(priv->rows, g_strdup(SEN_DUMMY_LABEL));
+                g_ptr_array_add(priv->row_sources,
+                                g_strdup(SEN_DUMMY_SOURCE));
+                if (priv->values)
+                    g_ptr_array_add(priv->values, NULL);
+            }
         }
     }
     /* Галочка в модели — иначе не зажжётся. */

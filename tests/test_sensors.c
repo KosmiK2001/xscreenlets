@@ -2081,61 +2081,89 @@ static void test_dummy_disappears_on_first_sensor(void)
     }
 }
 
-/* Заглушка dummy — только при ПЕРВОМ запуске.
+/* Заглушка dummy — всегда при нуле сенсоров.
  *
- * Требование пользователя: отметил сенсор, потом убрал — сенсоров
- * ноль, и dummy тоже не нужен. То есть «ничего не выбрано» и «ничего
- * не выбрано, потому что ты снимал галочки» — это разные состояния, и
- * без отдельного признака они неразличимы: в обоих случаях ключа rows
- * в конфиге нет.
+ * Правило простое и симметричное: сенсоров нет -> dummy есть, сенсоры
+ * есть -> dummy нет. Отдельного признака «выбор был» не требуется и он
+ * был бы лишним: он вводился ради правила «только при первом запуске»,
+ * которое пользователь отменил.
  *
- * Признак selected переживает момент обнуления: он пишется всегда, даже
- * когда сенсоров не осталось ни одного. Иначе следующий старт решил
- * бы, что это первый запуск, и вернул заглушку. */
-static void test_dummy_only_on_first_run(void)
+ * Проверяем обе стороны, потому что ошибка в любую из них одинаково
+ * плохо видна: лишняя заглушка рядом с данными или пустое окно. */
+static void test_dummy_when_no_sensors(void)
 {
-    /* 1. Первый запуск: selected=0, строк нет -> dummy есть. */
-    {
-        gboolean selected = FALSE, rows_len = 0, dummy;
-
-        dummy = (rows_len == 0 && !selected);
-        check_int(dummy, 1, "первый запуск показывает заглушку");
-    }
-
-    /* 2. Выбрал сенсор, потом снял: selected=1, строк нет -> dummy НЕТ. */
-    {
-        gboolean selected = TRUE, rows_len = 0, dummy;
-
-        dummy = (rows_len == 0 && !selected);
-        check_int(dummy, 0, "после снятия сенсора заглушки нет");
-    }
-
-    /* 3. Есть сенсоры: заглушка не появляется ни при каком selected. */
-    {
-        gboolean rows_len = 2, dummy;
-
-        dummy = (rows_len == 0 && !TRUE);
-        check_int(dummy, 0, "при выбранных сенсорах заглушки нет");
-    }
-
-    /* 4. Признак пишется даже при нуле сенсоров. Если бы при пустом
-     * выборе ключ не писался, признак потерялся бы — и п.2 сломался бы
-     * ровно при следующем старте, а не сразу. */
+    /* 1. Ничего не выбрано — заглушка есть. Именно этот случай
+     * пользователь и описал: отметил сенсор, потом убрал. */
     {
         guint rows_len = 0;
-        gboolean selected = TRUE;
-        char *conf_rows = NULL;      /* sen_rows_to_config вернёт NULL */
-        char *conf_selected = NULL;  /* но признак обязан писаться */
+        gboolean dummy = (rows_len == 0);
 
-        if (rows_len == 0)
-            conf_rows = NULL;
-        if (selected)
-            conf_selected = g_strdup("1");
+        check_int(dummy, 1, "при нуле сенсоров заглушка возвращается");
+    }
 
-        check_int(conf_rows == NULL, 1, "при нуле сенсоров ключа rows нет");
-        check(conf_selected != NULL,
-              "признак selected пишется даже без сенсоров");
-        g_free(conf_selected);
+    /* 2. Есть хоть один сенсор — заглушки нет. */
+    {
+        guint rows_len = 1;
+        gboolean dummy = (rows_len == 0);
+
+        check_int(dummy, 0, "при одном сенсоре заглушки нет");
+    }
+
+    /* 3. Много сенсоров — тоже нет. */
+    {
+        guint rows_len = 18;
+        gboolean dummy = (rows_len == 0);
+
+        check_int(dummy, 0, "при многих сенсорах заглушки нет");
+    }
+
+    /* 4. Цикл «снял последний -> вернулась заглушка -> отметил снова
+     * -> исчезла». Обе стороны инварианта проверяются вместе: ошибка
+     * где-то посередине даёт либо двойную заглушку, либо пустой вывод. */
+    {
+        GPtrArray *rows = g_ptr_array_new_with_free_func(g_free);
+        GPtrArray *srcs = g_ptr_array_new_with_free_func(g_free);
+        guint i;
+
+        /* отметили первый сенсор */
+        g_ptr_array_add(rows, g_strdup("CPU"));
+        g_ptr_array_add(srcs, g_strdup("coretemp/coretemp.0/Core 0"));
+        check_int(rows->len == 0, 0, "после включения заглушки нет");
+
+        /* сняли его */
+        g_ptr_array_remove_index(rows, 0);
+        g_ptr_array_remove_index(srcs, 0);
+        if (rows->len == 0) {
+            g_ptr_array_add(rows, g_strdup(SEN_DUMMY_LABEL));
+            g_ptr_array_add(srcs, g_strdup(SEN_DUMMY_SOURCE));
+        }
+        check_int(rows->len, 1, "снятие вернуло ровно одну строку");
+        check_str(g_ptr_array_index(srcs, 0), SEN_DUMMY_SOURCE,
+                  "вернулась именно заглушка");
+
+        /* отметили снова — заглушка ушла */
+        i = 0;
+        g_ptr_array_remove_index(rows, i);
+        g_ptr_array_remove_index(srcs, i);
+        g_ptr_array_add(rows, g_strdup("CPU"));
+        g_ptr_array_add(srcs, g_strdup("coretemp/coretemp.0/Core 0"));
+        check_int(rows->len, 1, "повторное включение не оставило заглушку");
+        check_str(g_ptr_array_index(srcs, 0), "coretemp/coretemp.0/Core 0",
+                  "в списке сенсор, а не заглушка");
+
+        g_ptr_array_unref(rows);
+        g_ptr_array_unref(srcs);
+    }
+
+    /* 5. В конфиге заглушки нет ни при каком состоянии: ключ rows
+     * пишется только для настоящих сенсоров. */
+    {
+        static const char *rows[] = { SEN_DUMMY_LABEL };
+        static const char *srcs[] = { SEN_DUMMY_SOURCE };
+        char *t = sen_test_rows_to_config(rows, srcs, 1);
+
+        check_int(t == NULL, 1, "заглушка не попадает в конфиг");
+        g_free(t);
     }
 }
 
@@ -2177,7 +2205,7 @@ int main(void)
     test_config_only_enabled_sensors();
     test_step_never_overlaps_text();
     test_dummy_disappears_on_first_sensor();
-    test_dummy_only_on_first_run();
+    test_dummy_when_no_sensors();
     test_auto_height_uses_effective_step();
     test_default_value_x_after_rows();
     test_nvml_source_prefix();
