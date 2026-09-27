@@ -822,6 +822,19 @@ double sensor_corner_radius_value(int value)
     return value > 0 ? (double)value : 0.0;
 }
 
+void sensor_array_replace(GPtrArray *array, guint index, void *value)
+{
+    if (index >= array->len)
+        return;
+    /* free_func в GPtrArray приватное поле (g_ptr_array_get_free_func
+     * появился только в GLib 2.42, а здесь нужен вариант, который
+     * работает и без него). Массивы значений у нас всегда строковые,
+     * поэтому освобождаем как строку — ровно то, чем заполняет их
+     * sen_read_values(). Значение NULL освобождать нечего. */
+    g_free(g_ptr_array_index(array, index));
+    g_ptr_array_index(array, index) = value;
+}
+
 gboolean sensor_corner_radius_is_rounded(double radius)
 {
     return radius > 0.5;

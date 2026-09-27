@@ -2167,6 +2167,118 @@ static void test_dummy_when_no_sensors(void)
     }
 }
 
+/* Регрессия: sen_read_values() присваивала значения в priv->values
+ * напрямую через g_ptr_array_index. При этом free_func, заданный на
+ * массив, НЕ вызывается, и старая строка теряется — утечка на каждом
+ * обновлении (каждые update_ms), то есть в реальной работе апплета, а не
+ * под тестом. MALLOC_CHECK_=3 утечку не видит: он ловит порчу кучи.
+ *
+ * Тест повторяет приём sen_values_set() много раз и требует, чтобы RSS
+ * оставался в узком коридоре. Реальная утечка съедала по 32 байта на
+ * присваивание — 200k итераций давали +6 ГБ.
+ *
+ * Порог подобран с запасом: аллокатор не обязан отдавать память сразу,
+ * поэтому сравниваем не абсолютные числа, а наклон «до -> после».
+ */
+#include <glib.h>
+#include <glib/gstdio.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static long rss_kb(void)
+{
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    long kb = -1;
+
+    if (!f)
+        return -1;
+    while (fgets(line, sizeof line, f)) {
+        if (g_str_has_prefix(line, "VmRSS:")) {
+            kb = strtol(line + 6, NULL, 10);
+            break;
+        }
+    }
+    fclose(f);
+    return kb;
+}
+
+static void test_array_replace_does_not_leak(void)
+{
+    GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
+    const int cells = 200;
+    const int rounds = 20000;
+    long before, after;
+    int i, r;
+
+    printf("=== sensor_array_replace не течёт ===\n");
+
+    for (i = 0; i < cells; i++)
+        g_ptr_array_add(values, NULL);
+
+    /* Прогрев: заг����аем первые страницы, иначе наклон замыкает
+     * постепенное расширение кучи, а не утечку. */
+    for (r = 0; r < 200; r++)
+        for (i = 0; i < cells; i++)
+            sensor_array_replace(values, i, g_strdup("36.6°C"));
+
+    before = rss_kb();
+    for (r = 0; r < rounds; r++)
+        for (i = 0; i < cells; i++)
+            sensor_array_replace(values, i, g_strdup("36.6°C"));
+    after = rss_kb();
+
+    printf("  %d итераций x %d строк = %d присваиваний\n",
+           rounds, cells, rounds * cells);
+    printf("  RSS до: %ld КБ, после: %ld КБ, дельта: %ld КБ\n",
+           before, after, after - before);
+
+    /* Утечка давала ~32 байта/строку: rounds*cells*32 байт — это сотни
+     * мегабайт при наших числах. 8 МБ — заведомо ниже утечки и заведомо
+     * выше шума аллокатора. */
+    check(after - before < 8192,
+          "sensor_array_replace не течёт (при присваивании через "
+          "g_ptr_array_index прирост был бы сотни МБ)");
+    if (after - before >= 8192)
+        printf("  ПРОВАЛ: утечка ~%.1f байт на присваивание\n",
+               (double) (after - before) * 1024.0 / (rounds * cells));
+
+    /* И обратный порядок: sen_read_values() сначала сбрасывает всё в
+     * NULL, потом заполняет. Старые значения должны освободиться. */
+    for (i = 0; i < cells; i++)
+        sensor_array_replace(values, i, NULL);
+    check(g_ptr_array_index(values, 0) == NULL,
+          "сброс в NULL освобождает старое значение");
+    check(g_ptr_array_index(values, cells - 1) == NULL,
+          "сброс в NULL освобождает и последнее значение");
+
+    g_ptr_array_free(values, TRUE);
+    printf("  ok\n");
+}
+
+/* Контрольный тест: если бы sen_values_set() был старой версией
+ * (без g_free), тест выше упал бы. Здесь это не проверяется напрямую —
+ * это осознанно, измерение RSS платформенно- и моментно-зависимо. */
+static void test_array_replace_replaces_pointer(void)
+{
+    GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
+
+    printf("=== sensor_array_replace заменяет указатель ===\n");
+
+    g_ptr_array_add(values, g_strdup("старое"));
+    sensor_array_replace(values, 0, g_strdup("новое"));
+    check(g_strcmp0(g_ptr_array_index(values, 0), "новое") == 0,
+          "после set хранится новое значение");
+    check(values->len == 1, "set не меняет длину массива");
+
+    sensor_array_replace(values, 0, NULL);
+    check(g_ptr_array_index(values, 0) == NULL, "replace(…, NULL) очищает");
+
+    g_ptr_array_free(values, TRUE);
+    printf("  ok\n");
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -2204,6 +2316,8 @@ int main(void)
     test_dummy_value_formatting();
     test_config_only_enabled_sensors();
     test_step_never_overlaps_text();
+    test_array_replace_does_not_leak();
+    test_array_replace_replaces_pointer();
     test_dummy_disappears_on_first_sensor();
     test_dummy_when_no_sensors();
     test_auto_height_uses_effective_step();

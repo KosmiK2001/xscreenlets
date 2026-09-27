@@ -104,6 +104,15 @@ char *sensor_format_rgba(const gdouble color[4]);
  * не задан shape. Поэтому форму вызывают дважды — в draw() (клип) и в
  * sensor_apply_shape() (реальная форма окна, чтобы клики в углы не
  * попадали). */
+/* Заменить элемент в GPtrArray, созданном с free_func.
+ *
+ * Присваивать через g_ptr_array_index нельзя: free_func при этом НЕ
+ * вызывается, и старое значение теряется. Для массива строк, который
+ * перезаполняется на каждом обновлении, это утечка в обычной работе
+ * апплета, а не под тестом: MALLOC_CHECK_=3 ловит порчу кучи, но не
+ * рост памяти. */
+void sensor_array_replace(GPtrArray *array, guint index, void *value);
+
 double sensor_corner_radius_value(int value);
 gboolean sensor_corner_radius_is_rounded(double radius);
 cairo_region_t *sensor_rounded_region(int width, int height, int radius);

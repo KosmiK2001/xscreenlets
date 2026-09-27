@@ -410,9 +410,9 @@ static void sen_read_values(SenPriv *priv)
 
     if (!priv->values)
         priv->values = g_ptr_array_new_with_free_func(g_free);
-    for (i = 0; i < (priv->values ? priv->values->len : 0); i++)
-        g_ptr_array_index(priv->values, i) = NULL;
-    while (priv->values && priv->values->len < priv->rows->len)
+    for (i = 0; i < priv->values->len; i++)
+        sensor_array_replace(priv->values, i, NULL);
+    while (priv->values->len < priv->rows->len)
         g_ptr_array_add(priv->values, NULL);
 
     list = sensor_list_read("/sys/class/hwmon");
@@ -421,7 +421,7 @@ static void sen_read_values(SenPriv *priv)
          * пустоту — иначе апплет выглядит сломанным, хотя это просто
          * не удалось прочитать. */
         for (i = 0; i < priv->rows->len; i++)
-            g_ptr_array_index(priv->values, i) = g_strdup("—");
+            sensor_array_replace(priv->values, i, g_strdup("—"));
         priv->values_valid = TRUE;
         return;
     }
@@ -435,8 +435,9 @@ static void sen_read_values(SenPriv *priv)
          * «dummy» не нашёлся бы ни в sysfs, ни в NVML, и пользователь
          * увидел бы прочерк вместо проверки, что вывод работает. */
         if (g_strcmp0(row_id, SEN_DUMMY_SOURCE) == 0) {
-            g_ptr_array_index(priv->values, i) =
-                sensor_format_value(SEN_DUMMY_CELSIUS, priv->fahrenheit, TRUE);
+            sensor_array_replace(priv->values, i,
+                           sensor_format_value(SEN_DUMMY_CELSIUS,
+                                               priv->fahrenheit, TRUE));
             continue;
         }
 
@@ -461,7 +462,7 @@ static void sen_read_values(SenPriv *priv)
                 text = g_strdup("—");     /* канал не подключён (-128) */
         }
         if (text)
-            g_ptr_array_index(priv->values, i) = text;
+            sensor_array_replace(priv->values, i, text);
     }
     sensor_list_free(list);
     priv->values_valid = TRUE;
@@ -632,8 +633,12 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
                                                     NULL);
         if (units && g_ascii_strcasecmp(units, "celsius") == 0)
             priv->fahrenheit = FALSE;
-        else if (units)
+        else if (units && g_ascii_strcasecmp(units, "fahrenheit") == 0)
             priv->fahrenheit = TRUE;
+        else if (units && *units)
+            /* Неизвестное значение молча включало Фаренгейт: ветка
+             * «units есть -> TRUE» ловила и опечатку, и «kelvin». */
+            priv->fahrenheit = FALSE;
         else
             priv->fahrenheit = xs_host_api()->conf_int(kf, p->name,
                                                        "fahrenheit", 1) != 0;
