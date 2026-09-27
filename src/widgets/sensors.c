@@ -78,6 +78,7 @@ typedef struct {
     gdouble border_color[4];
 
     int label_x, value_x, first_row_y;
+    gboolean value_align_right;   /* число прижато вправо (по умолчанию) */
     int line_step;
 
     /* Список строк: «метка» = «чип/канал» (например «nvme0/Composite»),
@@ -502,10 +503,23 @@ static cairo_surface_t *sen_render(SenPriv *priv, int width, int height)
              * network_monitor: позиция числа задана своим ключом и не
              * зависит от длины подписи. Иначе «Position ничего не
              * делает» и «Label position двигает всю строку». */
-            sen_show_text(cr, label_font, label_x, y, label,
-                          priv->label_color, 0);
-            sen_show_text(cr, value_font, value_x, y, value,
-                          priv->value_color, width - SEN_MARGIN);
+            /* По умолчанию число выровнено по ПРАВОМУ краю окна: подпись
+             * прижата влево, а колонка чисел читается взглядом независимо
+             * от длины подписей. При value_align=left число стартует от
+             * value_x, как в прежних сборках. */
+            if (priv->value_align_right) {
+                int w = sen_text_width(cr, value, value_font);
+
+                sen_show_text(cr, label_font, label_x, y, label,
+                              priv->label_color, 0);
+                sen_show_text(cr, value_font, width - SEN_MARGIN - w, y,
+                              value, priv->value_color, 0);
+            } else {
+                sen_show_text(cr, label_font, label_x, y, label,
+                              priv->label_color, 0);
+                sen_show_text(cr, value_font, value_x, y, value,
+                              priv->value_color, width - SEN_MARGIN);
+            }
         } else if (label && *label) {
             sen_show_text(cr, label_font, label_x, y, label,
                           priv->label_color, 0);
@@ -603,6 +617,16 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * быть зашитым числом. Пользовательский value_x из конфига
      * уважается — правится только дефолт. */
     priv->value_x = xs_host_api()->conf_int(kf, p->name, "value_x", -1);
+
+    /* Выравнивание значения строковым ключом, а не флагом: это режим
+     * отображения, и со временем появится третий вариант (по центру),
+     * который флагом не выразить. Дефолт — вправо. */
+    {
+        const char *al = xs_host_api()->conf_str(kf, p->name,
+                                                 "value_align", "right");
+
+        priv->value_align_right = !al || g_ascii_strcasecmp(al, "left") != 0;
+    }
     priv->first_row_y = xs_host_api()->conf_int(kf, p->name, "first_row_y", 4);
     priv->line_step = xs_host_api()->conf_int(kf, p->name, "line_step", 12);
 
@@ -870,6 +894,8 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_string(kf, p->name, "value_font", priv->value_font);
     g_key_file_set_integer(kf, p->name, "label_x", priv->label_x);
     g_key_file_set_integer(kf, p->name, "value_x", priv->value_x);
+    g_key_file_set_string(kf, p->name, "value_align",
+                          priv->value_align_right ? "right" : "left");
     g_key_file_set_integer(kf, p->name, "first_row_y", priv->first_row_y);
     g_key_file_set_integer(kf, p->name, "line_step", priv->line_step);
     xs_core_plugin_conf_flush(p->name);
@@ -982,6 +1008,43 @@ static void sen_save(SenPriv *priv)
     g_key_file_set_string(priv->kf, priv->plugin->name, "rows", text);
     g_free(text);
     xs_core_plugin_conf_flush(priv->plugin->name);
+}
+
+/* Галка для строки настроек. sen_row кладёт виджет в правую колонку, а
+ * заголовок ставит слева, поэтому виджет должен быть без собственного
+ * текста — иначе подпись уехала бы в третью колонку. */
+static GtkWidget *sen_check(const char *key, gboolean active)
+{
+    GtkWidget *cb = gtk_check_button_new();
+
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cb), active);
+    g_object_set_data(G_OBJECT(cb), "xs-key", (gpointer) key);
+    return cb;
+}
+
+/* Обработчик галки выравнивания. Отдельный от sen_int_changed: ключ
+ * приходит виджетом, а поле занимает gboolean, а не int. Сохранение —
+ * строкой, ровно как читает init. */
+static void sen_bool_changed(GtkToggleButton *cb, gpointer data)
+{
+    SenDialogContext *ctx = data;
+    SenPriv *priv = sen_live_priv(ctx);
+    const char *key;
+
+    if (!priv)
+        return;
+    key = g_object_get_data(G_OBJECT(cb), "xs-key");
+    if (!key || strcmp(key, "value_align_right") != 0)
+        return;
+    priv->value_align_right = gtk_toggle_button_get_active(cb);
+    priv->design_width = priv->width;
+    priv->design_height = priv->height;
+    sen_rebuild_cache(priv, priv->width, priv->height);
+    xs_host_api()->resize(priv->plugin, priv->width, priv->height);
+    xs_host_api()->invalidate(priv->plugin);
+    if (priv->plugin->win)
+        gtk_widget_queue_draw(priv->plugin->win);
+    sen_save(priv);
 }
 
 static void sen_int_changed(GtkSpinButton *spin, gpointer data)
@@ -1640,9 +1703,14 @@ static void sen_connect_children(GtkWidget *widget, SenDialogContext *ctx)
              g_object_get_data(G_OBJECT(widget), "xs-key"))
         g_signal_connect(widget, "changed",
                          G_CALLBACK(sen_units_changed), ctx);
-    /* Отмечаемых чекбоксов с ключом в диалоге нет: галочки выбора
-     * сенсоров несут xs-source, а не xs-key, и подключаются отдельно в
-     * sen_sensor_list(). Поэтому здесь ветки для toggle-button нет. */
+    /* Галка выравнивания несёт xs-key, в отличие от галочек выбора
+     * сенсоров, где xs-source (они подключаются в sen_sensor_list).
+     * Проверка ключа обязательна: иначе в этот обработчик попали бы и
+     * те, и он получил бы не тот тип данных. */
+    else if (GTK_IS_TOGGLE_BUTTON(widget) &&
+             g_object_get_data(G_OBJECT(widget), "xs-key"))
+        g_signal_connect(widget, "toggled",
+                         G_CALLBACK(sen_bool_changed), ctx);
 
     if (GTK_IS_CONTAINER(widget)) {
         GList *children = gtk_container_get_children(GTK_CONTAINER(widget));
@@ -1747,6 +1815,8 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
                                          pos_max));
     sen_row(&g, "Позиция числа", sen_spin("value_x", priv->value_x, 0,
                                          pos_max));
+    sen_row(&g, "Число вправо",
+            sen_check("value_align_right", priv->value_align_right));
     sen_row(&g, "Первая строка", sen_spin("first_row_y", priv->first_row_y, 0,
                                           pos_max));
     sen_row(&g, "Шаг строк", sen_spin("line_step", priv->line_step, 1,
