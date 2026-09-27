@@ -118,6 +118,28 @@ static gboolean nvml_open(void)
     return TRUE;
 }
 
+/* Освободить NVML. Вызывается на выходе плагина: без этого handle
+ * остаётся открытым, и при пересоздании апплета (properties -> init
+ * -> shutdown -> init) число инициализаций накапливалось бы. */
+void nvml_shutdown(void)
+{
+    if (nvml_ctx.ready && nvml_ctx.shutdown)
+        nvml_ctx.shutdown();
+    nvml_ctx.ready = FALSE;
+    nvml_ctx.tried = FALSE;   /* следующий init попробует заново */
+    if (nvml_ctx.lib) {
+        dlclose(nvml_ctx.lib);
+        nvml_ctx.lib = NULL;
+    }
+    memset(&nvml_ctx.init, 0, sizeof nvml_ctx.init);
+    nvml_ctx.count = NULL;
+    nvml_ctx.handle = NULL;
+    nvml_ctx.name = NULL;
+    nvml_ctx.uuid = NULL;
+    nvml_ctx.temp = NULL;
+    nvml_ctx.shutdown = NULL;
+}
+
 gboolean nvml_source_is_nvidia(const char *row_id)
 {
     return row_id && g_str_has_prefix(row_id, "nvidia/");

@@ -2279,6 +2279,94 @@ static void test_array_replace_replaces_pointer(void)
     printf("  ok\n");
 }
 
+/* Регрессия: sen_scale_font() возвращал указатель на ОБЩИЙ статический
+ * буфер. sen_render() зовёт её дважды подряд — для подписи и для числа,
+ * — и оба указателя ссылались на одну память: второй вызов затирал
+ * первый, и подпись рисовалась кеглем числа. При равных шрифтах
+ * (Sans 10 / Sans 10) дефект не виден — он проявлялся только когда
+ * label_font и value_font различаются, и только на экране.
+ *
+ * Здесь повторяем ровно схему использования из sen_render(): два
+ * вызова подряд, оба результата должны остаться валидными.
+ */
+#include <glib.h>
+#include <stdio.h>
+#include <string.h>
+
+/* Копия исправленного sen_scale_font() с двумя буферами. */
+static const char *scale_font_fixed(const char *font, int design, int actual)
+{
+    PangoFontDescription *fd = pango_font_description_from_string(font);
+    const char *family = pango_font_description_get_family(fd);
+    int points = pango_font_description_get_size(fd) / PANGO_SCALE;
+    int scaled;
+    static char bufs[2][128];
+    static int next;
+    char *buf = bufs[next];
+
+    next = (next + 1) % 2;
+    if (design <= 0 || actual <= 0)
+        design = actual = 1;
+    scaled = (points * actual) / design;
+    if (scaled < 1)
+        scaled = 1;
+    g_snprintf(buf, sizeof bufs[0], "%s %d", family ? family : "Sans", scaled);
+    pango_font_description_free(fd);
+    return buf;
+}
+
+static void test_scale_font_two_buffers(void)
+{
+    const char *a, *b;
+
+    printf("=== sen_scale_font: два вызова не затирают друг друга ===\n");
+
+    /* Именно как в sen_render: разные шрифты, один и тот же размер окна. */
+    a = scale_font_fixed("Sans 10", 257, 257);
+    b = scale_font_fixed("Sans 8", 257, 257);
+
+    printf("  подпись: %s\n  число:   %s\n", a, b);
+    check(a != b, "два вызова возвращают разные указатели");
+    check(strcmp(a, "Sans 10") == 0,
+          "подпись сохранила свой кегль (10), а не кегль числа");
+    check(strcmp(b, "Sans 8") == 0, "число сохранило свой кегль (8)");
+
+    /* Третий вызов возвращается к первому буферу — и снова корректно. */
+    a = scale_font_fixed("Sans 12", 257, 257);
+    check(strcmp(a, "Sans 12") == 0, "третий вызов снова даёт свой кегль");
+
+    printf("  ok\n");
+}
+
+static void test_scale_font_equal_fonts(void)
+{
+    const char *a, *b;
+
+    printf("=== sen_scale_font: одинаковые шрифты ===\n");
+
+    a = scale_font_fixed("Sans 10", 257, 257);
+    b = scale_font_fixed("Sans 10", 257, 257);
+    check(strcmp(a, b) == 0, "одинаковые шрифты дают одинаковый результат");
+
+    printf("  ok\n");
+}
+
+static void test_scale_font_resizes(void)
+{
+    const char *a;
+
+    printf("=== sen_scale_font: масштабирование кегля ===\n");
+
+    a = scale_font_fixed("Sans 10", 200, 400);
+    check(strcmp(a, "Sans 20") == 0, "окно вдвое шире — кегль вдвое больше");
+    a = scale_font_fixed("Sans 10", 400, 200);
+    check(strcmp(a, "Sans 5") == 0, "окно вдвое уже — кегль вдвое меньше");
+    a = scale_font_fixed("Sans 1", 1000, 1);
+    check(strcmp(a, "Sans 1") == 0, "кегль не падает до нуля");
+
+    printf("  ok\n");
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -2316,6 +2404,9 @@ int main(void)
     test_dummy_value_formatting();
     test_config_only_enabled_sensors();
     test_step_never_overlaps_text();
+    test_scale_font_two_buffers();
+    test_scale_font_equal_fonts();
+    test_scale_font_resizes();
     test_array_replace_does_not_leak();
     test_array_replace_replaces_pointer();
     test_dummy_disappears_on_first_sensor();

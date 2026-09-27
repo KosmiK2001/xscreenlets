@@ -35,4 +35,9 @@ gboolean nvml_source_is_nvidia(const char *row_id);
  * возвращает FALSE и ставит *out_celsius в NAN, если канала нет. */
 gboolean nvml_read_value(const char *row_id, gdouble *out_celsius);
 
+/* Освободить NVML на выходе плагина. Без этого вызова handle остаётся
+ * открытым, а при пересоздании апплета число инициализаций растёт.
+ * Безопасно вызывать, даже если NVML не открывался. */
+void nvml_shutdown(void);
+
 #endif /* SENSORS_NVML_H */

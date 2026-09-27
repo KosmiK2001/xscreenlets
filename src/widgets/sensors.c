@@ -293,14 +293,23 @@ static const char *sen_scale_font(const char *font, int design, int actual)
     const char *family = pango_font_description_get_family(fd);
     int points = pango_font_description_get_size(fd) / PANGO_SCALE;
     int scaled;
-    static char buf[128];
+    /* Буферов ДВА, по одному на вызов. Общий буфер был ловушкой:
+     * sen_render() зовёт функцию дважды подряд — для подписи и для
+     * числа, — и оба указателя ссылались на одну и ту же память.
+     * Второй вызов затирал первый, и подпись рисовалась кеглем числа:
+     * при label_font=Sans 10 и value_font=Sans 8 обе строки выходили
+     * одним шрифтом, молча и только на экране. */
+    static char bufs[2][128];
+    static int next;
+    char *buf = bufs[next];
 
+    next = (next + 1) % 2;
     if (design <= 0 || actual <= 0)
         design = actual = 1;
     scaled = (points * actual) / design;
     if (scaled < 1)
         scaled = 1;
-    g_snprintf(buf, sizeof(buf), "%s %d", family ? family : "Sans", scaled);
+    g_snprintf(buf, sizeof bufs[0], "%s %d", family ? family : "Sans", scaled);
     pango_font_description_free(fd);
     return buf;
 }
@@ -420,9 +429,29 @@ static void sen_read_values(SenPriv *priv)
     if (!list) {
         /* Каталог sysfs недоступен целиком: показываем прочерки, а не
          * пустоту — иначе апплет выглядит сломанным, хотя это просто
-         * не удалось прочитать. */
-        for (i = 0; i < priv->rows->len; i++)
-            sensor_array_replace(priv->values, i, g_strdup("—"));
+         * не удалось прочитать.
+         *
+         * Но прочерк получают НЕ все: тестовая строка и каналы NVIDIA
+         * от sysfs не зависят. Ранний return давал им «—» вместе с
+         * остальными, то есть при отказе доступа к /sys/class/hwmon
+         * апплет терял и проверку живости, и работающую карту. */
+        for (i = 0; i < priv->rows->len; i++) {
+            const char *row_id = g_ptr_array_index(priv->row_sources, i);
+            char *text = NULL;
+
+            if (g_strcmp0(row_id, SEN_DUMMY_SOURCE) == 0)
+                text = sensor_format_value(SEN_DUMMY_CELSIUS,
+                                           priv->fahrenheit, TRUE);
+            else if (nvml_source_is_nvidia(row_id)) {
+                gdouble c = 0.0;
+
+                if (nvml_read_value(row_id, &c))
+                    text = sensor_format_value(c, priv->fahrenheit, TRUE);
+            }
+            if (!text)
+                text = g_strdup("—");
+            sensor_array_replace(priv->values, i, text);
+        }
         priv->values_valid = TRUE;
         return;
     }
@@ -555,14 +584,20 @@ static cairo_surface_t *sen_render(SenPriv *priv, int width, int height)
                 sen_show_text(cr, value_font, value_left, y,
                               value, priv->value_color, 0);
             } else {
+                /* Подпись ограничена началом числа и здесь: при
+                 * value_align=left колонка чисел едет за value_x, и
+                 * длинная подпись без ограничения налезала бы на неё
+                 * точно так же, как при right. */
                 sen_show_text(cr, label_font, label_x, y, label,
-                              priv->label_color, 0);
+                              priv->label_color, value_x);
                 sen_show_text(cr, value_font, value_x, y, value,
                               priv->value_color, width - SEN_MARGIN);
             }
         } else if (label && *label) {
+            /* Строки без значения подпись рисуем до края окна, иначе
+             * длинная подпись обрезалась бы на середине слова. */
             sen_show_text(cr, label_font, label_x, y, label,
-                          priv->label_color, 0);
+                          priv->label_color, width - SEN_MARGIN);
         }
         y += step;
         shown++;
@@ -592,6 +627,64 @@ static char *sen_rows_to_config(const SenPriv *priv);
  * строки по источнику нужны раньше определения. */
 static guint sen_row_index(SenPriv *priv, const char *source);
 static void sen_drop_dummy_row(SenPriv *priv);
+
+/* Пересчитать размеры окна по содержимому.
+ *
+ * Отдельная функция, а не кусок init(), потому что размер нужен в двух
+ * местах: при первом запуске и после того, как пользователь поставил или
+ * снял галочку. Раньше второй случай пересчитывал кеш, но брал СТАРЫЙ
+ * priv->height: при height_auto добавленный сенсор попадал в render за
+ * нижнюю границу (y > height) и молча не рисовался до перезапуска
+ * демона. Снятая строка оставляла внизу пустое поле.
+ *
+ * Оба размера — и ширина, и высота — считаются здесь, потому что зависят
+ * от состава строк одинаково. */
+static void sen_recalc_auto_size(SenPriv *priv)
+{
+    cairo_surface_t *probe;
+    cairo_t *pcr;
+
+    if (!priv)
+        return;
+    probe = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    pcr = cairo_create(probe);
+
+    if (priv->height_auto) {
+        int step = sen_effective_step(pcr, priv->line_step,
+                                      priv->label_font, priv->value_font);
+        /* +1 на последнюю строку: базовая линия последней строки стоит
+         * на first_row_y + (n-1)*step, а под ней ещё descender. */
+        int need = priv->first_row_y + (int) priv->rows->len * step
+                 + SEN_MARGIN * 2;
+
+        /* Растёт И уменьшается: снял строки — окно должно сжаться, иначе
+         * пользователь получит пустое поле внизу, решив, что это норма. */
+        priv->height = CLAMP(need, SEN_MIN_HEIGHT, 1200);
+    }
+
+    if (priv->width_auto) {
+        int widest = 0;
+
+        for (guint i = 0; i < priv->rows->len; i++) {
+            const char *val = priv->values_valid && i < priv->values->len
+                                ? g_ptr_array_index(priv->values, i) : NULL;
+            int lw = sen_text_width(pcr, g_ptr_array_index(priv->rows, i),
+                                    priv->label_font);
+            int vw = val ? sen_text_width(pcr, val, priv->value_font) : 0;
+            int w = lw + SEN_VALUE_GAP + vw;
+
+            if (lw > widest)
+                widest = lw;
+            if (w > widest)
+                widest = w;
+        }
+        priv->width = CLAMP(priv->label_x + widest + SEN_MARGIN * 2,
+                            120, 1200);
+    }
+
+    cairo_destroy(pcr);
+    cairo_surface_destroy(probe);
+}
 
 static int sen_init(XsPlugin *p, GKeyFile *kf)
 {
@@ -920,65 +1013,7 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * строки задаётся line_step, а не размером окна: 12 строк в окне
      * 100px обрезаются по нижнему краю, и последняя температура не
      * видна вообще. Пользовательская высота уважается. */
-    if (priv->height_auto) {
-        cairo_surface_t *probe =
-            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-        cairo_t *pcr = cairo_create(probe);
-        int step = sen_effective_step(pcr, priv->line_step,
-                                      priv->label_font, priv->value_font);
-        int need;
-
-        cairo_destroy(pcr);
-        cairo_surface_destroy(probe);
-        /* +1 на последнюю строку: базовая линия последней строки стоит
-         * на first_row_y + (n-1)*step, а под ней ещё descender. */
-        need = priv->first_row_y + (int) priv->rows->len * step
-             + SEN_MARGIN * 2;
-
-        /* Растёт И уменьшается: снял строки — окно должно сжаться, иначе
-         * пользователь получит пустое поле внизу, решив, что это норма. */
-        priv->height = CLAMP(need, SEN_MIN_HEIGHT, 1200);
-    }
-
-    /* Ширина по самым длинным подписи и числу — по тому же принципу,
-     * что высота по строкам. Фиксированные 200px не годились, когда
-     * подписи длиннее: «coretemp-isa-0000 · Package id 0» занимала
-     * почти всю ширину, и число ложилось прямо на неё. Обе колонки
-     * становятся нечитаемыми, а дефект выглядит как «шрифт едет».
-     *
-     * Считается ПОСЛЕ того, как известен состав строк, и меряется тем
-     * же шрифтом, которым будет нарисовано, иначе масштаб уехал бы.
-     * Пользовательская ширина уважается: width_auto снимается, как
-     * только пользователь выставил размер вручную. */
-    if (priv->width_auto) {
-        cairo_surface_t *probe =
-            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-        cairo_t *pcr = cairo_create(probe);
-        int widest = 0, need_w;
-
-        for (guint i = 0; i < priv->rows->len; i++) {
-            const char *src = g_ptr_array_index(priv->row_sources, i);
-            int lw = sen_text_width(pcr, g_ptr_array_index(priv->rows, i),
-                                    priv->label_font);
-            const char *val = priv->values_valid && i < priv->values->len
-                                ? g_ptr_array_index(priv->values, i) : NULL;
-            int vw = val ? sen_text_width(pcr, val, priv->value_font) : 0;
-            int w;
-
-            if (lw > widest)
-                widest = lw;
-            /* Зазор нужен даже без числа — иначе «Чтото» и «36.6°C»
-             * встали бы впритык к краю окна. */
-            w = lw + SEN_VALUE_GAP + vw;
-            if (w > widest)
-                widest = w;
-            (void) src;
-        }
-        need_w = priv->label_x + widest + SEN_MARGIN * 2;
-        cairo_destroy(pcr);
-        cairo_surface_destroy(probe);
-        priv->width = CLAMP(need_w, 120, 1200);
-    }
+    sen_recalc_auto_size(priv);
 
     priv->design_width = priv->width;
     priv->design_height = priv->height;
@@ -1098,6 +1133,9 @@ static void sen_shutdown(XsPlugin *p)
         g_ptr_array_unref(priv->row_sources);
     if (priv->values)
         g_ptr_array_unref(priv->values);
+    /* NVML держит открытый handle: без освобождения он переживал бы
+     * пересоздание апплета, и число инициализаций копилось бы. */
+    nvml_shutdown();
     g_free(priv->label_font);
     g_free(priv->value_font);
     g_free(priv);
@@ -1186,7 +1224,11 @@ static GtkWidget *sen_check(const char *key, gboolean active)
     GtkWidget *cb = gtk_check_button_new();
 
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cb), active);
-    g_object_set_data(G_OBJECT(cb), "xs-key", (gpointer) key);
+    /* set_data_full, а не set_data: sen_spin рядом уже копирует ключ с
+     * g_free. Здесь вызов всего один и с литералом, так что оба варианта
+     * работают — но если кто-то добавит второй вызов с переменной,
+     * set_data молча уронил бы память. Разница в одну строку. */
+    g_object_set_data_full(G_OBJECT(cb), "xs-key", g_strdup(key), g_free);
     return cb;
 }
 
@@ -1528,6 +1570,22 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
 
     if (want) {
         if (idx == SEN_ROW_NONE) {
+            /* Лимит строк. Рисуем максимум SEN_MAX_ROWS, а диалог
+             * показывает все найденные каналы — на этой машине их 46
+             * при лимите 40. Без проверки лишние строки писались бы в
+             * конфиг, но не выводились: пользователь ставит галочку,
+             * а ничего не происходит, и галочка выглядит сломанной.
+             * Снимаем её обратно и говорим почему. */
+            if (priv->rows->len >= SEN_MAX_ROWS) {
+                want = FALSE;
+                gtk_list_store_set(GTK_LIST_STORE(model), &iter, 0, FALSE,
+                                   -1);
+                if (priv->plugin && priv->plugin->host)
+                    priv->plugin->host->log(
+                        "sensors: строка не добавлена — предел %d",
+                        SEN_MAX_ROWS);
+                goto done;
+            }
             /* Отложенная метка (введённая до включения) важнее полного
              * имени: пользователь её уже напечатал. */
             const char *use = pending && *pending ? pending : label;
@@ -1567,12 +1625,19 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
             }
         }
     }
+done:
     /* Галочка в модели — иначе не зажжётся. */
     gtk_list_store_set(GTK_LIST_STORE(model), &iter, 0, want, -1);
     gtk_tree_path_free(path);
 
     sen_save(priv);
     sen_read_values(priv);
+    /* Геометрия пересчитывается ДО rebuild_cache: при height_auto
+     * добавленный сенсор иначе попал бы в render за старой нижней
+     * границей и не был нарисован до перезапуска демона. */
+    sen_recalc_auto_size(priv);
+    priv->design_width = priv->width;
+    priv->design_height = priv->height;
     sen_rebuild_cache(priv, priv->width, priv->height);
     xs_host_api()->invalidate(priv->plugin);
     if (priv->plugin->win)
@@ -1589,6 +1654,32 @@ out:
  * и подставляется при включении. Раньше она вешалась на renderer, а он
  * один на всю таблицу: правка одной строки затирала другую.
  */
+/* Убрать из подписи символы, которые ломают формат конфига.
+ *
+ * Строка rows — это «подпись|источник», а строки разделены «;». Метка
+ * «CPU; GPU» или «диск|1» при следующем запуске развалилась бы: init
+ * делит значение по «;» и пару по «|», получил бы мусорные источники и
+ * запустил миграцию, которая потеряла бы привязку к устройствам.
+ *
+ * Символы вырезаются, а не заменяются: молчаливая подмена на «-» была бы
+ * хуже, потому что пользователь не увидел бы, что его текст изменили. */
+static char *sen_sanitize_label(const char *text)
+{
+    GString *out;
+
+    if (!text)
+        return NULL;
+    out = g_string_new(NULL);
+    for (const char *p = text; *p; p++)
+        if (*p != ';' && *p != '|')
+            g_string_append_c(out, *p);
+    if (!out->len) {
+        g_string_free(out, TRUE);
+        return NULL;   /* подпись из одних разделителей — не подпись */
+    }
+    return g_string_free(out, FALSE);
+}
+
 static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
                                   gchar *new_text, gpointer data)
 {
@@ -1599,6 +1690,7 @@ static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
     GtkTreePath *path;
     GtkTreeIter iter;
     char *source = NULL;
+    char *clean = NULL;
     guint idx;
 
     if (!priv || !view || ctx->building)
@@ -1607,12 +1699,20 @@ static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
      * игнорируем: строка остаётся с прежним текстом. */
     if (!new_text || !*new_text)
         return;
+    clean = sen_sanitize_label(new_text);
+    if (!clean) {
+        g_free(clean);
+        return;
+    }
     model = gtk_tree_view_get_model(view);
     path = gtk_tree_path_new_from_string(path_str);
-    if (!path)
+    if (!path) {
+        g_free(clean);
         return;
+    }
     if (!gtk_tree_model_get_iter(model, &iter, path)) {
         gtk_tree_path_free(path);
+        g_free(clean);
         return;
     }
     gtk_tree_model_get(model, &iter, 4, &source, -1);
@@ -1623,21 +1723,25 @@ static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
 
     if (idx == SEN_ROW_NONE) {
         /* Строка не выводится — откладываем метку до включения. */
-        gtk_list_store_set(GTK_LIST_STORE(model), &iter, 3, new_text, 5,
-                           new_text, -1);
+        gtk_list_store_set(GTK_LIST_STORE(model), &iter, 3, clean, 5,
+                           clean, -1);
         goto out;
     }
     g_free(g_ptr_array_index(priv->rows, idx));
-    g_ptr_array_index(priv->rows, idx) = g_strdup(new_text);
-    gtk_list_store_set(GTK_LIST_STORE(model), &iter, 3, new_text, -1);
+    g_ptr_array_index(priv->rows, idx) = g_strdup(clean);
+    gtk_list_store_set(GTK_LIST_STORE(model), &iter, 3, clean, -1);
     sen_save(priv);
     sen_read_values(priv);
+    sen_recalc_auto_size(priv);
+    priv->design_width = priv->width;
+    priv->design_height = priv->height;
     sen_rebuild_cache(priv, priv->width, priv->height);
     xs_host_api()->invalidate(priv->plugin);
     if (priv->plugin->win)
         gtk_widget_queue_draw(priv->plugin->win);
 out:
     g_free(source);
+    g_free(clean);
 }
 
 /* Таблица одной группы: имя группы заголовком, четыре колонки.
