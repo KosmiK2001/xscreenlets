@@ -872,11 +872,20 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * В конфиг пишется ПАРА «подпись|источник», а не одни подписи: init
      * разбирает именно пару, и запись одних подписей теряла привязку к
      * устройству. Строка переживала бы перезагрузку только до первого
-     * же сохранения — а оно происходит в init. */
+     * же сохранения — а оно происходит в init.
+     *
+     * Если ни один сенсор не выбран, ключ rows удаляется, а не пишется
+     * пустым: пустая строка означала бы «выбрана строка без подписи»,
+     * и следующий старт прогнал бы по ней миграцию, превратив дефолт
+     * в набор несуществующих сенсоров. Отсутствие ключа — это и есть
+     * «ничего не выбрано». */
     {
         char *rows_text = sen_rows_to_config(priv);
 
-        g_key_file_set_string(kf, p->name, "rows", rows_text);
+        if (rows_text)
+            g_key_file_set_string(kf, p->name, "rows", rows_text);
+        else
+            g_key_file_remove_key(kf, p->name, "rows", NULL);
         g_free(rows_text);
     }
     g_key_file_set_integer(kf, p->name, "window_width", priv->width);
@@ -996,16 +1005,56 @@ static SenPriv *sen_live_priv(SenDialogContext *ctx)
  * обработчик галочек — одни подписи, и первое же движение галочки стирало
  * привязку к устройству. Строка переживала бы перезагрузку только до
  * первого клика в Properties. */
+/* Сериализация активных сенсоров в конфиг.
+ *
+ * В конфиг попадают ТОЛЬКО включённые сенсоры. Отключённый сенсор не
+ * хранится вовсе — ни как выключенная строка, ни как «группа|канал» без
+ * галочки. Иначе конфиг разрастался бы мусором от всех когда-либо
+ * включённых датчиков, и файл перестал бы отвечать на вопрос «что сейчас
+ * выводится».
+ *
+ * Отдельно отсекается тестовая строка dummy: это не сенсор, а маркер
+ * работы плагина, и в списке выбранного ему не место. Её наличие
+ * определяется тем, что других строк нет.
+ *
+ * Пустой результат — это НЕ пустой ключ, а отсутствие ключа rows.
+ * Пустая строка означала бы «выбрана строка без подписи», и init
+ * чинил бы её миграцией, превращая нормальный дефолт в набор
+ * несуществующих сенсоров. */
 static char *sen_rows_to_config(const SenPriv *priv)
 {
-    return sensor_config_join_pair(priv->rows, priv->row_sources);
+    GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *sources = g_ptr_array_new_with_free_func(g_free);
+    char *text;
+
+    for (guint i = 0; i < priv->rows->len; i++) {
+        const char *label = g_ptr_array_index(priv->rows, i);
+        const char *src = g_ptr_array_index(priv->row_sources, i);
+
+        if (!src || !*src || g_strcmp0(src, SEN_DUMMY_SOURCE) == 0)
+            continue;   /* не сенсор: в конфиг не попадает */
+        g_ptr_array_add(labels, g_strdup(label ? label : ""));
+        g_ptr_array_add(sources, g_strdup(src));
+    }
+    if (labels->len == 0) {
+        g_ptr_array_unref(labels);
+        g_ptr_array_unref(sources);
+        return NULL;   /* выбора нет — ключ будет удалён */
+    }
+    text = sensor_config_join_pair(labels, sources);
+    g_ptr_array_unref(labels);
+    g_ptr_array_unref(sources);
+    return text;
 }
 
 static void sen_save(SenPriv *priv)
 {
     char *text = sen_rows_to_config(priv);
 
-    g_key_file_set_string(priv->kf, priv->plugin->name, "rows", text);
+    if (text)
+        g_key_file_set_string(priv->kf, priv->plugin->name, "rows", text);
+    else
+        g_key_file_remove_key(priv->kf, priv->plugin->name, "rows", NULL);
     g_free(text);
     xs_core_plugin_conf_flush(priv->plugin->name);
 }

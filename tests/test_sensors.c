@@ -1779,6 +1779,110 @@ static void test_default_value_x_after_rows(void)
     g_ptr_array_free(with_dummy, TRUE);
 }
 
+/* Конфиг хранит ТОЛЬКО включённые сенсоры.
+ *
+ * Инвариант: в ключе rows лежат пары «подпись|источник» исключительно
+ * для реальных сенсоров. Отключённый сенсор не хранится вовсе — не как
+ * «выключенная строка», не как запись без галочки. Тестовая строка dummy
+ * — не сенсор, и в конфиге ей тоже не место: её наличие определяется тем,
+ * что других строк нет.
+ *
+ * Проверяется ровно та формула, что в sen_rows_to_config(). */
+static char *sen_test_rows_to_config(const char *const *rows,
+                                     const char *const *sources, guint n)
+{
+    GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *srcs = g_ptr_array_new_with_free_func(g_free);
+    char *text;
+
+    for (guint i = 0; i < n; i++) {
+        const char *src = sources[i];
+
+        if (!src || !*src || g_strcmp0(src, SEN_DUMMY_SOURCE) == 0)
+            continue;   /* не сенсор */
+        g_ptr_array_add(labels, g_strdup(rows[i]));
+        g_ptr_array_add(srcs, g_strdup(src));
+    }
+    if (labels->len == 0) {
+        g_ptr_array_unref(labels);
+        g_ptr_array_unref(srcs);
+        return NULL;
+    }
+    text = sensor_config_join_pair(labels, srcs);
+    g_ptr_array_unref(labels);
+    g_ptr_array_unref(srcs);
+    return text;
+}
+
+static void test_config_only_enabled_sensors(void)
+{
+    /* 1. Только сенсоры — в конфиг идут все. */
+    {
+        static const char *rows[]  = { "CPU", "Диск", "Видеокарта" };
+        static const char *srcs[]  = {
+            "coretemp/coretemp.0/Core 0",
+            "drivetemp/0:0:2:0/temp1",
+            "nvidia/GPU-abc/gpu"
+        };
+        char *t = sen_test_rows_to_config(rows, srcs, 3);
+
+        check(t != NULL, "три сенсора дают непустой конфиг");
+        check(t && strstr(t, "CPU|coretemp/coretemp.0/Core 0") != NULL,
+              "первый сенсор в конфиге");
+        check(t && strstr(t, "Видеокарта|nvidia/GPU-abc/gpu") != NULL,
+              "источник NVIDIA в конфиге");
+        check(t && strchr(t, ';') != NULL, "список разделён точкой с запятой");
+        g_free(t);
+    }
+
+    /* 2. Пустой выбор — ключа быть не должно вовсе (NULL), а не пустая
+     * строка: пустая строка значила бы «выбрана строка без подписи», и
+     * следующий старт прогнал бы по ней миграцию. */
+    {
+        char *t = sen_test_rows_to_config(NULL, NULL, 0);
+
+        check_int(t == NULL, 1, "пустой выбор даёт NULL, а не пустую строку");
+        g_free(t);
+    }
+
+    /* 3. Одна отключённая строка исчезает из конфига. */
+    {
+        static const char *rows[] = { "CPU", "ОТКЛ" };
+        static const char *srcs[] = {
+            "coretemp/coretemp.0/Core 0",
+            ""                        /* сняли галочку */
+        };
+        char *t = sen_test_rows_to_config(rows, srcs, 2);
+
+        check(t != NULL, "одна включённая строка остаётся");
+        check(t && strstr(t, "ОТКЛ") == NULL,
+              "отключённый сенсор не попал в конфиг");
+        check(t && strstr(t, "CPU|coretemp/coretemp.0/Core 0") != NULL,
+              "включённый сенсор на месте");
+        g_free(t);
+    }
+
+    /* 4. Только dummy — как при первом старте: ключа нет. */
+    {
+        static const char *rows[] = { SEN_DUMMY_LABEL };
+        static const char *srcs[] = { SEN_DUMMY_SOURCE };
+        char *t = sen_test_rows_to_config(rows, srcs, 1);
+
+        check_int(t == NULL, 1, "только тестовая строка = ключа rows нет");
+        g_free(t);
+    }
+
+    /* 5. Подпись может содержать «;» и «|» — формат обязан выжить. */
+    {
+        static const char *rows[] = { "Диск; системный | главный" };
+        static const char *srcs[] = { "drivetemp/0:0:2:0/temp1" };
+        char *t = sen_test_rows_to_config(rows, srcs, 1);
+
+        check(t != NULL, "спецсимволы в подписи не ломают запись");
+        g_free(t);
+    }
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -1814,6 +1918,7 @@ int main(void)
     test_live_tree();
     test_dummy_row_constants();
     test_dummy_value_formatting();
+    test_config_only_enabled_sensors();
     test_default_value_x_after_rows();
     test_nvml_source_prefix();
     test_nvml_bus_slot();
