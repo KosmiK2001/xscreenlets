@@ -219,6 +219,7 @@ static int sen_text_width(cairo_t *cr, const char *text, const char *font)
     return width;
 }
 
+
 /* Высота строки по имени шрифта. Pango отдаёт логические единицы —
  * делить на PANGO_SCALE обязательно, иначе полоса становится в 1024
  * раза выше окна и весь текст исчезает. */
@@ -240,6 +241,30 @@ static int sen_row_height(cairo_t *cr, const char *font)
     g_object_unref(layout);
     pango_font_description_free(fd);
     return height;
+}
+
+/* Реальный шаг строк: НЕ МЕНЬШЕ высоты текста.
+ *
+ * line_step в конфиге — это шаг при компактном шрифте. Пользователь,
+ * увеличивший шрифт в Настройках, получал наезд строк друг на друга:
+ * при line_step=12 и Sans 10 высота строки 13, и вторая ложилась на
+ * первую. Оба места — расчёт высоты окна в init и отрисовка — обязаны
+ * брать шаг отсюда, иначе окно считается по одному шагу, а текст
+ * рисуется по другому, и последняя строка уезжает за нижний край.
+ *
+ * Шрифт меряется тем же Pango, что и отрисовка, на 1x1-поверхности:
+ * отдельная поверхность того же размера не нужна, измерение не зависит
+ * от размеров контекста. */
+static int sen_effective_step(cairo_t *cr, int line_step,
+                             const char *label_font, const char *value_font)
+{
+    int text_h;
+
+    if (!cr)
+        return MAX(line_step, 1);
+    text_h = MAX(sen_row_height(cr, label_font),
+                 sen_row_height(cr, value_font));
+    return MAX(line_step, text_h);
 }
 
 /* Шрифты заданы строками в design-пикселях, окно можно растянуть —
@@ -480,6 +505,13 @@ static cairo_surface_t *sen_render(SenPriv *priv, int width, int height)
                      height - 2 * SEN_MARGIN);
     if (step < 1)
         step = 1;
+    /* Шаг строк не может быть меньше высоты текста, иначе строки
+     * наезжают друг на друга. Пользовательский line_step задаёт шаг при
+     * МЕНЬШЕЙ высоте шрифта, а увеличение шрифта в Настройках об этом
+     * не говорит: при line_step=12 и шрифте Sans 10 высота строки 13,
+     * и вторая строка ложилась на первую. Поэтому шаг расширяется
+     * снизу, если текст выше. */
+    step = sen_effective_step(cr, step, label_font, value_font);
     label_x = sen_scale(priv->label_x, priv->design_width, width, width - 1);
     value_x = sen_scale(priv->value_x, priv->design_width, width, width - 1);
     y = sen_scale(priv->first_row_y, priv->design_height, height, height - 1);
@@ -547,6 +579,11 @@ static void sen_rebuild_cache(SenPriv *priv, int width, int height)
 /* Сериализация строк в «подпись|источник». Определение стоит рядом с
  * sen_save(), но вызывается и из init — прототип нужен здесь. */
 static char *sen_rows_to_config(const SenPriv *priv);
+
+/* Определены ниже, а вызываются из init: и очистка заглушки, и поиск
+ * строки по источнику нужны раньше определения. */
+static guint sen_row_index(SenPriv *priv, const char *source);
+static void sen_drop_dummy_row(SenPriv *priv);
 
 static int sen_init(XsPlugin *p, GKeyFile *kf)
 {
@@ -804,6 +841,14 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
             memcpy(priv->border_color, border_def, sizeof(border_def));
     }
 
+    /* Смесь «тестовая строка + реальные сенсоры» в конфиге — след
+     * прежних сборок, где заглушка не убиралась при включении
+     * сенсора. Убираем: она не должна стоять рядом с настоящими
+     * данными. */
+    if (priv->rows->len > 1 && sen_row_index(priv, SEN_DUMMY_SOURCE)
+                                  != SEN_ROW_NONE)
+        sen_drop_dummy_row(priv);
+
     /* Дефолт: НИ ОДНОГО реального сенсора.
      *
      * Апплет не должен угадывать за пользователя, что показывать. Если
@@ -856,8 +901,19 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * 100px обрезаются по нижнему краю, и последняя температура не
      * видна вообще. Пользовательская высота уважается. */
     if (priv->height_auto) {
-        int need = priv->first_row_y + (int) priv->rows->len * priv->line_step
-                 + SEN_MARGIN * 2;
+        cairo_surface_t *probe =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t *pcr = cairo_create(probe);
+        int step = sen_effective_step(pcr, priv->line_step,
+                                      priv->label_font, priv->value_font);
+        int need;
+
+        cairo_destroy(pcr);
+        cairo_surface_destroy(probe);
+        /* +1 на последнюю строку: базовая линия последней строки стоит
+         * на first_row_y + (n-1)*step, а под ней ещё descender. */
+        need = priv->first_row_y + (int) priv->rows->len * step
+             + SEN_MARGIN * 2;
 
         /* Растёт И уменьшается: снял строки — окно должно сжаться, иначе
          * пользователь получит пустое поле внизу, решив, что это норма. */
@@ -1303,6 +1359,32 @@ static guint sen_row_index(SenPriv *priv, const char *source)
     return SEN_ROW_NONE;
 }
 
+/* Убрать тестовую строку dummy, если она есть.
+ *
+ * Заглушка должна жить ровно тогда, когда не выбран ни один реальный
+ * сенсор. Как только пользователь отметил хоть один, она лишняя: рядом
+ * с настоящими данными она читается как ещё один датчик с неизменным
+ * значением, и это ровно то недоразумение, которое дефолт должен был
+ * устранить.
+ *
+ * Функция безопасна при любом состоянии: строки может не быть, она
+ * может быть единственной, а может не быть и priv->values — на этом
+ * месте мы просто ничего не трогаем. */
+static void sen_drop_dummy_row(SenPriv *priv)
+{
+    guint idx;
+
+    if (!priv || !priv->row_sources)
+        return;
+    idx = sen_row_index(priv, SEN_DUMMY_SOURCE);
+    if (idx == SEN_ROW_NONE)
+        return;
+    g_ptr_array_remove_index(priv->rows, idx);
+    g_ptr_array_remove_index(priv->row_sources, idx);
+    if (priv->values && idx < priv->values->len)
+        g_ptr_array_remove_index(priv->values, idx);
+}
+
 /* Порядок групп: сначала те, где больше сенсоров, потом по имени.
  * Сортировка обязана быть детерминированной, иначе таблицы прыгали бы
  * при каждом открытии Properties. */
@@ -1380,6 +1462,14 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
             /* Отложенная метка (введённая до включения) важнее полного
              * имени: пользователь её уже напечатал. */
             const char *use = pending && *pending ? pending : label;
+
+            /* Тестовая строка живёт ровно до первого выбранного
+             * сенсора. Дальше она лишняя: пользователь отметил, что
+             * хочет видеть, и заглушка рядом с его данными только
+             * мешает — выглядит как ещё один датчик с фиксированным
+             * значением. Убираем её здесь же, в момент включения, а не
+             * при следующей записи в конфиг. */
+            sen_drop_dummy_row(priv);
 
             g_ptr_array_add(priv->rows, g_strdup(use ? use : ""));
             g_ptr_array_add(priv->row_sources, g_strdup(source));

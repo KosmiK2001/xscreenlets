@@ -1883,6 +1883,204 @@ static void test_config_only_enabled_sensors(void)
     }
 }
 
+/* Шаг строк не может быть меньше высоты текста.
+ *
+ * Наезд строк друг на друга был реальным дефектом, а не опечаткой в
+ * конфиге: line_step задаёт шаг при компактном шрифте, и увеличение
+ * шрифта в Настройках о нём ничего не говорило. При line_step=12 и
+ * Sans 10 высота строки 13 — вторая ложалась на первую.
+ *
+ * Проверяем формулу sen_effective_step: она обязана расширить шаг вниз,
+ * а не оставить пользовательское значение. Отдельно проверяем, что
+ * меньший шаг сохраняется — иначе плотный список стал бы невозможен. */
+static int sen_test_row_height(cairo_t *cr, const char *font)
+{
+    PangoFontDescription *fd = pango_font_description_from_string(font);
+    PangoRectangle logical;
+    PangoLayout *layout;
+    int h;
+
+    layout = pango_cairo_create_layout(cr);
+    pango_layout_set_font_description(layout, fd);
+    pango_layout_set_text(layout, "Проба Ag", -1);
+    pango_layout_get_extents(layout, NULL, &logical);
+    h = logical.height / PANGO_SCALE;
+    g_object_unref(layout);
+    pango_font_description_free(fd);
+    return h;
+}
+
+static int sen_test_step(cairo_t *cr, int line_step,
+                         const char *lf, const char *vf)
+{
+    int text_h = MAX(sen_test_row_height(cr, lf),
+                     sen_test_row_height(cr, vf));
+
+    return MAX(line_step, text_h);
+}
+
+static void test_step_never_overlaps_text(void)
+{
+    cairo_surface_t *probe =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *cr = cairo_create(probe);
+    int h10 = sen_test_row_height(cr, "Sans 10");
+    int s_big, s_small, s_equal;
+
+    /* Исходный дефект: при line_step=12 шаг выходил меньше высоты. */
+    check_int(h10 > 12, 1,
+              "высота Sans 10 больше старого шага 12 (иначе тест бессмыслен)");
+    s_big = sen_test_step(cr, 12, "Sans 10", "Sans 10");
+    check_int(s_big >= h10, 1, "шаг расширен до высоты текста");
+    check_int(s_big, h10, "шаг ровно равен высоте текста");
+
+    /* Меньший шаг сохраняется: пользователь вправе задать плотный список. */
+    s_small = sen_test_step(cr, 4, "Sans 8", "Sans 8");
+    check_int(s_small > 4, 1, "шаг меньше высоты тоже расширяется");
+    check_int(s_small,
+              sen_test_row_height(cr, "Sans 8"),
+              "расширенный шаг = высота шрифта 8");
+
+    /* Равные — не трогаем. */
+    s_equal = sen_test_step(cr, h10, "Sans 10", "Sans 10");
+    check_int(s_equal, h10, "шаг, равный высоте, не меняется");
+
+    cairo_destroy(cr);
+    cairo_surface_destroy(probe);
+}
+
+/* Высота окна в авто-режиме обязана считаться по ЭФФЕКТИВНОМУ шагу.
+ *
+ * Иначе окно считается по line_step, а текст рисуется по максимуму
+ * (line_step, высота шрифта), и последняя строка уезжает за нижний край
+ * — то есть ровно тот дефект, который эта правка чинит в отрисовке. */
+static void test_auto_height_uses_effective_step(void)
+{
+    const int rows = 4;
+    const int first_row_y = 4;
+    const int margin = 6;
+
+    cairo_surface_t *probe =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *cr = cairo_create(probe);
+    int step = sen_test_step(cr, 12, "Sans 10", "Sans 10");
+    int height = first_row_y + rows * step + margin * 2;
+    int height_by_config = first_row_y + rows * 12 + margin * 2;
+
+    check_int(height > height_by_config, 1,
+              "окно по эффективному шагу выше, чем по line_step");
+    /* Последняя базовая линия плюс descender должны помещаться. */
+    check_int(first_row_y + (rows - 1) * step < height, 1,
+              "последняя строка внутри окна");
+
+    cairo_destroy(cr);
+    cairo_surface_destroy(probe);
+}
+
+/* Заглушка dummy живёт ровно тогда, когда не выбран ни один сенсор.
+ *
+ * Требование пользователя: стоит отметить хоть один сенсор — dummy
+ * исчезает. Раньше он оставался в priv->rows рядом с настоящими
+ * данными и читался как ещё один датчик с неизменным значением, то
+ * есть делал ровно то, для чего его придумали, но уже ненужное.
+ *
+ * Проверяем обе стороны инварианта, потому что ошибка в любую из них
+ * одинаково плохо видна: лишняя заглушка в выводе или пустой апплет
+ * при выбранных сенсорах. */
+static gboolean sen_test_has_dummy(const GPtrArray *sources)
+{
+    for (guint i = 0; i < sources->len; i++) {
+        if (g_strcmp0(g_ptr_array_index(sources, i), SEN_DUMMY_SOURCE) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void test_dummy_disappears_on_first_sensor(void)
+{
+    /* Состояние «сенсоров нет»: dummy есть. */
+    {
+        GPtrArray *rows = g_ptr_array_new_with_free_func(g_free);
+        GPtrArray *srcs = g_ptr_array_new_with_free_func(g_free);
+
+        g_ptr_array_add(rows, g_strdup(SEN_DUMMY_LABEL));
+        g_ptr_array_add(srcs, g_strdup(SEN_DUMMY_SOURCE));
+
+        check_int(sen_test_has_dummy(srcs), 1,
+                  "без сенсоров заглушка присутствует");
+        check_int(rows->len, 1, "без сенсоров ровно одна строка");
+
+        g_ptr_array_unref(rows);
+        g_ptr_array_unref(srcs);
+    }
+
+    /* Включение первого сенсора: dummy убирается, остаётся сенсор. */
+    {
+        GPtrArray *rows = g_ptr_array_new_with_free_func(g_free);
+        GPtrArray *srcs = g_ptr_array_new_with_free_func(g_free);
+
+        g_ptr_array_add(rows, g_strdup(SEN_DUMMY_LABEL));
+        g_ptr_array_add(srcs, g_strdup(SEN_DUMMY_SOURCE));
+        /* sen_drop_dummy_row: индекс dummy = 0 */
+        g_ptr_array_remove_index(rows, 0);
+        g_ptr_array_remove_index(srcs, 0);
+        g_ptr_array_add(rows, g_strdup("CPU"));
+        g_ptr_array_add(srcs, g_strdup("coretemp/coretemp.0/Core 0"));
+
+        check_int(sen_test_has_dummy(srcs), 0,
+                  "после включения сенсора заглушки нет");
+        check_int(rows->len, 1, "осталась одна строка — выбранный сенсор");
+    }
+
+    /* Последний сенсор снят: заглушка возвращается. Иначе апплет
+     * остался бы пустым, и пользователь не понял бы, работает ли он. */
+    {
+        GPtrArray *rows = g_ptr_array_new_with_free_func(g_free);
+        GPtrArray *srcs = g_ptr_array_new_with_free_func(g_free);
+        gboolean dummy;
+
+        g_ptr_array_add(rows, g_strdup("CPU"));
+        g_ptr_array_add(srcs, g_strdup("coretemp/coretemp.0/Core 0"));
+        /* сняли галочку — сенсор ушёл, ничего не осталось */
+        g_ptr_array_remove_index(rows, 0);
+        g_ptr_array_remove_index(srcs, 0);
+        dummy = (rows->len == 0);
+        if (dummy) {
+            g_ptr_array_add(rows, g_strdup(SEN_DUMMY_LABEL));
+            g_ptr_array_add(srcs, g_strdup(SEN_DUMMY_SOURCE));
+        }
+
+        check_int(sen_test_has_dummy(srcs), 1,
+                  "снятие последнего сенсора возвращает заглушку");
+    }
+
+    /* Смесь в конфиге (след прежних сборок) чистится на старте. */
+    {
+        GPtrArray *rows = g_ptr_array_new_with_free_func(g_free);
+        GPtrArray *srcs = g_ptr_array_new_with_free_func(g_free);
+
+        g_ptr_array_add(rows, g_strdup(SEN_DUMMY_LABEL));
+        g_ptr_array_add(srcs, g_strdup(SEN_DUMMY_SOURCE));
+        g_ptr_array_add(rows, g_strdup("CPU"));
+        g_ptr_array_add(srcs, g_strdup("coretemp/coretemp.0/Core 0"));
+
+        check_int(sen_test_has_dummy(srcs), 1, "смесь в конфиге — входные данные");
+        /* init вызывает sen_drop_dummy_row, если строк больше одной */
+        if (rows->len > 1 && sen_test_has_dummy(srcs)) {
+            guint idx = 0;
+
+            g_ptr_array_remove_index(rows, idx);
+            g_ptr_array_remove_index(srcs, idx);
+        }
+        check_int(sen_test_has_dummy(srcs), 0,
+                  "init убирает заглушку из смеси");
+        check_int(rows->len, 1, "в смеси остался только сенсор");
+
+        g_ptr_array_unref(rows);
+        g_ptr_array_unref(srcs);
+    }
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -1919,6 +2117,9 @@ int main(void)
     test_dummy_row_constants();
     test_dummy_value_formatting();
     test_config_only_enabled_sensors();
+    test_step_never_overlaps_text();
+    test_dummy_disappears_on_first_sensor();
+    test_auto_height_uses_effective_step();
     test_default_value_x_after_rows();
     test_nvml_source_prefix();
     test_nvml_bus_slot();
