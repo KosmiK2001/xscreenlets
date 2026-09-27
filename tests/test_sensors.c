@@ -1,5 +1,6 @@
 /* test_sensors.c — тесты ядра sensors: парсер hwmon, формат, скругление. */
 #include "sensors_core.h"
+#include "sensors_nvml.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -988,13 +989,24 @@ static void test_every_config_row_has_reading(void)
         const char *bar = strchr(parts[i], '|');
         const char *source;
         SensorReading *r;
+        gboolean found_any = FALSE;
 
         if (!bar || !*(bar + 1))
             continue;   /* строка без источника — не эта проверка */
         source = bar + 1;
         total++;
         r = sensor_find_reading(found, source);
-        if (!r) {
+        found_any = r != NULL;
+        /* Источник NVIDIA лежит не в hwmon, а в NVML, и проверять его
+         * нужно тем же способом, каким плагин его читает: поиск по
+         * дереву для «nvidia/…» всегда даёт «нет», и строка карты
+         * была бы объявлена битой. */
+        if (!r && nvml_source_is_nvidia(source)) {
+            gdouble nv = 0.0;
+
+            found_any = nvml_read_value(source, &nv);
+        }
+        if (!found_any) {
             bad++;
             printf("  ПРОВАЛ: источник «%s» не находит сенсор "
                    "(строка конфига «%s»)\n", source, parts[i]);
@@ -1519,6 +1531,109 @@ static void test_no_type_file_means_temperature(void)
     fx_free(&f);
 }
 
+/* NVIDIA через NVML: идентификатор строки, чтение, отсутствие NVML.
+ *
+ * Эти тесты НЕ требуют карты: на машине без NVIDIA nvml_open() обязан
+ * вернуть FALSE, и плагин — продолжить работу на одних hwmon-сенсорах.
+ * Проверяется именно это, плюс то, что источник nvidia/ опознаётся по
+ * префиксу и не ищется в sysfs (где его быть не может).
+ */
+static void test_nvml_source_prefix(void)
+{
+    check_int(nvml_source_is_nvidia("nvidia/GPU-abc/gpu"), 1,
+              "источник nvidia/ опознан");
+    check_int(nvml_source_is_nvidia("nvidia/GPU-abc/memory"), 1,
+              "источник памяти опознан");
+    check_int(nvml_source_is_nvidia("coretemp/0000:00:04.0/temp1"), 0,
+              "hwmon-источник не считается nvidia");
+    check_int(nvml_source_is_nvidia(""), 0, "пустая строка не nvidia");
+    check_int(nvml_source_is_nvidia(NULL), 0, "NULL не nvidia");
+}
+
+/* Слот для синтетического пути карты. Раньше sensor_bus_slot() на
+ * «nvml/GPU-…» возвращала пустую строку, и строка карты в таблице
+ * настроек оставалась бы без названия устройства. */
+static void test_nvml_bus_slot(void)
+{
+    char *s;
+
+    s = sensor_bus_slot("nvml/GPU-3aaa4916-ec48-3461-1a64-df9c72a1");
+    check(s != NULL, "слот карты построен");
+    if (s) {
+        check_str(s, "GPU-3aaa4916-ec48-3461-1a64-df9c72a1",
+                     "слот = UUID карты");
+        g_free(s);
+    }
+    /* Группа получается по имени чипа, шины у карты нет. */
+    s = sensor_group_name("nvidia", "nvml/GPU-abc");
+    check_str(s, "nvidia", "группа карты = nvidia");
+    g_free(s);
+}
+
+/* Пустое значение на неизвестном/битом источнике. Плагин обязан
+ * отличать «не знаю» от 0 градусов — иначе неисправная карта или снятая
+ * видеокарта показали бы «0.0°C», как это делал канал вентилятора. */
+static void test_nvml_read_unknown_is_nan(void)
+{
+    gdouble v = 0.0;
+    gboolean ok;
+
+    ok = nvml_read_value("nvidia/GPU-nonexistent/gpu", &v);
+    check_int(ok, 0, "несуществующая карта не даёт значение");
+    check_int(isnan(v), 1, "значение = NAN, а не 0");
+
+    ok = nvml_read_value("nvidia/GPU-abc/no-such-channel", &v);
+    check_int(ok, 0, "неизвестный канал не даёт значение");
+    check_int(isnan(v), 1, "значение = NAN");
+
+    ok = nvml_read_value("coretemp/0000:00:04.0/temp1", &v);
+    check_int(ok, 0, "hwmon-источник не читается через NVML");
+}
+
+/* Живой NVML, если карта есть. На машине без NVIDIA проверка
+ * пропускается — это штатное состояние, не сбой. */
+static void test_nvml_live_if_present(void)
+{
+    SensorList *list = nvml_sensor_list_read();
+
+    if (!list) {
+        printf("  пропуск: NVML недоступен (машина без NVIDIA)\n");
+        checks++;
+        return;
+    }
+    check_int(list->chips->len > 0, 1, "NVML вернул хотя бы одну карту");
+    if (list->chips->len > 0) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+        gdouble v = 0.0;
+        char *row;
+
+        check_str(c->chip, "nvidia", "чип карты назван nvidia");
+        check(c->device && *c->device, "у карты есть идентификатор");
+        check_int(c->readings->len > 0, 1, "у карты есть каналы");
+        check_int(c->readings->len < 3, 1,
+                  "каналов не больше двух (gpu и memory)");
+
+        row = sensor_row_id(c->chip, c->device, "gpu");
+        check(row != NULL && g_str_has_prefix(row, "nvidia/"),
+              "идентификатор строки карты с префиксом nvidia/");
+        /* Значение канала обязано совпадать с тем, что вернул список. */
+        if (c->readings->len > 0) {
+            SensorReading *r = g_ptr_array_index(c->readings, 0);
+
+            if (nvml_read_value(row, &v)) {
+                /* NVML отдаёт ЦЕЛЫЕ градусы: значение обязано совпасть
+                 * с прочитанным при обходе, без деления на тысячу. */
+                check_dbl(v, r->celsius, 0.001,
+                          "повторное чтение того же канала");
+                check(v > -50.0 && v < 150.0,
+                      "температура GPU в разумных пределах");
+            }
+        }
+        g_free(row);
+    }
+    sensor_list_free(list);
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -1552,6 +1667,10 @@ int main(void)
     test_rounding();
     test_rounded_region();
     test_live_tree();
+    test_nvml_source_prefix();
+    test_nvml_bus_slot();
+    test_nvml_read_unknown_is_nan();
+    test_nvml_live_if_present();
     test_channel_type_filter();
     test_no_type_file_means_temperature();
     test_auto_height_fits_all_rows();

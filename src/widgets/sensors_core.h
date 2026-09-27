@@ -80,6 +80,8 @@ typedef struct {
 #define SENSOR_INVALID_MILLI (-128000)
 
 void sensor_list_free(SensorList *list);
+void sensor_reading_free(gpointer data);
+void sensor_chip_free(gpointer data);
 
 /* Разбор цвета из конфига. Принимает ВСЕ формы, которые пишут конфиги
  * этого проекта: «0.2,0.75,1.0,1.0» (legacy network_monitor), «rgb(r,g,b)»

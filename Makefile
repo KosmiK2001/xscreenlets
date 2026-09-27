@@ -107,10 +107,11 @@ $(TARGET_NETWORK_PLUGIN): $(BUILD_DIR) build/network_monitor.o build/network_mon
 
 $(BUILD_DIR)/sensors_core.o: src/widgets/sensors_core.c src/widgets/sensors_core.h
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
-$(BUILD_DIR)/sensors.o: src/widgets/sensors.c src/widgets/sensors_core.h include/xs_api.h src/core/common.h
+$(BUILD_DIR)/sensors_nvml.o: src/widgets/sensors_nvml.c src/widgets/sensors_nvml.h src/widgets/sensors_core.h
+$(BUILD_DIR)/sensors.o: src/widgets/sensors.c src/widgets/sensors_core.h src/widgets/sensors_nvml.h include/xs_api.h src/core/common.h
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
-$(TARGET_SENSORS_PLUGIN): $(BUILD_DIR) build/sensors.o build/sensors_core.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/sensors.o build/sensors_core.o $(LDFLAGS_PLUGIN)
+$(TARGET_SENSORS_PLUGIN): $(BUILD_DIR) build/sensors.o build/sensors_core.o build/sensors_nvml.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/sensors.o build/sensors_core.o build/sensors_nvml.o $(LDFLAGS_PLUGIN) -ldl
 
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o $(LDFLAGS_PLUGIN)
@@ -132,8 +133,8 @@ $(BUILD_DIR)/test_disk_monitor: tests/test_disk_monitor.c src/widgets/disk_monit
 
 $(BUILD_DIR)/test_network_monitor: tests/test_network_monitor.c src/widgets/network_monitor_core.c src/widgets/network_monitor_core.h
 	$(CC) $(CFLAGS) -o $@ tests/test_network_monitor.c src/widgets/network_monitor_core.c $(LDFLAGS_PLUGIN)
-$(BUILD_DIR)/test_sensors: tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_core.h
-	$(CC) $(CFLAGS) -o $@ tests/test_sensors.c src/widgets/sensors_core.c $(LDFLAGS_PLUGIN)
+$(BUILD_DIR)/test_sensors: tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_core.h src/widgets/sensors_nvml.c src/widgets/sensors_nvml.h
+	$(CC) $(CFLAGS) -o $@ tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_nvml.c $(LDFLAGS_PLUGIN) -ldl
 
 test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors
 	$(BUILD_DIR)/test_memory_monitor

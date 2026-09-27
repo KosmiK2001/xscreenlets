@@ -17,6 +17,7 @@
  *    «кнопка не работает» — и проверено это на практике.
  */
 #include "sensors_core.h"
+#include "sensors_nvml.h"
 
 #include "xs_api.h"
 #include "common.h"
@@ -127,6 +128,12 @@ static gboolean sen_source_is_broken(SenPriv *priv, SensorList *found,
 {
     if (!source || !*source)
         return TRUE;
+    /* Источник NVIDIA не лежит в sysfs, поэтому поиск по дереву hwmon
+     * для него всегда даёт «нет». Без этой проверки миграция на каждом
+     * запуске пыталась бы «починить» живую строку карты, а чистка
+     * мёртвых строк — удалила бы её совсем. */
+    if (nvml_source_is_nvidia(source))
+        return FALSE;
     if (!found)
         return FALSE;   /* дерево не прочитано — чинить нечего */
     return sensor_find_reading(found, source) == NULL;
@@ -394,9 +401,21 @@ static void sen_read_values(SenPriv *priv)
     }
     for (i = 0; i < priv->rows->len; i++) {
         const char *row_id = g_ptr_array_index(priv->row_sources, i);
-        SensorReading *r = sensor_find_reading(list, row_id);
+        SensorReading *r;
         char *text = NULL;
 
+        /* NVIDIA не отдаёт hwmon-узел, её каналы лежат в NVML. Сначала
+         * пробуем sysfs, и только если источник помечен как nvidia/ —
+         * идём в NVML: иначе строка с карты вечно давала бы прочерк. */
+        r = list ? sensor_find_reading(list, row_id) : NULL;
+        if (!r && nvml_source_is_nvidia(row_id)) {
+            gdouble c = 0.0;
+
+            if (nvml_read_value(row_id, &c))
+                text = sensor_format_value(c, priv->fahrenheit, TRUE);
+            else
+                text = g_strdup("—");
+        }
         if (r) {
             if (r->read_error)
                 text = g_strdup("—");     /* канал есть, значение неизвестно */
@@ -700,8 +719,9 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
                     const char *src = g_ptr_array_index(priv->row_sources,
                                                         i);
 
-                    if (src && *src && sensor_find_reading(now, src))
-                        continue;   /* строка жива */
+                    if (src && *src && (sensor_find_reading(now, src)
+                                        || nvml_source_is_nvidia(src)))
+                        continue;   /* строка жива (hwmon или NVML) */
                     g_ptr_array_remove_index(priv->rows, i);
                     g_ptr_array_remove_index(priv->row_sources, i);
                     i--;   /* remove_index сдвинул хвост на себя */
@@ -1510,6 +1530,43 @@ static GtkWidget *sen_sensor_list(SenDialogContext *ctx)
         }
         g_free(group);
         g_free(short_slot);
+    }
+
+    /* Карты NVIDIA в дереве hwmon отсутствуют (у драйвера nvidia нет
+     * /sys/class/hwmon-узла), поэтому список настроек дополняем NVML.
+     * Без этого в таблице не было бы ни одной строки карты, и
+     * выбрать её было бы негде. */
+    {
+        SensorList *nv = nvml_sensor_list_read();
+
+        if (nv) {
+            for (guint i = 0; i < nv->chips->len; i++) {
+                SensorChip *c = g_ptr_array_index(nv->chips, i);
+                char *group = sensor_group_name(c->chip, c->dev_path);
+                char *short_slot = sensor_bus_slot(c->dev_path);
+
+                for (guint j = 0; j < c->readings->len; j++) {
+                    SensorReading *r = g_ptr_array_index(c->readings, j);
+                    GPtrArray *rows = g_hash_table_lookup(groups, group);
+
+                    if (!rows) {
+                        rows = g_ptr_array_new();
+                        g_hash_table_insert(groups, g_strdup(group), rows);
+                        g_ptr_array_add(order, g_strdup(group));
+                    }
+                    g_ptr_array_add(kind, g_strdup(r->label));
+                    g_ptr_array_add(slot, g_strdup(short_slot));
+                    g_ptr_array_add(source,
+                                    sensor_row_id(c->chip, c->device,
+                                                  r->label));
+                    g_ptr_array_add(rows, GUINT_TO_POINTER(kind->len - 1));
+                    total++;
+                }
+                g_free(group);
+                g_free(short_slot);
+            }
+            sensor_list_free(nv);
+        }
     }
     g_print("sensors: строк=%u групп=%u\n", total, order->len);
 

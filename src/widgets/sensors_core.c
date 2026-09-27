@@ -21,7 +21,11 @@ static gint sensor_reading_cmp(gconstpointer a, gconstpointer b)
     return g_strcmp0(ra->label, rb->label);
 }
 
-static void sensor_reading_free(gpointer data)
+/* Освобождение элементов списка. Сделано не-static: sensors_nvml.c
+ * собирает SensorChip/SensorReading для карт NVIDIA и обязан освобождать
+ * их ТЕМ ЖЕ способом, что и список hwmon. Своя копия free здесь
+ * разошлась бы с этой при первом же добавленном поле в структуре. */
+void sensor_reading_free(gpointer data)
 {
     SensorReading *r = data;
 
@@ -33,7 +37,7 @@ static void sensor_reading_free(gpointer data)
     g_free(r);
 }
 
-static void sensor_chip_free(gpointer data)
+void sensor_chip_free(gpointer data)
 {
     SensorChip *c = data;
 
@@ -536,7 +540,21 @@ char *sensor_group_name(const char *chip, const char *dev_path)
  * «0000», «1-2d». Это то, что видит пользователь в таблице. */
 char *sensor_bus_slot(const char *dev_path)
 {
-    char *slot = sensors_slot_from_path(dev_path);
+    char *slot;
+
+    /* Источники без sysfs-пути. У карт NVIDIA путь синтетический
+     * («nvml/GPU-3aaa…»), разбирать его на bus/device нечего, и слот
+     * вышел бы пустым — строка в таблице осталась бы без названия
+     * устройства. Отдаём последний значимый сегмент пути: для карты это
+     * её UUID, однозначно её идентифицирующий и устойчивый к смене
+     * порядка перечисления, в отличие от индекса. */
+    if (!dev_path || g_str_has_prefix(dev_path, "nvml/")) {
+        const char *last = dev_path ? strrchr(dev_path, '/') : NULL;
+
+        return g_strdup(last ? last + 1 : (dev_path ? dev_path : ""));
+    }
+
+    slot = sensors_slot_from_path(dev_path);
 
     if (!slot)
         return g_strdup("");
