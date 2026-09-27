@@ -121,6 +121,14 @@ $(BUILD_DIR)/conlog.o: src/widgets/conlog.c src/widgets/conlog_core.h include/xs
 $(TARGET_CONLOG_PLUGIN): $(BUILD_DIR) build/conlog.o build/conlog_core.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/conlog.o build/conlog_core.o $(LDFLAGS_PLUGIN)
 
+# Урезанная версия conlog: только вывод строк, без conlog_core.
+# Что убрано и как возвращать — src/widgets/CONLOG-FUNCTIONALITY.md.
+# conlog.c и conlog_core.c остаются на месте нетронутыми.
+$(BUILD_DIR)/conlog_min.o: src/widgets/conlog_min.c include/xs_api.h src/core/common.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+$(BUILD_DIR)/conlog_min.so: $(BUILD_DIR) build/conlog_min.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/conlog_min.o $(LDFLAGS_PLUGIN)
+
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o build/process_list_core.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o build/process_list_core.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
