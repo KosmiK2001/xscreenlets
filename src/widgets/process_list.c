@@ -23,7 +23,9 @@
 #define PL_UPDATE_DEFAULT     1000
 #define PL_ROWS_DEFAULT       8
 #define PL_MAX_PROCESSES      16384
-#define PL_NAME_MAX           96
+/* PL_NAME_MAX и PlProcess живут в process_list_core.h: разбор /proc и
+ * структура процесса вынесены туда ради тестов без X. */
+#include "process_list_core.h"
 #define PL_PADDING             4.0
 #define PL_TEXT_PADDING        2.0
 #define PL_COL_GAP             4.0
@@ -35,19 +37,6 @@
 #define PL_HEADER_Y           21.0
 #define PL_ROWS_Y             36.0
 #define PL_PROC_READ_SIZE     8192
-
-typedef struct {
-    gint pid;
-    guint64 cpu_ticks;
-    guint64 start_time;
-    guint64 disk_read_bytes;
-    guint64 disk_write_bytes;
-    gint64 rss_bytes;
-    gint cpu_tenths;                 /* 1000 = 100.0 percent */
-    gint64 io_bytes_per_sec;
-    gboolean running;
-    char name[PL_NAME_MAX];
-} PlProcess;
 
 typedef enum {
     PL_SORT_NAME,
@@ -93,6 +82,13 @@ typedef struct {
     guint running_count;
     gint64 last_sample_us;
     int proc_fd;
+    /* Читать ли io/rss для ВСЕХ процессов или только для видимых.
+     * Нужно всем, только когда по этой колонке идёт сортировка: иначе
+     * порядок определялся бы по нулям. При сортировке по CPU/NAME/PID
+     * эти файлы читаются вторым проходом только для top-N — на машине
+     * с 1000+ процессов это снимает 2/3 всех openat. */
+    gboolean want_io_everywhere;
+    gboolean want_rss_everywhere;
     char *read_buffer;
 } PrivData;
 
@@ -126,22 +122,6 @@ static gboolean pl_number(const char *text, guint64 *value)
     errno = 0;
     result = g_ascii_strtoull(text, &end, 10);
     if (errno == ERANGE || end == text || *end != '\0')
-        return FALSE;
-    *value = result;
-    return TRUE;
-}
-
-static gboolean pl_number_prefix(const char *text, guint64 *value)
-{
-    gchar *end = NULL;
-    guint64 result;
-
-    if (!text || !*text)
-        return FALSE;
-    errno = 0;
-    result = g_ascii_strtoull(text, &end, 10);
-    if (errno == ERANGE || end == text ||
-        (*end != '\0' && !g_ascii_isspace(*end) && *end != 'k' && *end != 'K'))
         return FALSE;
     *value = result;
     return TRUE;
@@ -204,33 +184,6 @@ static void pl_read_color(PrivData *priv, const char *key,
     }
 }
 
-static gboolean pl_parse_status(const char *text, gint64 *rss_kb,
-                                gboolean *running)
-{
-    gchar **lines = g_strsplit(text, "\n", -1);
-    gboolean found_rss = FALSE;
-    guint i;
-
-    if (running)
-        *running = FALSE;
-    for (i = 0; lines[i]; i++) {
-        if (g_str_has_prefix(lines[i], "State:") &&
-            (strchr(lines[i] + 6, 'R') || strchr(lines[i] + 6, 'r'))) {
-            if (running)
-                *running = TRUE;
-        } else if (g_str_has_prefix(lines[i], "VmRSS:")) {
-            guint64 kb;
-            if (pl_number_prefix(g_strstrip(lines[i] + 6), &kb) &&
-                kb <= G_MAXINT64) {
-                *rss_kb = (gint64)kb;
-                found_rss = TRUE;
-            }
-        }
-    }
-    g_strfreev(lines);
-    return found_rss;
-}
-
 static gboolean pl_read_proc(PrivData *priv, const char *relative,
                              char **data)
 {
@@ -267,97 +220,96 @@ static gboolean pl_read_proc(PrivData *priv, const char *relative,
     return TRUE;
 }
 
-static gboolean pl_read_io(PrivData *priv, gint pid,
-                           guint64 *read_bytes, guint64 *write_bytes)
+/* Дочитать «дорогие» поля для процесса, который попал в видимые строки.
+ *
+ * stat нужен ВСЕМ процессам: по нему сортировка по CPU и подсчёт. А вот
+ * statm и io нужны только тем, кто реально рисуется — их row_count
+ * (по умолчанию 8) из тысячи. Раньше оба открывались на каждый pid:
+ * 2/3 всех openat демона, причём 10% запросов io — ENOENT на потоках
+ * ядра, то есть работа впустую. */
+static void pl_fill_extra(PrivData *priv, PlProcess *proc)
 {
     char relative[64];
-    char *text = NULL;
-    g_auto(GStrv) lines = NULL;
+    char *data;
+    gsize page_size;
+    PlIo io;
 
-    g_snprintf(relative, sizeof(relative), "%d/io", pid);
-    if (!pl_read_proc(priv, relative, &text))
-        return FALSE;
-    lines = g_strsplit(text, "\n", -1);
-    for (guint i = 0; lines[i]; i++) {
-        gchar *end = NULL;
-        guint64 value;
+    if (!priv || !proc)
+        return;
+    page_size = (gsize)sysconf(_SC_PAGESIZE);
+    if (page_size > 0) {
+        g_snprintf(relative, sizeof(relative), "%d/statm", proc->pid);
+        if (pl_read_proc(priv, relative, &data)) {
+            guint64 rss = 0;
 
-        if (g_str_has_prefix(lines[i], "read_bytes:")) {
-            errno = 0;
-            value = g_ascii_strtoull(lines[i] + 11, &end, 10);
-            if (end != lines[i] + 11 && errno != ERANGE)
-                *read_bytes = value;
-        } else if (g_str_has_prefix(lines[i], "write_bytes:")) {
-            errno = 0;
-            value = g_ascii_strtoull(lines[i] + 12, &end, 10);
-            if (end != lines[i] + 12 && errno != ERANGE)
-                *write_bytes = value;
+            if (pl_core_parse_statm(data, (guint)page_size, &rss) &&
+                rss <= (guint64)G_MAXINT64)
+                proc->rss_bytes = (gint64)rss;
         }
     }
-    return *read_bytes != G_MAXUINT64 && *write_bytes != G_MAXUINT64;
+    if (!priv->want_io_everywhere) {
+        g_snprintf(relative, sizeof(relative), "%d/io", proc->pid);
+        if (pl_read_proc(priv, relative, &data) &&
+            pl_core_parse_io(data, &io)) {
+            proc->disk_read_bytes = io.read_bytes;
+            proc->disk_write_bytes = io.write_bytes;
+        }
+    }
 }
 
 static PlProcess *pl_read_pid(PrivData *priv, const char *pid_text,
                               gboolean *running)
 {
     char relative[64];
-    char *stat_data;
-    char *status_data;
-    g_autofree char *name = NULL;
-    const char *open_paren;
-    const char *close_paren;
-    gchar **fields = NULL;
-    guint64 pid;
-    guint64 utime;
-    guint64 stime;
-    guint64 start_time;
-    gsize name_length;
-    PlProcess *proc;
-    gint64 rss_kb = 0;
+    char *data;
     gboolean is_running = FALSE;
+    guint64 pid;
+    gsize page_size;
+    PlProcess *proc;
+    PlIo io;
 
     if (!g_ascii_isdigit(pid_text[0]) || !pl_number(pid_text, &pid) ||
         pid > G_MAXINT)
         return NULL;
     g_snprintf(relative, sizeof(relative), "%d/stat", (gint)pid);
-    if (!pl_read_proc(priv, relative, &stat_data))
+    if (!pl_read_proc(priv, relative, &data))
         return NULL;
-    open_paren = strchr(stat_data, '(');
-    close_paren = open_paren ? strrchr(open_paren, ')') : NULL;
-    if (!open_paren || !close_paren)
-        return NULL;
-    name_length = (gsize)(close_paren - open_paren - 1);
-    name = g_strndup(open_paren + 1, name_length);
-    fields = g_strsplit_set(close_paren + 1, " \t", -1);
-    if (!fields[0] || !fields[1] || !fields[9] || !fields[10] ||
-        !fields[11] || !fields[12] || !fields[18] || !fields[19] ||
-        !pl_number(fields[11], &utime) || !pl_number(fields[12], &stime) ||
-        !pl_number(fields[19], &start_time)) {
-        g_strfreev(fields);
-        return NULL;
-    }
-    g_strfreev(fields);
-    g_snprintf(relative, sizeof(relative), "%d/status", (gint)pid);
-    if (!pl_read_proc(priv, relative, &status_data))
-        return NULL;
-    pl_parse_status(status_data, &rss_kb, &is_running);
-
     proc = g_new0(PlProcess, 1);
     proc->pid = (gint)pid;
-    proc->cpu_ticks = utime + stime;
-    proc->start_time = start_time;
-    proc->disk_read_bytes = G_MAXUINT64;
-    proc->disk_write_bytes = G_MAXUINT64;
-    (void)pl_read_io(priv, proc->pid, &proc->disk_read_bytes,
-                     &proc->disk_write_bytes);
-    proc->rss_bytes = rss_kb > 0 &&
-                      rss_kb <= G_MAXINT64 / 1024 ?
-                      rss_kb * 1024 : 0;
-    proc->running = is_running;
-    g_strlcpy(proc->name, name, sizeof(proc->name));
+    if (!pl_core_parse_stat(data, proc, &is_running)) {
+        g_free(proc);
+        return NULL;
+    }
     *running = is_running;
+
+    /* statm и io читаются здесь только когда они нужны ВСЕМ процессам,
+     * то есть когда по ним идёт сортировка: иначе порядок был бы по
+     * нулям. Когда сортировка по CPU/NAME/PID, их дочитывает второй
+     * проход pl_fill_extra() — уже для видимых строк. */
+    if (!priv->want_rss_everywhere)
+        return proc;
+    page_size = (gsize)sysconf(_SC_PAGESIZE);
+    if (page_size > 0) {
+        g_snprintf(relative, sizeof(relative), "%d/statm", proc->pid);
+        if (pl_read_proc(priv, relative, &data)) {
+            guint64 rss = 0;
+
+            if (pl_core_parse_statm(data, (guint)page_size, &rss) &&
+                rss <= (guint64)G_MAXINT64)
+                proc->rss_bytes = (gint64)rss;
+        }
+    }
+    if (priv->want_io_everywhere) {
+        g_snprintf(relative, sizeof(relative), "%d/io", proc->pid);
+        if (pl_read_proc(priv, relative, &data) &&
+            pl_core_parse_io(data, &io)) {
+            proc->disk_read_bytes = io.read_bytes;
+            proc->disk_write_bytes = io.write_bytes;
+        }
+    }
     return proc;
 }
+
 
 static const char *pl_sort_name(guint sort)
 {
@@ -412,34 +364,6 @@ static gint pl_compare(gconstpointer a, gconstpointer b, gpointer data)
     return pa->pid < pb->pid ? -1 : pa->pid > pb->pid ? 1 : 0;
 }
 
-static gint64 pl_online_cpu_count(void)
-{
-    g_autofree char *online = NULL;
-
-    if (g_file_get_contents("/sys/devices/system/cpu/online", &online,
-                            NULL, NULL)) {
-        g_auto(GStrv) parts = g_strsplit(online, ",", -1);
-        guint64 count = 0;
-
-        for (guint i = 0; parts[i]; i++) {
-            guint64 first;
-            guint64 last;
-
-            if (sscanf(parts[i], "%" G_GUINT64_FORMAT "-%" G_GUINT64_FORMAT,
-                       &first, &last) == 2) {
-                if (last >= first && last < 100000)
-                    count += last - first + 1;
-            } else if (pl_number(g_strstrip(parts[i]), &first) &&
-                       first < 100000) {
-                count++;
-            }
-        }
-        if (count)
-            return (gint64)count;
-    }
-    return (gint64)MAX((long)sysconf(_SC_NPROCESSORS_ONLN), 1L);
-}
-
 static void pl_rebuild_rows(PrivData *priv)
 {
     GPtrArray *rows = g_ptr_array_new_with_free_func(pl_process_free);
@@ -466,6 +390,7 @@ static void pl_sample(PrivData *priv)
     guint i;
     gint64 now = pl_now_us();
     gint64 elapsed_us = now - priv->last_sample_us;
+    gint64 cores_online;
     long ticks_per_second = sysconf(_SC_CLK_TCK);
 
     if (ticks_per_second <= 0)
@@ -475,6 +400,12 @@ static void pl_sample(PrivData *priv)
     priv->last_sample_us = now;
     priv->process_count = 0;
     priv->running_count = 0;
+    /* io читается только если влияет на порядок или на вывод. Раньше
+     * файл открывался на каждый pid безусловно — 10% запросов к io были
+     * ENOENT на потоках ядра, то есть работа впустую. */
+    priv->want_io_everywhere =
+        pl_core_needs_io(TRUE, priv->sorting.sort == PL_SORT_IO);
+    priv->want_rss_everywhere = (priv->sorting.sort == PL_SORT_MEM);
 
     directory = g_dir_open("/proc", 0, NULL);
     if (directory) {
@@ -496,39 +427,18 @@ static void pl_sample(PrivData *priv)
         g_dir_close(directory);
     }
 
+    /* Число ядер читается ОДИН раз на сэмпл, а не на каждый процесс:
+     * раньше pl_online_cpu_count() стоял внутри этого цикла и перечитывал
+     * sysfs 1021 раз за тик. */
+    cores_online = priv->cpu_basis == 1 ? pl_core_online_cores() : 0;
     for (i = 0; i < current->len; i++) {
         PlProcess *proc = g_ptr_array_index(current, i);
         PlProcess *old = g_hash_table_lookup(priv->previous,
                                              GINT_TO_POINTER(proc->pid));
 
-        if (old && old->start_time == proc->start_time) {
-            if (proc->cpu_ticks >= old->cpu_ticks) {
-                guint64 delta = proc->cpu_ticks - old->cpu_ticks;
-                /* cpu_tenths is 1000 = 100.0% of one logical thread.
-                 * CPU ticks are CLK_TCK units; elapsed_us is microseconds. */
-                gdouble tenths = 100.0 * (gdouble)delta * 10000000.0 /
-                                ((gdouble)ticks_per_second *
-                                 (gdouble)elapsed_us);
-                if (priv->cpu_basis == 1)
-                    tenths /= (gdouble)pl_online_cpu_count();
-                proc->cpu_tenths = (gint)CLAMP((gint64)(tenths + 0.5),
-                                               (gint64)0, (gint64)G_MAXINT);
-            }
-            if (proc->disk_read_bytes != G_MAXUINT64 &&
-                proc->disk_write_bytes != G_MAXUINT64 &&
-                old->disk_read_bytes != G_MAXUINT64 &&
-                old->disk_write_bytes != G_MAXUINT64 &&
-                proc->disk_read_bytes >= old->disk_read_bytes &&
-                proc->disk_write_bytes >= old->disk_write_bytes) {
-                guint64 delta = (proc->disk_read_bytes -
-                                 old->disk_read_bytes) +
-                                (proc->disk_write_bytes -
-                                 old->disk_write_bytes);
-                guint64 scaled = delta * G_GUINT64_CONSTANT(1000000);
-                proc->io_bytes_per_sec = (gint64)MIN(
-                    scaled / (guint64)elapsed_us, (guint64)G_MAXINT64);
-            }
-        }
+        pl_core_compute_rates(proc, old, (guint64)elapsed_us,
+                              ticks_per_second, priv->cpu_basis,
+                              cores_online);
     }
 
     g_hash_table_remove_all(priv->previous);
@@ -539,6 +449,11 @@ static void pl_sample(PrivData *priv)
                             baseline);
     }
     g_ptr_array_sort_with_data(current, pl_compare, &priv->sorting);
+    /* Второй проход: дочитываем statm/io уже для отсортированного
+     * top-N. Сортировать по CPU/MEM можно и по одному stat — нужно
+     * только то, что реально попадёт в строки. */
+    for (i = 0; i < MIN(current->len, priv->row_count); i++)
+        pl_fill_extra(priv, g_ptr_array_index(current, i));
     g_ptr_array_unref(priv->snapshot);
     priv->snapshot = g_ptr_array_ref(current);
     pl_rebuild_rows(priv);
@@ -814,7 +729,19 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         char mem_text[24];
         char io_text[24];
         double y = PL_ROWS_Y + i * row_height;
-        GRegex *regex = g_regex_new("[[:cntrl:]]", 0, 0, NULL);
+        /* Regex собирается ОДИН раз на процесс, а не на каждую строку
+         * каждого кадра: раньше здесь было row_count компиляций в секунду.
+         *
+         * ВАЖНО: regex НЕЛЬЗЯ освобождать в конце итерации — ниже стоит
+         * g_regex_unref(), оставшийся от прежней версии, где regex был
+         * локальным. Со static он освобождался на первой же строке, и
+         * вторая итерация работала с освобождённым GRegex: демон падал
+         * при старте с SIGSEGV (pc == rax, вызов через освобождённый
+         * указатель). Поэтому ниже unref убран. */
+        static GRegex *regex;
+
+        if (!regex)
+            regex = g_regex_new("[[:cntrl:]]", 0, 0, NULL);
         gchar *clean_name = regex ?
             g_regex_replace(regex, proc->name, -1, 0, "_", 0, NULL) :
             g_strdup(proc->name);
@@ -834,8 +761,6 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         pl_show_column(layout, cr, io_text, columns.right[4], y,
                        PL_IO_WIDTH, FALSE);
         g_free(clean_name);
-        if (regex)
-            g_regex_unref(regex);
     }
     pl_dotted_line(cr, priv->title, PL_PADDING,
                    height - PL_PADDING - 1.0, right);

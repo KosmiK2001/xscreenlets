@@ -121,8 +121,8 @@ $(BUILD_DIR)/conlog.o: src/widgets/conlog.c src/widgets/conlog_core.h include/xs
 $(TARGET_CONLOG_PLUGIN): $(BUILD_DIR) build/conlog.o build/conlog_core.o
 	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/conlog.o build/conlog_core.o $(LDFLAGS_PLUGIN)
 
-$(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o $(LDFLAGS_PLUGIN)
+$(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o build/process_list_core.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o build/process_list_core.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
 
@@ -146,12 +146,16 @@ $(BUILD_DIR)/test_sensors: tests/test_sensors.c src/widgets/sensors_core.c src/w
 $(BUILD_DIR)/test_conlog: tests/test_conlog.c src/widgets/conlog_core.c src/widgets/conlog_core.h
 	$(CC) $(CFLAGS) -o $@ tests/test_conlog.c src/widgets/conlog_core.c $(LDFLAGS_PLUGIN)
 
-test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors $(BUILD_DIR)/test_conlog
+$(BUILD_DIR)/test_process_list: tests/test_process_list.c src/widgets/process_list_core.c src/widgets/process_list_core.h
+	$(CC) $(CFLAGS) -o $@ tests/test_process_list.c src/widgets/process_list_core.c $(LDFLAGS_PLUGIN)
+
+test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors $(BUILD_DIR)/test_conlog $(BUILD_DIR)/test_process_list
 	$(BUILD_DIR)/test_memory_monitor
 	$(BUILD_DIR)/test_disk_monitor
 	$(BUILD_DIR)/test_network_monitor
 	$(BUILD_DIR)/test_sensors
 	$(BUILD_DIR)/test_conlog
+	$(BUILD_DIR)/test_process_list
 
 clean:
 	rm -rf $(BUILD_DIR)
