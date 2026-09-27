@@ -799,6 +799,120 @@ static void t_sgr_empty_and_edges(void)
 }
 
 
+/* ── Кэш разбивки строк (bounded) ───────────────────────────────
+ *
+ * Разбор SGR на каждый кадр стоил 99% CPU. Строка в буфере
+ * неизменна после добавления, поэтому кэшировать разбивку можно
+ * по её порядковому номеру (seq) — он монотонный и не
+ * переиспользуется, так что случайных совпадений не бывает.
+ *
+ * Кэш обязан быть ОГРАНИЧЕН: с журналом на 5000 строк неограниченный
+ * кэш съедает память процесса и не отдаёт её никогда.
+ */
+static void t_runcache_bounded(void)
+{
+    /* Лимит меньше CONLOG_RUNCACHE_MIN зажимается, поэтому беру
+     * явно разрешённый минимум, а не произвольное число: иначе
+     * проверка «не превышает лимит» мерила бы не кэш, а зажим. */
+    const guint lim = CONLOG_RUNCACHE_MIN;
+    ConLogRunCache *c = conlog_runcache_new(lim);
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    const char *font = "Sans 9";
+    const ConLogLineRuns *got;
+    guint peak = 0;
+
+    check(c != NULL, "кэш создан");
+    if (!c)
+        return;
+
+    check(conlog_runcache_size(c) == 0, "новый кэш пуст");
+
+    /* Строк вчетверо больше лимита: кэш обязан остаться в лимите.
+     * Без вытеснения он рос бы неограниченно. */
+    for (guint64 seq = 1; seq <= lim * 4; seq++) {
+        const ConLogLineRuns *r =
+            conlog_runcache_get(c, seq, "\033[31mкрас\033[0m обычный",
+                               base, font);
+        check(r != NULL, "строка разобралась при переполнении");
+        if (conlog_runcache_size(c) > peak)
+            peak = conlog_runcache_size(c);
+    }
+    check(conlog_runcache_size(c) <= lim,
+          "кэш не превышает лимит");
+    check(peak <= lim, "кэш ни разу не превысил лимит по ходу");
+    check(conlog_runcache_size(c) == lim,
+          "после вытеснений кэш заполнен под лимит");
+
+    /* Первая запись вытеснена: разбор повторный, но результат годен. */
+    got = conlog_runcache_get(c, 1, "\033[32mзелёный\033[0m хвост",
+                              base, font);
+    check(got != NULL, "вытесненная строка разбирается заново, не NULL");
+    check(got && got->n == 2, "зелёный прогон + обычный хвост — два");
+
+    conlog_runcache_free(c);
+    printf("  t_runcache_bounded: ок\n");
+}
+
+static void t_runcache_hit_and_width(void)
+{
+    ConLogRunCache *c = conlog_runcache_new(16);
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    const char *font = "Sans 9";
+    const ConLogLineRuns *a, *b;
+
+    check(c != NULL, "кэш создан");
+    if (!c)
+        return;
+
+    a = conlog_runcache_get(c, 7, "\033[31mA\033[0mB", base, font);
+    check(a != NULL, "первый разбор вернул прогоны");
+    check(a && a->n == 2, "«A» красным и «B» обычным — два прогона");
+    check(a && a->runs[0].text && a->runs[0].text[0] == 'A',
+          "текст прогона «A» не содержит escape");
+    check(a && a->width > 0.0, "ширина посчитана и больше нуля");
+    /* Ширина каждого прогона нужна для позиционирования: без неё
+     * отрисовка меряет все прогоны заново на каждом кадре, и кэш
+     * избавляет только от разбора, то есть от половины нагрузки. */
+    check(a && a->run_width && a->run_width[0] > 0,
+          "ширина прогона «A» посчитана и больше нуля");
+    check(a && a->run_width && a->run_width[1] > 0,
+          "ширина прогона «B» посчитана и больше нуля");
+    check(a && a->run_width
+             && ABS((a->run_width[0] + a->run_width[1]) - a->width) < 0.001,
+          "сумма ширин прогонов равна общей ширине строки");
+
+    b = conlog_runcache_get(c, 7, "\033[31mA\033[0mB", base, font);
+    check(a == b, "повторный запрос вернул тот же указатель (кэш сработал)");
+    check(conlog_runcache_size(c) == 1,
+          "повторный запрос не добавил запись");
+
+    conlog_runcache_free(c);
+    printf("  t_runcache_hit_and_width: ок\n");
+}
+
+static void t_runcache_null_safety(void)
+{
+    ConLogRunCache *c = conlog_runcache_new(4);
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    const ConLogLineRuns *r;
+
+    check(conlog_runcache_new(0) != NULL || TRUE, "лимит 0 не падает");
+    if (!c)
+        return;
+
+    r = conlog_runcache_get(c, 1, NULL, base, "Sans 9");
+    check(r != NULL, "NULL-текст не роняет разбор");
+    r = conlog_runcache_get(c, 2, "текст", NULL, "Sans 9");
+    check(r != NULL, "NULL-цвет не роняет разбор");
+    r = conlog_runcache_get(c, 3, "текст", base, NULL);
+    check(r != NULL, "NULL-шрифт не роняет разбор");
+
+    conlog_runcache_free(c);
+    conlog_runcache_free(NULL);
+    conlog_runcache_clear(NULL);
+    printf("  t_runcache_null_safety: ок\n");
+}
+
 int main(void)
 {
     t_basic();
@@ -833,6 +947,9 @@ int main(void)
     t_sgr_no_escape_leak();
     t_sgr_has_sgr();
     t_sgr_empty_and_edges();
+    t_runcache_bounded();
+    t_runcache_hit_and_width();
+    t_runcache_null_safety();
     printf("\n");
     if (failures)
         printf("CONLOG_FAIL: %d проверок, %d провалов\n", checks, failures);

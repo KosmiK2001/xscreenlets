@@ -104,8 +104,11 @@ struct _ConlogPriv {
     gboolean     widest_valid;
     guint64      seen_cached;
 
-    /* Кэш ширины прогонов — общий на процесс (см. cl_run_width):
-     * он не зависит от инстанса, только от текста и шрифта. */
+    /* Кэш разбивки строк на прогоны (SGR). На инстанс, а не на
+     * процесс: ширина прогонов зависит от шрифта, а у applet
+     * бывает несколько инстансов с разными шрифтами. Создаётся
+     * лениво и только при keep_ansi — иначе он не нужен вовсе. */
+    ConLogRunCache *runcache;
 };
 
 /* Живая таблица инстансов: контекст диалога переживает properties(),
@@ -370,11 +373,6 @@ static int cl_text_width(cairo_t *cr, const char *font, const char *text)
 }
 
 
-/* Мерка ширины прогона строки с чужим цветом. Определение ниже, после
- * cl_line_runs_get(), который её вызывает. */
-static int cl_run_width(cairo_t *cr, const char *font, const char *text,
-                        gboolean bold);
-
 /* y_top — координата ВЕРХА текста, как её и показывает pango.
  *
  * Раньше параметр назывался baseline, но pango_cairo_show_layout()
@@ -411,98 +409,29 @@ static GHashTable *cl_runcache_ensure(void);
  *
  * Разбор SGR на каждый кадр стоил 99% CPU: на окне в 40 строк ls
  * --color это ~400 вызовов conlog_sgr_parse() в секунду, каждый с
- * g_strdup на каждый прогон.
+ * g_strdup на каждый прогон. Разбивка и её ширина кэшируются по
+ * порядковому номеру строки — см. conlog_runcache_get() в core.
+ * Сам кэш живёт в core не случайно: там он тестируется без X, и
+ * ограничение его размера проверяется тестом, а не глазами.
  *
- * Строка в буфере неизменяема после добавления, поэтому ключ кэша —
- * её порядковый номер (seq). Он монотонен и не переиспользуется,
- * так что совпадений случайно не будет.
+ * Кэш на инстанс, а не на процесс: у applet может быть несколько
+ * инстансов с разными шрифтами, а ширина прогонов зависит от
+ * шрифта. Общий кэш потребовал бы ключа «шрифт + номер строки» и
+ * риска отдать прогоны, посчитанные чужим шрифтом.
  */
-typedef struct {
-    ConLogRun *runs;
-    guint      n;
-    gdouble    width;    /* сумма ширин прогонов */
-    gdouble    color[4];
-} ClLineRuns;
-
-static void cl_line_runs_free(gpointer data)
+/* Разбор с кэшем. Кэш ленивый: у applet без keep_ansi он не нужен
+ * вовсе, и пустой хеш на каждый инстанс — лишняя работа. */
+static const ConLogLineRuns *cl_line_runs_get(ConlogPriv *priv,
+                                               const char *text,
+                                               guint64 seq,
+                                               const gdouble color[4])
 {
-    ClLineRuns *lr = data;
-
-    if (!lr)
-        return;
-    conlog_sgr_free(lr->runs, lr->n);
-    g_free(lr);
-}
-
-static GHashTable *cl_lineruns;     /* guint64 seq -> ClLineRuns* */
-static int         cl_lineruns_n;
-
-#define CL_LINERUNS_MAX 512
-
-static GHashTable *cl_lineruns_ensure(void)
-{
-    if (!cl_lineruns)
-        cl_lineruns = g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                                            NULL,
-                                            cl_line_runs_free);
-    return cl_lineruns;
-}
-
-static void cl_lineruns_clear(void)
-{
-    if (!cl_lineruns)
-        return;
-    g_hash_table_destroy(cl_lineruns);
-    cl_lineruns = NULL;
-    cl_lineruns_n = 0;
-}
-
-/* Разбивка строки на прогоны с кэшем по seq. Ширина прогонов меряется
- * один раз; пересчёт — только когда строка та же, а шрифт сменился
- * (кэш сбрасывается целиком в cl_font_set). */
-static ClLineRuns *cl_line_runs_get(cairo_t *cr, ConlogPriv *priv,
-                                    const char *text, guint64 seq,
-                                    const gdouble color[4])
-{
-    gint64 key = (gint64) seq;
-    ClLineRuns *lr;
-    gdouble rx;
-
-    cl_lineruns_ensure();
-    lr = g_hash_table_lookup(cl_lineruns, &key);
-    if (lr)
-        return lr;
-    if (cl_lineruns_n >= CL_LINERUNS_MAX)
-        return NULL;      /* переполнен: считаем на лету, не кэшируем */
-
-    lr = g_new0(ClLineRuns, 1);
-    lr->runs = conlog_sgr_parse(text, color, &lr->n);
-    memcpy(lr->color, color, sizeof lr->color);
-    rx = 0.0;
-    for (guint k = 0; k < lr->n; k++) {
-        if (lr->runs[k].text)
-            rx += cl_run_width(cr, priv->row_font, lr->runs[k].text,
-                               lr->runs[k].style.bold);
-    }
-    lr->width = rx;
-    {
-        gint64 *k = g_new(gint64, 1);
-
-        *k = key;
-        g_hash_table_insert(cl_lineruns, k, lr);
-    }
-    cl_lineruns_n++;
-    return lr;
-}
-
-/* Мерка ширины прогона. Кэшируется в cl_line_runs_get(): здесь
- * функция вызывается только при построении кэша строки, то есть
- * один раз на строку, а не каждый кадр. */
-static int cl_run_width(cairo_t *cr, const char *font, const char *text,
-                        gboolean bold)
-{
-    (void) bold;   /* жирность пока не влияет на мерку */
-    return cl_text_width(cr, font, text);
+    if (!priv->runcache)
+        priv->runcache = conlog_runcache_new(CONLOG_RUNCACHE_DEFAULT);
+    if (!priv->runcache)
+        return NULL;
+    return conlog_runcache_get(priv->runcache, seq, text, color,
+                               priv->row_font);
 }
 
 /* Отрисовать прогон. Ширина уже посчитана при построении кэша
@@ -615,26 +544,27 @@ static cairo_surface_t *cl_render(ConlogPriv *priv, int width, int height)
 
         if (priv->keep_ansi && conlog_has_sgr(text)) {
             /* Строка с чужим цветом: рисуется по прогонам. Разбивка
-             * и мерка кэшируются по номеру строки — без кэша каждый
-             * кадр заново парсил SGR, и демон уходил в 99% CPU. */
+             * кэшируется по номеру строки — без этого каждый кадр
+             * заново парсил SGR, и демон уходил в 99% CPU. */
             guint64 seq = conlog_seq(priv->buf, i);
-            ClLineRuns *lr = cl_line_runs_get(cr, priv, text, seq, color);
+            const ConLogLineRuns *lr = cl_line_runs_get(priv, text, seq,
+                                                         color);
+            gdouble rx = CONLOG_MARGIN;
+            gboolean drawn = FALSE;
 
-            if (lr) {
-                gdouble rx = CONLOG_MARGIN;
-
-                for (guint k = 0; k < lr->n; k++) {
-                    if (!lr->runs[k].text)
-                        continue;
-                    cl_draw_run(cr, font, rx, y, lr->runs[k].text,
-                                lr->runs[k].style.fg);
-                    rx += cl_run_width(cr, font, lr->runs[k].text,
-                                       lr->runs[k].style.bold);
-                }
-            } else {
-                /* кэш переполнен: рисуем строку целиком, без разбора */
-                cl_draw_run(cr, font, CONLOG_MARGIN, y, text, color);
+            /* Ширина берётся из кэша, а не перемеряется: пересчёт
+             * на каждом кадре — вторая половина той же нагрузки,
+             * что и разбор SGR. */
+            for (guint k = 0; lr && k < lr->n; k++) {
+                if (!lr->runs[k].text || !*lr->runs[k].text)
+                    continue;
+                cl_draw_run(cr, font, rx, y, lr->runs[k].text,
+                            lr->runs[k].style.fg);
+                rx += (lr->run_width ? lr->run_width[k] : 0.0);
+                drawn = TRUE;
             }
+            if (!drawn)
+                cl_draw_run(cr, font, CONLOG_MARGIN, y, text, color);
         } else {
             cl_draw_run(cr, font, CONLOG_MARGIN, y, text, color);
         }
@@ -1010,6 +940,10 @@ static void cl_shutdown(XsPlugin *p)
     conlog_stop(priv);
     if (priv->cache)
         cairo_surface_destroy(priv->cache);
+    /* Кэш разбивки держит g_strdup на каждый прогон, поэтому его
+     * нужно отдать до priv: без этого на каждый перезапуск демона
+     * остаётся память на все строки, которые когда-то показывались. */
+    conlog_runcache_free(priv->runcache);
     conlog_buffer_free(priv->buf);
     g_free(priv->command);
     g_free(priv->cwd);
@@ -1119,10 +1053,9 @@ static void cl_title_changed(GtkEditable *e, gpointer data)
      * кэша сбрасываются, а размер пересчитывается до перерисовки —
      * иначе строки наезжали бы на метку до следующего тика. */
     priv->widest_valid = FALSE;
-    /* Мерки прогонов зависят от шрифта, поэтому кэш разбивки
-     * сбрасывается целиком: точечная инвалидация по строкам обошлась
-     * бы дороже полной пересборки. */
-    cl_lineruns_clear();
+    /* Кэш разбивки тут ни при чём: он зависит от ШРИФТА СТРОК, а
+     * сменилась только метка. Сбрасывать его — потеря кэша на ровном
+     * месте. */
     cl_recalc_size(priv);
     cl_save(priv);
     cl_rebuild_cache(priv, priv->width, priv->height);
@@ -1182,6 +1115,11 @@ static void cl_font_set(GtkFontButton *fb, gpointer data)
     } else if (!g_strcmp0(key, "row_font")) {
         g_free(priv->row_font);
         priv->row_font = want;
+        /* Ширина прогонов посчитана прежним шрифтом — кэш
+         * разбивки сбрасывается целиком. Точечная инвалидация по
+         * строкам обошлась бы дороже полной пересборки: строк в
+         * окне десятки, а пересчёт каждой всё равно лишний. */
+        conlog_runcache_clear(priv->runcache);
     } else {
         g_free(want);
         return;
@@ -1251,7 +1189,7 @@ static void cl_clear_buffer_and_restart(ConlogPriv *priv)
     priv->scroll_top = 0;
     conlog_start(priv);
     priv->widest_valid = FALSE;
-    cl_lineruns_clear();
+    conlog_runcache_clear(priv->runcache);
 }
 
 static void cl_check_changed(GtkToggleButton *cb, gpointer data)

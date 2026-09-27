@@ -920,3 +920,146 @@ gboolean conlog_needs_scroll(const ConLogBuffer *b, int window_height,
     need = first_row_y + (int) b->lines->len * line_step;
     return need > window_height;
 }
+
+/* ------------------------------------------------- кэш прогонов */
+
+struct _ConLogRunCache {
+    /* seq -> ConLogLineRuns*. Порядок обхода не важен: вытеснение
+     * идёт по отдельной очереди, а не по хеш-таблице. */
+    GHashTable *map;
+    /* guint64* — порядок добавления, для FIFO-вытеснения. */
+    GQueue     *order;
+    guint       max;
+};
+
+static void cl_line_runs_destroy(gpointer data)
+{
+    ConLogLineRuns *lr = data;
+
+    if (!lr)
+        return;
+    conlog_sgr_free(lr->runs, lr->n);
+    g_free(lr->run_width);
+    g_free(lr);
+}
+
+ConLogRunCache *conlog_runcache_new(guint max_entries)
+{
+    ConLogRunCache *c = g_new0(ConLogRunCache, 1);
+
+    if (!c)
+        return NULL;
+    if (max_entries < CONLOG_RUNCACHE_MIN)
+        max_entries = CONLOG_RUNCACHE_MIN;
+    if (max_entries > CONLOG_RUNCACHE_MAX)
+        max_entries = CONLOG_RUNCACHE_MAX;
+    c->max   = max_entries;
+    c->map   = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                     g_free, cl_line_runs_destroy);
+    c->order = g_queue_new();
+    return c;
+}
+
+void conlog_runcache_clear(ConLogRunCache *c)
+{
+    if (!c)
+        return;
+    g_hash_table_remove_all(c->map);
+    /* Ключи в очереди и в хеш-таблице — ОДНИ И ТЕ ЖЕ указатели, и
+     * освобождает их g_hash_table. Освобождать здесь второй раз
+     * нельзя: это double free. */
+    g_queue_free(c->order);
+    c->order = g_queue_new();
+}
+
+void conlog_runcache_free(ConLogRunCache *c)
+{
+    if (!c)
+        return;
+    conlog_runcache_clear(c);
+    g_hash_table_destroy(c->map);
+    g_queue_free(c->order);
+    g_free(c);
+}
+
+guint conlog_runcache_size(const ConLogRunCache *c)
+{
+    return c ? g_hash_table_size(c->map) : 0;
+}
+
+/* Вытолкнуть самую старую запись: её разбивка больше не нужна,
+ * строка из буфера либо ушла за max_lines, либо ушла из окна. */
+static void conlog_runcache_evict_one(ConLogRunCache *c)
+{
+    gpointer key;
+
+    key = g_queue_pop_head(c->order);
+    if (!key)
+        return;
+    /* Ключ освобождает g_hash_table_remove (он же key_destroy) —
+     * второй раз g_free(key) здесь дал бы double free. */
+    g_hash_table_remove(c->map, key);
+}
+
+const ConLogLineRuns *conlog_runcache_get(ConLogRunCache *c, guint64 seq,
+                                          const char *text,
+                                          const gdouble line_color[4],
+                                          const char *font)
+{
+    ConLogLineRuns *lr;
+    gint64 key = (gint64) seq;
+    gdouble width = 0.0;
+
+    if (!c)
+        return NULL;
+    if (!text)
+        text = "";
+    if (!line_color) {
+        static const gdouble dflt[4] = { 0.85, 0.85, 0.85, 1.0 };
+        line_color = dflt;
+    }
+
+    lr = g_hash_table_lookup(c->map, &key);
+    if (lr)
+        return lr;
+
+    lr = g_new0(ConLogLineRuns, 1);
+    if (!lr)
+        return NULL;
+    lr->runs = conlog_sgr_parse(text, line_color, &lr->n);
+    memcpy(lr->color, line_color, sizeof lr->color);
+    /* Ширина каждого прогона меряется ОДИН раз и лежит рядом с
+     * прогоном: отрисовка идёт слева направо и складывает ширины
+     * уже нарисованных, поэтому пересчёт на кадре вернул бы 99% CPU
+     * обратно, избавив от пересчёта только разбор SGR. */
+    if (lr->n > 0)
+        lr->run_width = g_new0(gdouble, lr->n);
+    for (guint k = 0; lr->run_width && k < lr->n; k++) {
+        if (!lr->runs[k].text || !*lr->runs[k].text)
+            continue;
+        lr->run_width[k] = (gdouble)
+            conlog_text_width(font, lr->runs[k].text);
+        width += lr->run_width[k];
+    }
+    lr->width = width;
+
+    /* Полный кэш — строка всё равно разобрана (указатель годен для
+     * отрисовки), но не запоминается: иначе при потоке шире лимита
+     * кэш вытеснял бы сам себя, попадая в цикл разбор-вытеснение-
+     * разбор на каждой строке. */
+    if (g_hash_table_size(c->map) >= c->max) {
+        conlog_runcache_evict_one(c);
+        if (g_hash_table_size(c->map) >= c->max)
+            return lr;         /* лимит исчерпан, не кэшируем */
+    }
+    {
+        gint64 *k = g_new(gint64, 1);
+
+        *k = key;
+        /* Один и тот же указатель живёт и в очереди, и в хеше: так
+         * вытеснению не нужен второй обход и не расходятся ключи. */
+        g_queue_push_tail(c->order, k);
+        g_hash_table_insert(c->map, k, lr);
+    }
+    return lr;
+}
