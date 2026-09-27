@@ -204,6 +204,28 @@ static GPtrArray *read_chip_channels(const char *hwmon_dir,
         input_path = g_build_filename(hwmon_dir, name, NULL);
         rr = read_long(input_path, &milli);
         g_free(input_path);
+
+        /* Тип канала из tempN_type. У nct7904 каналы универсальные: под
+         * префиксом temp лежит и температура, и вентилятор. type=6 —
+         * вентилятор (RPM), и он честно отдаёт 0, а плагин показывал это
+         * как «0.0°C». Каналы без tempN_type (старые драйверы) не
+         * фильтруем — там префикс temp сам по себе означает температуру. */
+        {
+            const char *digits0 = name + 4;   /* после «temp» */
+            gint chan0 = (gint) g_ascii_strtoll(digits0, NULL, 10);
+            char *fname = g_strdup_printf("temp%d_type", chan0);
+            char *tpath = g_build_filename(hwmon_dir, fname, NULL);
+            glong type_val = -1;
+
+            g_free(fname);
+            if (read_long(tpath, &type_val) == SEN_READ_OK
+                && type_val == 6) {
+                g_free(tpath);
+                continue;   /* вентилятор, не температура */
+            }
+            g_free(tpath);
+        }
+
         /* MISSING — файла нет, канала физически нет: строка не нужна.
          * ERROR — канал есть, но драйвер не отдал значение (параллельный
          * доступ к i2c с ipmi на серверной матери): строка нужна, число

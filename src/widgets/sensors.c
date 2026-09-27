@@ -528,7 +528,13 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     priv->height = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_height",
                                                SEN_DEFAULT_HEIGHT),
                          SEN_MIN_HEIGHT, 1200);
-    priv->height_auto = xs_host_api()->conf_int(kf, p->name, "window_height",
+    /* Авто-высота по числу строк. Ключ window_height НЕ годится как
+     * признак: плагин сам записывает его в конфиг при старте («чтобы
+     * конфиг документировал себя»), и на следующем запуске авто-режим
+     * выключался навсегда — окно переставало расти, и каждая добавленная
+     * строка обрезалась снизу. Признак хранится отдельным ключом, и его
+     * пишет только плагин. */
+    priv->height_auto = xs_host_api()->conf_int(kf, p->name, "height_auto",
                                                 -1) < 0;
     priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                                         "corner_radius",
@@ -677,6 +683,36 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
             if (fixed)
                 p->host->log("sensors: восстановлено источников: %d", fixed);
         }
+
+        /* Строка, сенсор которой исчез совсем, выводиться не может.
+         *
+         * Каналы у вентиляторов nct7904 имели temp6_type=6, и раньше они
+         * попадали в апплет как «0.0°C». Теперь core их не отдаёт, и такая
+         * строка осталась бы висеть с прочерком навсегда — без причины и
+         * без возможности починить. Удаляем, логируем, чтобы был след в
+         * конфиге. */
+        {
+            SensorList *now = sensor_list_read("/sys/class/hwmon");
+            guint dropped = 0;
+
+            if (now) {
+                for (guint i = 0; i < priv->row_sources->len; i++) {
+                    const char *src = g_ptr_array_index(priv->row_sources,
+                                                        i);
+
+                    if (src && *src && sensor_find_reading(now, src))
+                        continue;   /* строка жива */
+                    g_ptr_array_remove_index(priv->rows, i);
+                    g_ptr_array_remove_index(priv->row_sources, i);
+                    i--;   /* remove_index сдвинул хвост на себя */
+                    dropped++;
+                }
+                sensor_list_free(now);
+            }
+            if (dropped)
+                p->host->log("sensors: удалено строк с исчезнувшим "
+                             "сенсором: %u", dropped);
+        }
     }
 
     priv->values = g_ptr_array_new_with_free_func(g_free);
@@ -774,8 +810,9 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
         int need = priv->first_row_y + (int) priv->rows->len * priv->line_step
                  + SEN_MARGIN * 2;
 
-        if (need > priv->height)
-            priv->height = CLAMP(need, SEN_MIN_HEIGHT, 1200);
+        /* Растёт И уменьшается: снял строки — окно должно сжаться, иначе
+         * пользователь получит пустое поле внизу, решив, что это норма. */
+        priv->height = CLAMP(need, SEN_MIN_HEIGHT, 1200);
     }
 
     priv->design_width = priv->width;
@@ -795,6 +832,10 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
     }
     g_key_file_set_integer(kf, p->name, "window_width", priv->width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->height);
+    /* Признак авто-высоты: -1 — считать по числу строк, любое другое
+     * значение — пользователь задал высоту руками, её уважаем. */
+    g_key_file_set_integer(kf, p->name, "height_auto",
+                           priv->height_auto ? -1 : priv->height);
     g_key_file_set_integer(kf, p->name, "corner_radius",
                            priv->corner_radius);
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
@@ -932,7 +973,12 @@ static void sen_int_changed(GtkSpinButton *spin, gpointer data)
         return;
     value = gtk_spin_button_get_value_as_int(spin);
     if (!strcmp(key, "window_width"))            priv->width = value;
-    else if (!strcmp(key, "window_height"))      priv->height = value;
+    else if (!strcmp(key, "window_height")) {
+        priv->height = value;
+        /* Пользователь задал высоту руками — авто-режим выключается, иначе
+         * следующая добавленная строка снова упрётся в обрезку снизу. */
+        priv->height_auto = FALSE;
+    }
     else if (!strcmp(key, "corner_radius"))      priv->corner_radius = value;
     else if (!strcmp(key, "update_ms"))          priv->update_ms = value;
     else if (!strcmp(key, "label_x"))            priv->label_x = value;

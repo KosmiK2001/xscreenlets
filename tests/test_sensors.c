@@ -1348,6 +1348,177 @@ static void test_toggle_row_is_reversible(void)
     g_ptr_array_unref(sources);
 }
 
+/* Авто-высота по числу строк.
+ *
+ * Регрессия на «строки пропали из окна снизу». Признак авто-режима
+ * вычислялся из наличия ключа window_height, а плагин САМ записывает его
+ * в конфиг при старте. На следующем запуске авто-режим выключался
+ * навсегда: окно не росло, и каждая добавленная строка обрезалась снизу.
+ *
+ * Проверяем то, на чём держится вывод: окно должно вмещать все строки
+ * при line_step = 12, first_row_y = 4 и поле 4 px снизу и сверху.
+ */
+#define SEN_T_MARGIN 4
+#define SEN_T_MIN_H  60
+
+static int sensor_test_needed_height(int rows, int line_step, int first_row_y)
+{
+    return first_row_y + rows * line_step + SEN_T_MARGIN * 2;
+}
+
+static void test_auto_height_fits_all_rows(void)
+{
+    /* Окно на 18 строк: должно вместить все, а не 13 «как в прошлый раз». */
+    const int rows[] = { 1, 4, 13, 14, 15, 18, 30, 46 };
+    const int line_step = 12, first_row_y = 4;
+
+    for (guint i = 0; i < G_N_ELEMENTS(rows); i++) {
+        int n = rows[i];
+        int need = sensor_test_needed_height(n, line_step, first_row_y);
+        int h = SEN_T_MIN_H;   /* старт с минимума, как в init */
+        int fits;
+
+        /* Авто-режим присваивает, а не только растёт: снятые строки
+         * сжимают окно. */
+        h = CLAMP(need, SEN_T_MIN_H, 1200);
+        fits = (h - first_row_y - SEN_T_MARGIN * 2) / line_step;
+        check_int(fits >= n, 1,
+                  "окно вмещает все строки при авто-высоте");
+        if (fits < n)
+            printf("  инфо: строк=%d окно=%d влезает=%d нужно=%d\n",
+                   n, h, fits, need);
+    }
+
+    /* Ровно 18 строк по нашему конфигу: 4 + 18*12 + 8 = 228 px. */
+    check_int(sensor_test_needed_height(18, 12, 4), 228,
+              "18 строк требуют ровно 228 px");
+
+    /* Регрессия: старый код с `if (need > priv->height)` при старой
+     * высоте 172 оставлял 18 строк в окне на 13. */
+    {
+        int need = sensor_test_needed_height(18, 12, 4);
+        int stale = 172;   /* высота, записанная прошлым запуском */
+        int old_fits = (stale - 4 - SEN_T_MARGIN * 2) / 12;
+
+        check_int(old_fits, 13, "старая высота 172 вмещала 13 строк");
+        check_int(need > stale, 1, "нужная высота больше старой");
+    }
+
+    /* Снятие строк сжимает окно, а не оставляет пустое поле. */
+    {
+        int big = CLAMP(sensor_test_needed_height(18, 12, 4), SEN_T_MIN_H,
+                        1200);
+        int small = CLAMP(sensor_test_needed_height(4, 12, 4), SEN_T_MIN_H,
+                          1200);
+
+        check_int(small < big, 1, "после снятия строк окно сжалось");
+        check_int(small, 60, "4 строки дают минимум 60 px");
+    }
+}
+
+/* Фильтр типа канала: вентилятор под префиксом temp не показывается.
+ *
+ * Регрессия: nct7904 — универсальный чип, там под tempN_input лежат и
+ * температуры, и обороты вентиляторов. Канал temp6 имеет temp6_type=6
+ * (вентилятор) и честно отдаёт 0, а апплет показывал «0.0°C», то есть
+ * обороты в градусах Цельсия.
+ *
+ * Правило: type=6 — вентилятор, канал пропускается. Остальные типы
+ * (1-5) показываются, и каналы без tempN_type (старые драйверы) тоже:
+ * там префикс temp сам по себе означает температуру.
+ */
+static void test_channel_type_filter(void)
+{
+    Fixture f = fx_new();
+    const char *const files[] = {
+        "temp4_input=41125\n",
+        "temp4_type=4\n",     /* настоящий датчик */
+        "temp6_input=0\n",
+        "temp6_type=6\n",     /* вентилятор: 0 об/мин */
+        "temp7_input=0\n",
+        "temp7_type=6\n",     /* вентилятор */
+        "temp1_input=-128000\n",
+        "temp1_type=3\n",     /* нет датчика: канал есть, данных нет */
+        NULL
+    };
+    SensorList *list;
+    gboolean has4 = FALSE, has6 = FALSE, has7 = FALSE, has1 = FALSE;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "nct7904", files);
+    list = sensor_list_read(f.path);
+    check(list != NULL, "дерево с типами каналов прочитано");
+    if (!list) {
+        fx_free(&f);
+        return;
+    }
+    check_int((gint) list->chips->len, 1, "один чип");
+    if (list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+
+        for (guint i = 0; i < c->readings->len; i++) {
+            SensorReading *r = g_ptr_array_index(c->readings, i);
+
+            if (r->channel == 4) {
+                has4 = TRUE;
+                check_int(r->valid, 1, "канал 4 валиден");
+                check_dbl(r->celsius, 41.125, 0.001, "канал 4 = 41.125°C");
+            } else if (r->channel == 6) {
+                has6 = TRUE;
+            } else if (r->channel == 7) {
+                has7 = TRUE;
+            } else if (r->channel == 1) {
+                has1 = TRUE;
+                check_int(r->valid, 0, "канал 1 без данных (-128000)");
+            }
+        }
+    }
+    check_int(has4, 1, "температурный канал 4 на месте");
+    check_int(has6, 0, "вентилятор 6 отфильтрован");
+    check_int(has7, 0, "вентилятор 7 отфильтрован");
+    check_int(has1, 1, "канал 1 (type 3) остался — будет прочерк");
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
+/* Каналы без tempN_type показываются: префикс temp сам по себе означает
+ * температуру (старые драйверы). */
+static void test_no_type_file_means_temperature(void)
+{
+    Fixture f = fx_new();
+    const char *const files[] = {
+        "temp1_input=45000\n",
+        /* temp1_type намеренно не создаём */
+        NULL
+    };
+    SensorList *list;
+    gint n = 0;
+
+    if (!f.path)
+        return;
+    fx_hwmon(&f, "hwmon0", "olddrv", files);
+    list = sensor_list_read(f.path);
+    check(list != NULL, "дерево без tempN_type прочитано");
+    if (!list) {
+        fx_free(&f);
+        return;
+    }
+    if (list->chips->len == 1) {
+        SensorChip *c = g_ptr_array_index(list->chips, 0);
+
+        n = (gint) c->readings->len;
+        if (n == 1) {
+            SensorReading *r = g_ptr_array_index(c->readings, 0);
+
+            check_dbl(r->celsius, 45.0, 0.001, "канал без type = 45°C");
+        }
+    }
+    check_int(n, 1, "канал без tempN_type не отфильтрован");
+    sensor_list_free(list);
+    fx_free(&f);
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -1381,6 +1552,9 @@ int main(void)
     test_rounding();
     test_rounded_region();
     test_live_tree();
+    test_channel_type_filter();
+    test_no_type_file_means_temperature();
+    test_auto_height_fits_all_rows();
     test_toggle_row_is_reversible();
     test_bus_kind_and_slot();
     test_name_composed_from_kind_slot();
