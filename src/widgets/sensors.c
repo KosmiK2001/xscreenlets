@@ -24,6 +24,13 @@
 #include <math.h>
 #include <string.h>
 
+static char *sen_source_key(const char *chip, const char *device,
+                            const char *label)
+{
+    return sensor_row_id(chip, device, label);
+}
+
+
 /* ------------------------------------------------------------- размеры */
 
 #define SEN_DEFAULT_WIDTH   200
@@ -121,11 +128,6 @@ static GHashTable *sen_instances;
  * после перезагрузки указала бы на другой диск. Полный путь sysfs
  * устройства устойчив — это тот же приём, что /dev/disk/by-id в
  * disk_monitor. */
-static char *sen_source_key(const char *chip, const char *device,
-                            const char *label)
-{
-    return sensor_row_id(chip, device, label);
-}
 
 /* ---------------------------------------------------------------- текст */
 
@@ -1038,6 +1040,10 @@ static GtkWidget *sen_font_button(const char *key, const char *font)
  * сверху. При снятии галочки строка удаляется — иначе в апплете остаются
  * значения для сенсоров, которые пользователь убрал. */
 /* Индекс строки в priv по её источнику. */
+/* Устойчивый идентификатор строки. Тонкая обёртка над sensor_row_id()
+ * нужна, чтобы смысл аргументов читался в месте вызова: chip, device и
+ * label вместе дают ключ, не зависящий от номера hwmon. */
+
 static guint sen_row_index(SenPriv *priv, const char *source)
 {
     for (guint i = 0; i < priv->row_sources->len; i++) {
@@ -1047,44 +1053,81 @@ static guint sen_row_index(SenPriv *priv, const char *source)
     return SEN_ROW_NONE;
 }
 
-/* Галочка «показывать эту строку». Состав и порядок строк задаёт
- * пользователь, поэтому включение добавляет в конец, а выключение
- * убирает с хвостом сдвига. */
-static void sen_row_toggled(GtkToggleButton *check, gpointer data)
+/* Порядок групп: сначала те, где больше сенсоров, потом по имени.
+ * Сортировка обязана быть детерминированной, иначе таблицы прыгали бы
+ * при каждом открытии Properties. */
+typedef struct {
+    const char *name;
+    guint rows;
+} SenGroupOrder;
+
+static gint sen_group_cmp(gconstpointer pa, gconstpointer pb)
+{
+    const SenGroupOrder *a = pa, *b = pb;
+
+    if (a->rows != b->rows)
+        return a->rows > b->rows ? -1 : 1;
+    return strcmp(a->name, b->name);
+}
+
+/* Галочка «выводить эту строку» в таблице.
+ *
+ * GtkTreeView, а не GtkGrid: заголовки колонок, сортировка по клику и
+ * выделение строки идут из коробки.
+ *
+ * Галочка — GtkCellRendererToggle, а НЕ GtkWidgetCellRenderer со
+ * вложенным GtkCheckButton: виджетные рендереры в дереве не
+ * перерисовываются при прокрутке и переиспользуют ячейки неверно —
+ * таблица дёргается. Toggle-рендерер рисует себя сам.
+ *
+ * Строка ищется в priv по ИСТОЧНИКУ, а не по индексу модели: строки
+ * переставляются сортировкой, индекс после этого ничего не значит. */
+static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
+                             gpointer data)
 {
     SenDialogContext *ctx = data;
     SenPriv *priv = sen_live_priv(ctx);
-    const char *source;
-    const char *label;
-    gboolean on;
+    GtkTreeView *view = g_object_get_data(G_OBJECT(cell), "xs-view");
+    GtkTreeModel *model;
+    GtkTreePath *path;
+    GtkTreeIter iter;
+    gboolean cur = FALSE;
+    char *source = NULL;
+    char *label = NULL;
     guint idx;
 
-    if (!priv)
+    if (!priv || !view || ctx->building)
         return;
-    if (ctx->building)
+    model = gtk_tree_view_get_model(view);
+    path = gtk_tree_path_new_from_string(path_str);
+    if (!path)
         return;
-    source = g_object_get_data(G_OBJECT(check), "xs-source");
-    label = g_object_get_data(G_OBJECT(check), "xs-label");
-    if (!source || !label)
+    if (!gtk_tree_model_get_iter(model, &iter, path)) {
+        gtk_tree_path_free(path);
         return;
-    on = gtk_toggle_button_get_active(check);
+    }
+    /* Колонка 0 — галочка, 2 — полное имя (источник), 3 — метка. */
+    gtk_tree_model_get(model, &iter, 0, &cur, 2, &source, 3, &label, -1);
+    gtk_tree_path_free(path);
+    if (!source)
+        goto out;
     idx = sen_row_index(priv, source);
 
-    if (on) {
+    if (!cur) {   /* включили */
         if (idx != SEN_ROW_NONE)
-            return;   /* уже есть: простой клик порядок не меняет */
-        g_ptr_array_add(priv->rows, g_strdup(label));
+            goto out;   /* уже выводится: клик не должен менять порядок */
+        g_ptr_array_add(priv->rows, g_strdup(label ? label : ""));
         g_ptr_array_add(priv->row_sources, g_strdup(source));
         if (priv->values)
             g_ptr_array_add(priv->values, NULL);
-    } else {
+    } else {      /* выключили */
         if (idx == SEN_ROW_NONE)
-            return;
-        /* Сдвигаем: g_ptr_array_remove_index не переносит хвост, и
-         * следующая строка получила бы чужой источник. */
+            goto out;
+        /* g_ptr_array_remove_index не сдвигает хвост — следующая строка
+         * получила бы чужой источник. */
         g_ptr_array_remove_index(priv->rows, idx);
         g_ptr_array_remove_index(priv->row_sources, idx);
-        if (priv->values && idx < priv->values->len)
+        if (priv->values && (guint) idx < priv->values->len)
             g_ptr_array_remove_index(priv->values, idx);
     }
     sen_save(priv);
@@ -1093,138 +1136,275 @@ static void sen_row_toggled(GtkToggleButton *check, gpointer data)
     xs_host_api()->invalidate(priv->plugin);
     if (priv->plugin->win)
         gtk_widget_queue_draw(priv->plugin->win);
+out:
+    g_free(source);
+    g_free(label);
 }
 
-/* Правка подписи. Меняется ТОЛЬКО подпись: источник остаётся тем же,
- * иначе стрка потеряла бы привязку к физическому устройству и пережила
- * бы перезагрузку только до первого сохранения. */
-static void sen_label_changed(GtkEntry *entry, gpointer data)
+/* Правка метки прямо в таблице: колонка 3.
+ *
+ * Идентификатор строки берём из модели (колонка 2), а не из индекса:
+ * после сортировки по заголовку индекс указывает на другую строку. */
+static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
+                                  gchar *new_text, gpointer data)
 {
     SenDialogContext *ctx = data;
     SenPriv *priv = sen_live_priv(ctx);
-    const char *source = g_object_get_data(G_OBJECT(entry), "xs-source");
-    const char *text = gtk_entry_get_text(entry);
+    GtkTreeView *view = g_object_get_data(G_OBJECT(cell), "xs-view");
+    GtkTreeModel *model;
+    GtkTreePath *path;
+    GtkTreeIter iter;
+    char *source = NULL;
     guint idx;
 
-    if (ctx->building)
+    if (!priv || !view || ctx->building)
         return;
-    if (!priv || !source || !text)
+    /* Пустая метка вывела бы голое число без подписи, поэтому
+     * игнорируем её: строка остаётся с прежним текстом. */
+    if (!new_text || !*new_text)
         return;
-    idx = sen_row_index(priv, source);
-    /* Строка не выведена — подпись ей не нужна. Сюда попадает и вызов
-     * во время ПОСТРОЕНИЯ списка: sen_connect_children() обходит дерево
-     * уже после sen_sensor_list(), и gtk_entry_set_text() успевает
-     * сработать «changed» на каждой из 46 строк. */
-    if (idx == SEN_ROW_NONE)
+    model = gtk_tree_view_get_model(view);
+    path = gtk_tree_path_new_from_string(path_str);
+    if (!path)
         return;
-    /* Пустая подпись опасна: строка выводится с числом и без имени,
-     * и пользователь не понимает, что это. Возвращаем прежнюю. */
-    if (!*text) {
-        gtk_entry_set_text(entry,
-                           (const char *) g_object_get_data(G_OBJECT(entry),
-                                                            "xs-row-label"));
+    if (!gtk_tree_model_get_iter(model, &iter, path)) {
+        gtk_tree_path_free(path);
         return;
     }
+    gtk_tree_model_get(model, &iter, 2, &source, -1);
+    gtk_tree_path_free(path);
+    if (!source)
+        goto out;
+    idx = sen_row_index(priv, source);
+    if (idx == SEN_ROW_NONE) {
+        /* Строка не выводится: сохраняем подпись, чтобы при включении
+         * галочки не подставился полный sensors-идентификатор. */
+        g_object_set_data_full(G_OBJECT(cell), "xs-pending-label",
+                              g_strdup(new_text), g_free);
+        goto out;
+    }
     g_free(g_ptr_array_index(priv->rows, idx));
-    g_ptr_array_index(priv->rows, idx) = g_strdup(text);
+    g_ptr_array_index(priv->rows, idx) = g_strdup(new_text);
     sen_save(priv);
+    sen_read_values(priv);
     sen_rebuild_cache(priv, priv->width, priv->height);
     xs_host_api()->invalidate(priv->plugin);
     if (priv->plugin->win)
         gtk_widget_queue_draw(priv->plugin->win);
+out:
+    g_free(source);
 }
 
-/* Список найденных сенсоров: галочка «показывать» плюс поле подписи.
+/* Таблица одной группы: имя группы заголовком, четыре колонки.
  *
- * В списке ВСЕ найденные сенсоры — решение пользователя, что оставить.
- * Подпись в списке редактируемая: имя сенсора в стиле sensors узнаваемо,
- * но для апплета пользователь хочет «CPU 1», «Диск sda», а не
- * «coretemp · Core 1». */
+ * Четыре параллельных массива, и ПЕРЕПУТАТЬ их нельзя: sources — это
+ * устойчивые идентификаторы «чип/устройство/канал», kinds — названия
+ * каналов. Именно этой ошибкой строка «Чтото» получила источник
+ * «loc1» вместо «i350bb/0500/loc1» и осталась без числа. */
+static GtkWidget *sen_group_table(SenDialogContext *ctx, const char *group,
+                                  GPtrArray *slots, GPtrArray *kinds,
+                                  GPtrArray *sources)
+{
+    GtkWidget *frame = gtk_frame_new(group);
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkListStore *store;
+    GtkTreeView *view;
+    GtkCellRenderer *r;
+    GtkTreeViewColumn *col;
+
+    /* Свой скроллер внутри таблицы: групп пять, суммарно 46 строк, и
+     * coretemp-isa (18 строк) растянула бы страницу Properties на весь
+     * экран. */
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(scroll),
+                                        GTK_SHADOW_NONE);
+    gtk_widget_set_size_request(scroll, -1, 132);
+    gtk_container_add(GTK_CONTAINER(scroll), outer);
+
+    store = gtk_list_store_new(4, G_TYPE_BOOLEAN, G_TYPE_STRING,
+                               G_TYPE_STRING, G_TYPE_STRING);
+    view = GTK_TREE_VIEW(gtk_tree_view_new_with_model(
+        GTK_TREE_MODEL(store)));
+    gtk_tree_view_set_headers_visible(view, TRUE);
+    gtk_tree_view_set_enable_search(view, FALSE);
+
+    /* «вывод» — галочка */
+    r = gtk_cell_renderer_toggle_new();
+    g_signal_connect(r, "toggled", G_CALLBACK(sen_tree_toggled), ctx);
+    g_object_set_data(G_OBJECT(r), "xs-view", view);
+    col = gtk_tree_view_column_new_with_attributes("вывод", r, "active", 0,
+                                                   NULL);
+    gtk_tree_view_column_set_clickable(col, TRUE);
+    gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_FIXED);
+    gtk_tree_view_column_set_fixed_width(col, 44);
+    gtk_tree_view_append_column(view, col);
+
+    /* «устройство» — короткое имя слота («1-10», «8100»). Не редактируется:
+     * оно выведено из пути устройства, правка сделала бы строку
+     * неузнаваемой. */
+    r = gtk_cell_renderer_text_new();
+    col = gtk_tree_view_column_new_with_attributes("устройство", r, "text", 1,
+                                                   NULL);
+    gtk_tree_view_column_set_clickable(col, TRUE);
+    gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_FIXED);
+    gtk_tree_view_column_set_fixed_width(col, 78);
+    gtk_tree_view_append_column(view, col);
+
+    /* «канал» — полное имя в стиле sensors(1), серым. */
+    r = gtk_cell_renderer_text_new();
+    col = gtk_tree_view_column_new_with_attributes("канал", r, "text", 2, NULL);
+    gtk_tree_view_column_set_clickable(col, TRUE);
+    gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_AUTOSIZE);
+    gtk_tree_view_append_column(view, col);
+
+    /* «метка» — то, что видит апплет. Правится прямо в таблице. */
+    r = gtk_cell_renderer_text_new();
+    g_object_set(r, "editable", TRUE, NULL);
+    g_signal_connect(r, "edited", G_CALLBACK(sen_tree_label_edited), ctx);
+    g_object_set_data(G_OBJECT(r), "xs-view", view);
+    col = gtk_tree_view_column_new_with_attributes("метка", r, "text", 3, NULL);
+    gtk_tree_view_column_set_clickable(col, TRUE);
+    gtk_tree_view_column_set_expand(col, TRUE);
+    gtk_tree_view_append_column(view, col);
+
+    for (guint i = 0; i < slots->len; i++) {
+        const char *slot = g_ptr_array_index(slots, i);
+        const char *kind = g_ptr_array_index(kinds, i);
+        const char *source = g_ptr_array_index(sources, i);
+        guint idx = sen_row_index(ctx->priv, source);
+        gboolean active = idx != SEN_ROW_NONE;
+        const char *row_label = active
+        ? (const char *) g_ptr_array_index(ctx->priv->rows, idx) : NULL;
+        char *full = g_strdup_printf("%s · %s", group, kind);
+        GtkTreeIter it;
+
+        gtk_list_store_append(store, &it);
+        /* Метка по умолчанию — полное имя сенсора: пользователь видит, что
+         * выбрал, и переименовывает то, что ему нужно. */
+        gtk_list_store_set(store, &it, 0, active, 1, slot, 2, full,
+                           3, row_label ? row_label : full, -1);
+        g_free(full);
+    }
+    /* Модель нужна колонке «метка» для записи отредактированного текста,
+     * поэтому она остаётся живой: gtk_tree_view_new_with_model() её не
+     * забирает. Владение — у GtkTreeView, второй unref не нужен. */
+    g_object_unref(store);
+    gtk_container_add(GTK_CONTAINER(outer), GTK_WIDGET(view));
+    gtk_container_add(GTK_CONTAINER(frame), scroll);
+    return frame;
+}
+
+/* Список сенсоров таблицами по типам модулей.
+ *
+ * Был единый список из 46 строк с полями ввода, где подпись была уже
+ * развёрнутой («nvme-pci-8100 · Composite») и не сказано было, какой это
+ * контроллер. Теперь на каждый тип модуля своя таблица, а внутри
+ * короткое имя слота и отдельное поле метки. */
 static GtkWidget *sen_sensor_list(SenDialogContext *ctx)
 {
-    GtkWidget *list = gtk_list_box_new();
-    SensorList *found = sensor_list_read("/sys/class/hwmon");
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    SensorList *found;
+    GHashTable *groups;    /* имя группы -> GPtrArray индексов строк */
+    GPtrArray *order;      /* имена групп, в порядке вывода */
+    GPtrArray *kind, *slot, *source;
+    guint total = 0;
 
     ctx->building = TRUE;
+    gtk_widget_set_size_request(box, -1, 300);
 
-    /* Свой скроллер списку НЕ нужен: страница Properties уже
-     * прокручивается, и два скроллера один в другом ловят колесо по
-     * очереди — список «залипает» на первых строках, а до секций Вид и
-     * Раскладка добраться нельзя. Список ограничен по высоте и
-     * обрезается по месту, прокручивает его страница. */
-    gtk_widget_set_size_request(list, -1, 300);
-
-    if (found) {
-        for (guint i = 0; i < found->chips->len; i++) {
-            SensorChip *c = g_ptr_array_index(found->chips, i);
-            char *sname = sensor_chip_sensors_name(c);
-
-            for (guint j = 0; j < c->readings->len; j++) {
-                SensorReading *r = g_ptr_array_index(c->readings, j);
-                char *source = sen_source_key(c->chip, c->device, r->label);
-                char *row_label = NULL;
-                GtkWidget *row = gtk_list_box_row_new();
-                GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-                GtkWidget *check;
-                GtkWidget *entry;
-                guint idx;
-                gboolean active;
-
-                /* Имя сенсора в стиле sensors — чтобы опознать по conky.
-                 * device в подписи НЕ показываем: он нужен конфигу для
-                 * устойчивости, но пользователю это шум. */
-                idx = sen_row_index(ctx->priv, source);
-                if (idx != SEN_ROW_NONE)
-                    row_label = g_strdup(g_ptr_array_index(ctx->priv->rows, idx));
-                else
-                    row_label = g_strdup_printf("%s · %s", sname, r->label);
-                active = idx != SEN_ROW_NONE;
-
-                check = gtk_check_button_new();
-                g_object_set_data_full(G_OBJECT(check), "xs-source",
-                                       g_strdup(source), g_free);
-                g_object_set_data_full(G_OBJECT(check), "xs-label",
-                                       g_strdup(row_label), g_free);
-                gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), active);
-                g_signal_connect(check, "toggled",
-                                 G_CALLBACK(sen_row_toggled), ctx);
-
-                entry = gtk_entry_new();
-                gtk_entry_set_text(GTK_ENTRY(entry), row_label);
-                /* Тултип объясняет, что это за сенсор: подпись меняется,
-                 * а исходное имя нужно помнить. */
-                gtk_widget_set_tooltip_text(entry, sname);
-                g_object_set_data_full(G_OBJECT(entry), "xs-source", source,
-                                       g_free);
-                /* Исходная подпись: откат для пустого поля и запас на
-                 * случай, если пользователь стирает всё. */
-                g_object_set_data_full(G_OBJECT(entry), "xs-row-label",
-                                       g_strdup(row_label), g_free);
-
-                gtk_box_pack_start(GTK_BOX(box), check, FALSE, FALSE, 0);
-                gtk_box_pack_start(GTK_BOX(box), entry, TRUE, TRUE, 0);
-                g_signal_connect(entry, "changed",
-                                 G_CALLBACK(sen_label_changed), ctx);
-                gtk_container_add(GTK_CONTAINER(row), box);
-                gtk_list_box_insert(GTK_LIST_BOX(list), row, -1);
-                g_free(row_label);
-                /* source НЕ освобождаем: владение им уже у entry
-                 * (g_object_set_data_full с g_free). Второй free того же
-                 * указателя ломал кучу — демон падал с «corrupted size vs.
-                 * prev_size» при закрытии Properties, потому что GTK
-                 * уничтожал виджеты и вызывал g_free повторно. */
-            }
-            g_free(sname);
-        }
-        sensor_list_free(found);
-    } else {
+    found = sensor_list_read("/sys/class/hwmon");
+    if (!found) {
         GtkWidget *empty = gtk_label_new("Сенсоры не найдены");
 
-        gtk_container_add(GTK_CONTAINER(list), empty);
+        gtk_container_add(GTK_CONTAINER(box), empty);
+        ctx->building = FALSE;
+        return box;
     }
+
+    kind = g_ptr_array_new_with_free_func(g_free);
+    slot = g_ptr_array_new_with_free_func(g_free);
+    source = g_ptr_array_new_with_free_func(g_free);
+    groups = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                   (GDestroyNotify) g_ptr_array_unref);
+    order = g_ptr_array_new_with_free_func(g_free);
+
+    for (guint i = 0; i < found->chips->len; i++) {
+        SensorChip *c = g_ptr_array_index(found->chips, i);
+        char *group = sensor_group_name(c->chip, c->dev_path);
+        char *short_slot = sensor_bus_slot(c->dev_path);
+
+        for (guint j = 0; j < c->readings->len; j++) {
+            SensorReading *r = g_ptr_array_index(c->readings, j);
+            GPtrArray *rows = g_hash_table_lookup(groups, group);
+
+            if (!rows) {
+                rows = g_ptr_array_new();
+                g_hash_table_insert(groups, g_strdup(group), rows);
+                g_ptr_array_add(order, g_strdup(group));
+            }
+            g_ptr_array_add(kind, g_strdup(r->label));
+            g_ptr_array_add(slot, g_strdup(short_slot));
+            g_ptr_array_add(source, sensor_row_id(c->chip, c->device, r->label));
+            /* GPtrArray хранит указатели, а индекс — число: приводим явно. */
+            g_ptr_array_add(rows, GUINT_TO_POINTER(kind->len - 1));
+            total++;
+        }
+        g_free(group);
+        g_free(short_slot);
+    }
+    g_print("sensors: строк=%u групп=%u\n", total, order->len);
+
+    {
+        GPtrArray *sorted = g_ptr_array_new_with_free_func(g_free);
+
+        for (guint i = 0; i < order->len; i++) {
+            const char *g = g_ptr_array_index(order, i);
+            GPtrArray *rows = g_hash_table_lookup(groups, g);
+            SenGroupOrder *item = g_new(SenGroupOrder, 1);
+
+            item->name = g;
+            item->rows = rows->len;
+            g_ptr_array_add(sorted, item);
+        }
+        g_ptr_array_sort(sorted, sen_group_cmp);
+
+        for (guint gi = 0; gi < sorted->len; gi++) {
+            SenGroupOrder *item = g_ptr_array_index(sorted, gi);
+            GPtrArray *rows = g_hash_table_lookup(groups, item->name);
+            GPtrArray *k = g_ptr_array_new_with_free_func(g_free);
+            GPtrArray *sl = g_ptr_array_new_with_free_func(g_free);
+            GPtrArray *sr = g_ptr_array_new_with_free_func(g_free);
+            GtkWidget *table;
+
+            for (guint i = 0; i < rows->len; i++) {
+                guint idx = GPOINTER_TO_UINT(g_ptr_array_index(rows, i));
+
+                g_ptr_array_add(k, g_strdup(g_ptr_array_index(kind, idx)));
+                g_ptr_array_add(sl, g_strdup(g_ptr_array_index(slot, idx)));
+                g_ptr_array_add(sr, g_strdup(g_ptr_array_index(source, idx)));
+            }
+            /* Порядок: слоты, названия каналов, ИСТОЧНИКИ. Источники
+             * обязательно из sr: в k лежат названия каналов («loc1»), и
+             * строка с таким источником не находит сенсор — видна подпись
+             * без числа. */
+            table = sen_group_table(ctx, item->name, sl, k, sr);
+            gtk_box_pack_start(GTK_BOX(box), table, FALSE, FALSE, 0);
+        }
+        g_ptr_array_unref(sorted);
+    }
+
+    g_ptr_array_unref(kind);
+    g_ptr_array_unref(slot);
+    g_ptr_array_unref(source);
+    g_ptr_array_unref(order);
+    g_hash_table_destroy(groups);
+    sensor_list_free(found);
     ctx->building = FALSE;
-    return list;
+    return box;
 }
+
 
 /* Привязать обработчики по ключу. Рекурсивный обход вместо ручного:
  * сигнатуры у font-set, color-set, value-changed и toggled разные. */

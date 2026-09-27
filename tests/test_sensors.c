@@ -943,6 +943,308 @@ static void test_live_tree(void)
     sensor_list_free(list);
 }
 
+/* Регрессия на баг «подпись есть, числа нет».
+ *
+ * В диалоге источник строки однажды собирался из названия канала
+ * («loc1») вместо ключа «чип/устройство/канал». Конфиг такой источник
+ * принимал, строка показывалась, но sensor_find_reading() ничего не
+ * находил — и апплет выводил подпись без температуры. Здесь проверяется
+ * то же условие, на котором держится вывод: КАЖДЫЙ источник из
+ * сохранённых строк обязан находить реальный сенсор.
+ *
+ * Путь к конфигу задаётся переменной SEN_TEST_CONFIG; без неё тест
+ * молча пропускает себя, чтобы обычный прогон не зависел от live-файла. */
+static void test_every_config_row_has_reading(void)
+{
+    const char *cfg = getenv("SEN_TEST_CONFIG");
+    SensorList *found;
+    char *text = NULL;
+    char *rows, **parts;
+    gsize len = 0;
+    guint bad = 0, total = 0;
+
+    if (!cfg)
+        return;
+    found = sensor_list_read("/sys/class/hwmon");
+    check(found != NULL, "живое дерево прочитано для проверки конфига");
+    if (!found)
+        return;
+    if (!g_file_get_contents(cfg, &text, &len, NULL)) {
+        printf("  инфо: конфиг %s не прочитан, проверка пропущена\n", cfg);
+        sensor_list_free(found);
+        return;
+    }
+    rows = strstr(text, "rows=");
+    check(rows != NULL, "в конфиге есть ключ rows=");
+    if (!rows) {
+        g_free(text);
+        sensor_list_free(found);
+        return;
+    }
+    rows += 5;
+    rows[strcspn(rows, "\n")] = '\0';
+    parts = g_strsplit(rows, ";", -1);
+    for (guint i = 0; parts[i]; i++) {
+        const char *bar = strchr(parts[i], '|');
+        const char *source;
+        SensorReading *r;
+
+        if (!bar || !*(bar + 1))
+            continue;   /* строка без источника — не эта проверка */
+        source = bar + 1;
+        total++;
+        r = sensor_find_reading(found, source);
+        if (!r) {
+            bad++;
+            printf("  ПРОВАЛ: источник «%s» не находит сенсор "
+                   "(строка конфига «%s»)\n", source, parts[i]);
+        }
+    }
+    g_strfreev(parts);
+    check(bad == 0, "все строки конфига находят сенсор");
+    printf("  инфо: строк конфига=%u, без сенсора=%u\n", total, bad);
+    g_free(text);
+    sensor_list_free(found);
+}
+
+static void test_bus_kind_and_slot(void)
+{
+    static const struct {
+        const char *dev_path;
+        const char *chip;
+        const char *kind;
+        const char *slot;
+    } t[] = {
+        { "/sys/devices/pci0000:00/0000:07:00.0/host0/port-0:2/"
+          "end_device-0:2/target0:0:2/0:0:2:0", "drivetemp",
+          "scsi", "0-20" },
+        { "/sys/devices/pci0000:00/0000:01:00.0/host1/port-1:3/"
+          "end_device-1:3/target1:0:3/1:0:3:0", "drivetemp",
+          "scsi", "1-30" },
+        { "/sys/devices/pci0000:00/0000:00:03.2/0000:05:00.0", "i350bb",
+          "pci", "0500" },
+        { "/sys/devices/pci0000:00/0000:00:02.0/0000:02:00.0/nvme/nvme0",
+          "nvme", "pci", "0200" },
+        { "/sys/devices/platform/coretemp.0", "coretemp",
+          "isa", "0000" },
+        { "/sys/devices/platform/coretemp.1", "coretemp",
+          "isa", "0001" },
+        { "/sys/devices/pci0000:00/0000:00:1f.3/i2c-1/1-002d", "nct7904",
+          "i2c", "1-2d" },
+    };
+    const guint n = sizeof(t) / sizeof(t[0]);
+
+    for (guint i = 0; i < n; i++) {
+        char *kind = sensor_bus_kind(t[i].dev_path, t[i].chip);
+        char *slot = sensor_bus_slot(t[i].dev_path);
+
+        check_str(kind, t[i].kind, t[i].dev_path);
+        check_str(slot, t[i].slot, t[i].dev_path);
+        g_free(kind);
+        g_free(slot);
+    }
+}
+
+/* Полное имя обязано собираться из kind+slot: если формулы разойдутся,
+ * в настройках и в апплете будут разные имена одного сенсора. */
+static void test_name_composed_from_kind_slot(void)
+{
+    static const struct {
+        const char *dev_path;
+        const char *chip;
+        const char *want;
+    } t[] = {
+        { "/sys/devices/pci0000:00/0000:07:00.0/host0/port-0:2/"
+          "end_device-0:2/target0:0:2/0:0:2:0", "drivetemp",
+          "drivetemp-scsi-0-20" },
+        { "/sys/devices/pci0000:00/0000:00:03.2/0000:05:00.0", "i350bb",
+          "i350bb-pci-0500" },
+        { "/sys/devices/pci0000:00/0000:00:1f.3/i2c-1/1-002d", "nct7904",
+          "nct7904-i2c-1-2d" },
+        { "/sys/devices/platform/coretemp.0", "coretemp",
+          "coretemp-isa-0000" },
+    };
+
+    for (guint i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        SensorChip c;
+        char *kind, *slot, *name;
+
+        memset(&c, 0, sizeof(c));
+        c.chip = (char *) t[i].chip;
+        c.dev_path = (char *) t[i].dev_path;
+        name = sensor_chip_sensors_name(&c);
+        check_str(name, t[i].want, t[i].dev_path);
+
+        /* та же формула вручную: имя == chip + "-" + kind + "-" + slot */
+        kind = sensor_bus_kind(t[i].dev_path, t[i].chip);
+        slot = sensor_bus_slot(t[i].dev_path);
+        {
+            char *group = sensor_group_name(t[i].chip, t[i].dev_path);
+            char *want = g_strdup_printf("%s-%s", group, slot);
+
+            check_str(name, want, "имя собирается из группы и слота");
+            g_free(want);
+            g_free(group);
+        }
+        g_free(name);
+        g_free(kind);
+        g_free(slot);
+    }
+}
+
+/* Без device-симлинка слот пустой, и имя не должно превращаться в
+ * «чип--» или «чип-» с висящим дефисом. */
+static void test_name_without_device(void)
+{
+    SensorChip c;
+
+    memset(&c, 0, sizeof(c));
+    c.chip = (char *) "acpitz";
+    c.dev_path = NULL;
+    {
+        char *name = sensor_chip_sensors_name(&c);
+
+        check_str(name, "acpitz", "нет пути — только имя чипа");
+        g_free(name);
+    }
+    c.dev_path = (char *) "";
+    {
+        char *name = sensor_chip_sensors_name(&c);
+
+        check_str(name, "acpitz", "пустой путь — только имя чипа");
+        g_free(name);
+    }
+    {
+        char *kind = sensor_bus_kind(NULL, "acpitz");
+        char *slot = sensor_bus_slot(NULL);
+
+        check_str(kind, "none", "без пути — шины нет");
+        check_str(slot, "", "без пути — слот пустой, не NULL");
+        g_free(kind);
+        g_free(slot);
+    }
+}
+
+/* На живой машине: имена уникальны И слоты уникальны внутри группы.
+ * Иначе две строки в таблице диалога неразличимы. */
+static void test_slots_unique_per_group(void)
+{
+    SensorList *list = sensor_list_read("/sys/class/hwmon");
+    GHashTable *seen;
+    guint dup = 0;
+
+    check(list != NULL, "живое дерево читается");
+    if (!list)
+        return;
+    seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    for (guint i = 0; i < list->chips->len; i++) {
+        SensorChip *c = g_ptr_array_index(list->chips, i);
+        char *kind = sensor_bus_kind(c->dev_path, c->chip);
+        char *slot = sensor_bus_slot(c->dev_path);
+        char *key = g_strdup_printf("%s/%s", kind, slot);
+
+        if (g_hash_table_contains(seen, key)) {
+            dup++;
+            printf("  дубль в группе: %s\n", key);
+        }
+        g_hash_table_add(seen, key);
+        /* key уходит хешу вместе с его g_free: g_hash_table_add ключ не
+         * копирует, и следующий g_free(key) давал double free — тест
+         * падал в abort() на последнем g_hash_table_destroy. */
+        g_free(kind);
+        g_free(slot);
+    }
+    check_int((gint) dup, 0, "внутри группы слоты уникальны");
+    g_hash_table_destroy(seen);
+    sensor_list_free(list);
+}
+
+/* ---------------------------------------------------- группы диалога
+ *
+ * Таблица в настройках: заголовок группы + строки вида
+ * «[галочка] короткое-имя [поле метки]». Группа обязана включать имя
+ * чипа: два coretemp дают слоты 0000 и 0001, и без чипа в заголовке
+ * пользователь не поймёт, что строки с разных процессоров.
+ */
+static void test_group_names(void)
+{
+    static const struct {
+        const char *dev_path;
+        const char *chip;
+        const char *want;
+    } t[] = {
+        { "/sys/devices/pci0000:00/0000:07:00.0/host0/port-0:2/"
+          "end_device-0:2/target0:0:2/0:0:2:0", "drivetemp",
+          "drivetemp-scsi" },
+        { "/sys/devices/pci0000:00/0000:00:03.2/0000:05:00.0", "i350bb",
+          "i350bb-pci" },
+        { "/sys/devices/pci0000:00/0000:00:02.0/0000:02:00.0/nvme/nvme0",
+          "nvme", "nvme-pci" },
+        { "/sys/devices/platform/coretemp.0", "coretemp", "coretemp-isa" },
+        { "/sys/devices/pci0000:00/0000:00:1f.3/i2c-1/1-002d", "nct7904",
+          "nct7904-i2c" },
+    };
+
+    for (guint i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        char *g = sensor_group_name(t[i].chip, t[i].dev_path);
+
+        check_str(g, t[i].want, t[i].dev_path);
+        g_free(g);
+    }
+    /* Нет пути — группа равна имени чипа, без висящего дефиса */
+    {
+        char *g = sensor_group_name("acpitz", NULL);
+
+        check_str(g, "acpitz", "без пути группа = имя чипа");
+        g_free(g);
+        g = sensor_group_name(NULL, NULL);
+        check_str(g, "unknown", "NULL-чип даёт «unknown», не падает");
+        g_free(g);
+    }
+}
+
+/* На живой машине: слот уникален внутри группы. Иначе в таблице две
+ * одинаковые строки, и пользователь не отличит один диск от другого. */
+static void test_group_slots_unique_live(void)
+{
+    SensorList *list = sensor_list_read("/sys/class/hwmon");
+    GHashTable *seen;
+    guint dup = 0, groups = 0;
+    GHashTable *kinds;
+
+    check(list != NULL, "живое дерево читается");
+    if (!list)
+        return;
+    seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    kinds = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    for (guint i = 0; i < list->chips->len; i++) {
+        SensorChip *c = g_ptr_array_index(list->chips, i);
+        char *group = sensor_group_name(c->chip, c->dev_path);
+        char *slot = sensor_bus_slot(c->dev_path);
+        char *key = g_strdup_printf("%s/%s", group, slot);
+
+        if (g_hash_table_contains(seen, key)) {
+            dup++;
+            printf("  дубль в группе: %s\n", key);
+        }
+        if (!g_hash_table_contains(kinds, group)) {
+            g_hash_table_add(kinds, g_strdup(group));
+            groups++;
+        }
+        g_hash_table_add(seen, key);   /* key уходит хешу с его g_free */
+        g_free(group);
+        g_free(slot);
+    }
+    check_int((gint) dup, 0, "внутри группы слоты уникальны");
+    /* На этой машине 5 разных групп: coretemp-isa, drivetemp-scsi,
+     * i350bb-pci, nvme-pci, nct7904-i2c. */
+    check(groups >= 4, "групп несколько, а не одна на все сенсоры");
+    printf("  инфо: групп=%u\n", groups);
+    g_hash_table_destroy(kinds);
+    g_hash_table_destroy(seen);
+    sensor_list_free(list);
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -976,6 +1278,13 @@ int main(void)
     test_rounding();
     test_rounded_region();
     test_live_tree();
+    test_bus_kind_and_slot();
+    test_name_composed_from_kind_slot();
+    test_name_without_device();
+    test_slots_unique_per_group();
+    test_group_names();
+    test_group_slots_unique_live();
+    test_every_config_row_has_reading();
 
     if (failures == 0)
         printf("TEST_OK: %d проверок, 0 провалов\n", checks);

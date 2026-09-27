@@ -377,7 +377,11 @@ char *sensor_row_id(const char *chip, const char *device, const char *label)
  *    процессоров. */
 static char *sensors_slot_from_path(const char *dev_path)
 {
-    if (!dev_path)
+    /* Пустая строка — не то же, что NULL: g_strsplit("", "/") даёт
+     * массив из одного пустого элемента, и обращение к последнему
+     * сегменту уходит за границу. Такое значение приходит из теста и
+     * может прийти из конфига, поэтому проверяем явно. */
+    if (!dev_path || !*dev_path)
         return NULL;
     /* последний компонент, начинающийся с PCI-адреса или с i2c-адреса */
     {
@@ -446,97 +450,164 @@ static char *sensors_slot_from_path(const char *dev_path)
     return NULL;
 }
 
+/* ------------------------------------------------- разбор по типу и слоту
+ *
+ * Имя в стиле sensors — это «чип-<шина>-<слот>». Для диалога нужно то же
+ * самое, но РАЗДЕЛЁННОЕ: тип группы («drivetemp», «scsi», «pci», «i2c»)
+ * и укороченный слот («1-10» вместо «scsi-1-10»). Дублировать разбор
+ * пути в плагине нельзя: формулы SCSI и i2c выведены сверкой с живым
+ * sensors(1), и вторая копия разъедется с первой при первом же
+ * новом устройстве. */
+char *sensor_bus_kind(const char *dev_path, const char *chip)
+{
+    char *slot = sensors_slot_from_path(dev_path);
+    char *kind;
+    int colons = 0;
+
+    if (slot) {
+        for (const char *p = slot; *p; p++)
+            if (*p == ':')
+                colons++;
+        /* Шина по форме слота, а не по порядку веток: SCSI-адрес
+         * «0:0:2:0» начинается с цифры, как PCI, но содержит ТРИ
+         * двоеточия против двух. */
+        if (colons == 2)
+            kind = g_strdup("pci");
+        else if (colons == 3)
+            kind = g_strdup("scsi");
+        else if (g_str_has_prefix(slot, "isa-"))
+            kind = g_strdup("isa");
+        else
+            kind = g_strdup("i2c");
+        g_free(slot);
+        return kind;
+    }
+    /* Чип без распознанной шины: настоящей шины у него нет, и sensors
+     * ничего похожего на «-pci-» не печатает. */
+    (void) chip;
+    return g_strdup("none");
+}
+
+/* Имя группы для диалога: «drivetemp-scsi», «nvme-pci», «coretemp-isa».
+ *
+ * Группа ВКЛЮЧАЕТ имя чипа, иначе в одной таблице окажутся несвязанные
+ * устройства: два coretemp (coretemp.0 и coretemp.1) дают слоты «0000» и
+ * «0001», и пользователь видит две строки с именами ядер, не понимая,
+ * что они с разных процессоров. С шиной без чипа таблица была бы
+ * общей для всех isa-сенсоров машины.
+ *
+ * Слот внутри группы уникален — проверено на живой машине. */
+char *sensor_group_name(const char *chip, const char *dev_path)
+{
+    char *kind = sensor_bus_kind(dev_path, chip);
+    char *group;
+
+    if (g_strcmp0(kind, "none") == 0)
+        group = g_strdup(chip ? chip : "unknown");
+    else
+        group = g_strdup_printf("%s-%s", chip ? chip : "unknown", kind);
+    g_free(kind);
+    return group;
+}
+
+/* Укороченный слот без имени чипа и без названия шины: «1-10», «0500»,
+ * «0000», «1-2d». Это то, что видит пользователь в таблице. */
+char *sensor_bus_slot(const char *dev_path)
+{
+    char *slot = sensors_slot_from_path(dev_path);
+
+    if (!slot)
+        return g_strdup("");
+    {
+        int colons = 0;
+
+        for (const char *p = slot; *p; p++)
+            if (*p == ':')
+                colons++;
+        if (colons == 2) {
+            /* PCI «0000:05:00.0» -> «0500»: домен и функция отброшены,
+             * bus и device склеены. Ведущие нули сохраняются — sensors
+             * печатает именно «0500». */
+            const char *colon = strchr(slot, ':');
+            char *busdev = g_strdup(colon + 1);
+            char *dot = strchr(busdev, '.');
+            char *second;
+
+            if (dot)
+                *dot = '\0';
+            second = strchr(busdev, ':');
+            if (second)
+                memmove(second, second + 1, strlen(second));
+            g_free(slot);
+            return busdev;
+        }
+        if (colons == 3) {
+            /* SCSI «0:0:2:0» -> «1-10»: host и target*10+lun, channel
+             * отброшен. Числом, а не склейкой цифр: конкатенация дала
+             * «00» там, где sensors печатает «0». */
+            gchar **p = g_strsplit(slot, ":", -1);
+            char *out;
+
+            if (g_strv_length(p) >= 4) {
+                guint target = (guint) g_ascii_strtoull(p[2], NULL, 10);
+                guint lun = (guint) g_ascii_strtoull(p[3], NULL, 10);
+
+                out = g_strdup_printf("%s-%u", p[0], target * 10 + lun);
+            } else {
+                out = g_strdup(slot);
+            }
+            g_strfreev(p);
+            g_free(slot);
+            return out;
+        }
+        if (g_str_has_prefix(slot, "isa-")) {
+            char *out = g_strdup(slot + 4);
+
+            g_free(slot);
+            return out;
+        }
+        /* i2c «1-002d» -> «1-2d»: адрес без ведущих нулей, шина
+         * остаётся. Слепим обратно в «1-2d» — это и есть укороченное
+         * представление, которое видит пользователь. */
+        {
+            gchar **p = g_strsplit(slot, "-", -1);
+            char *out;
+
+            if (g_strv_length(p) >= 2) {
+                char *z = p[1];
+
+                while (*z == '0' && z[1])
+                    z++;
+                out = g_strdup_printf("%s-%s", p[0], z);
+            } else {
+                out = g_strdup(slot);
+            }
+            g_strfreev(p);
+            g_free(slot);
+            return out;
+        }
+    }
+}
+
+/* Полное имя «чип-шина-слот», собранное из двух частей. Формулы SCSI и
+ * i2c те же, что проверены сверкой с sensors(1) на этой машине. */
 char *sensor_chip_sensors_name(const SensorChip *chip)
 {
-    char *slot;
-    char *result;
-    int colons = 0;
+    char *group, *slot, *name;
 
     if (!chip)
         return NULL;
-    slot = sensors_slot_from_path(chip->dev_path);
-    if (!slot)
-        return g_strdup(chip->chip);
-
-    /* Шина определяется формой слота, а не порядком веток: «0:0:2:0»
-     * начинается с цифры, как и PCI, но содержит ТРИ двоеточия против
-     * двух, и sensors называет его scsi. */
-    for (const char *p = slot; *p; p++)
-        if (*p == ':')
-            colons++;
-
-    if (colons == 2) {
-        /* PCI «0000:05:00.0»: слот — bus(dev), то есть «05:00» без
-         * домена и без функции. sensors печатает «pci-0500»: функция
-         * отбрасывается, двоеточие тоже. */
-        /* «0000:05:00.0» -> «0500»: домен отброшен, функция отброшена,
-         * а device и bus СКЛЕЕНЫ без разделителя. Сверка: 0000:05:00.0
-         * даёт у sensors «i350bb-pci-0500». */
-        const char *colon = strchr(slot, ':');
-        char *busdev = g_strdup(colon + 1);
-        char *dot = strchr(busdev, '.');
-        char *second_colon;
-
-        if (dot)
-            *dot = '\0';
-        second_colon = strchr(busdev, ':');
-        if (second_colon) {
-            memmove(second_colon, second_colon + 1, strlen(second_colon));
-        }
-        /* Ведущие нули НЕ обрезаем: sensors печатает «0500» и «0200»,
-         * то есть ровно как в исходном адресе. Обрезка дала «50»/«20»
-         * и не совпала. */
-        result = g_strdup_printf("%s-pci-%s", chip->chip, busdev);
-        g_free(busdev);
-    } else if (colons == 3) {
-        /* SCSI «0:0:2:0» -> «scsi-0-20», «1:0:3:0» -> «scsi-1-30».
-         *
-         * Проверено сверкой всех 13 drivetemp на этой машине с выводом
-         * sensors: берётся ПЕРВАЯ компонента (host) и число
-         * target*10 + lun — то есть номер диска в SCSI-адресе; channel
-         * (вторая) отбрасывается. Формула даёт 13 из 13.
-         *
-         * Отвергнутые варианты на тех же 13 примерах:
-         *   target || lun как строки        — 6 из 13 («1-00» вместо «1-0»)
-         *   target и «-lun», если lun != 0  — 7 из 13
-         *   host:target с дефисом            — 0 из 13
-         * Склейка строк даёт «00» там, где sensors печатает «0», поэтому
-         * считать надо числом, а не конкатенировать цифры. */
-        gchar **p = g_strsplit(slot, ":", -1);
-
-        if (g_strv_length(p) >= 4) {
-            guint target = (guint) g_ascii_strtoull(p[2], NULL, 10);
-            guint lun = (guint) g_ascii_strtoull(p[3], NULL, 10);
-
-            result = g_strdup_printf("%s-scsi-%s-%u", chip->chip, p[0],
-                                      target * 10 + lun);
-        } else {
-            result = g_strdup_printf("%s-scsi-%s", chip->chip, slot);
-        }
-        g_strfreev(p);
-    } else if (g_str_has_prefix(slot, "isa-")) {
-        result = g_strdup_printf("%s-isa-%s", chip->chip, slot + 4);
-    } else {
-        /* i2c: sensors печатает «i2c-BUS-ADDR» из «1-002d», то есть
-         * адрес адаптера «002d» печатается БЕЗ ведущих нулей, а шина
-         * вставляется перед ним. */
-        gchar **p = g_strsplit(slot, "-", -1);
-
-        if (g_strv_length(p) >= 2) {
-            gchar *addr = g_strdup(p[1]);
-            char *z = addr;
-
-            while (*z == '0' && z[1])
-                z++;
-            result = g_strdup_printf("%s-i2c-%s-%s", chip->chip, p[0], z);
-            g_free(addr);
-        } else {
-            result = g_strdup_printf("%s-i2c-%s", chip->chip, slot);
-        }
-        g_strfreev(p);
-    }
+    if (!chip->dev_path)
+        return g_strdup(chip->chip ? chip->chip : "");
+    group = sensor_group_name(chip->chip, chip->dev_path);
+    slot = sensor_bus_slot(chip->dev_path);
+    if (*slot)
+        name = g_strdup_printf("%s-%s", group, slot);
+    else
+        name = g_strdup(group);
+    g_free(group);
     g_free(slot);
-    return result;
+    return name;
 }
 
 SensorReading *sensor_find_reading(const SensorList *list, const char *row_id)

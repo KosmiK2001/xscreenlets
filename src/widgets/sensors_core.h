@@ -133,6 +133,16 @@ SensorReading *sensor_find_reading(const SensorList *list, const char *row_id);
 SensorChip *sensor_list_find_sensors_name(const SensorList *list,
                                           const char *sensors_name);
 char *sensor_chip_sensors_name(const SensorChip *chip);
+/* Тип шины: «pci», «scsi», «i2c», «isa», либо «none» если шины нет. */
+char *sensor_bus_kind(const char *dev_path, const char *chip);
+
+/* Имя группы для таблицы диалога: «drivetemp-scsi», «nvme-pci»,
+ * «coretemp-isa». ВКЛЮЧАЕТ имя чипа: два coretemp дают слоты «0000» и
+ * «0001», и без чипа в группе пользователь не отличил бы строки. */
+char *sensor_group_name(const char *chip, const char *dev_path);
+
+/* Укороченный слот без чипа и шины: «1-10», «0500», «0000», «1-2d». */
+char *sensor_bus_slot(const char *dev_path);
 
 /* Температура с округлением до десятых, с единицей измерения.
  * Единица вынесена наружу, потому что conky-конфиги пользователя
