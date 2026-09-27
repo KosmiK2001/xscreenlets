@@ -1245,6 +1245,109 @@ static void test_group_slots_unique_live(void)
     sensor_list_free(list);
 }
 
+/* Модель таблицы настроек: включение/снятие галочки обратимы.
+ *
+ * Регрессия на «чекбокс не реагирует визуально, но строка появляется».
+ * Обработчик правил priv, но не писал в модель, и искал источник не в
+ * той колонке (в читаемом имени вместо ключа). Итог: включение всегда
+ * давало idx == SEN_ROW_NONE, а снятие — тоже, то есть состояние
+ * строки в модели и в priv расходилось навсегда.
+ *
+ * Логика переключения проверяется на чистых массивах — тот же поиск по
+ * источнику, то же добавление в конец, то же снятие со сдвигом хвоста.
+ */
+typedef struct {
+    char *source;
+    gboolean active;
+} ModelRow;
+
+/* Поиск строки в priv по источнику: индекс или -1. */
+static gint model_find(GPtrArray *sources, const char *source)
+{
+    for (guint j = 0; j < sources->len; j++)
+        if (g_strcmp0(g_ptr_array_index(sources, j), source) == 0)
+            return (gint) j;
+    return -1;
+}
+
+static void test_toggle_row_is_reversible(void)
+{
+    GPtrArray *model = g_ptr_array_new();     /* ModelRow* — как GtkListStore */
+    GPtrArray *rows = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *sources = g_ptr_array_new_with_free_func(g_free);
+
+    /* Три строки: 0 и 2 включены, 1 выключена. Как в таблице: порядок
+     * в priv задаёт пользователь, а не порядок в модели. */
+    for (guint i = 0; i < 3; i++) {
+        ModelRow *r = g_new0(ModelRow, 1);
+        char *src = g_strdup_printf("chip%d/dev%d/temp1", (int) i, (int) i);
+
+        r->source = src;
+        r->active = (i != 1);
+        g_ptr_array_add(model, r);
+        if (r->active) {
+            g_ptr_array_add(rows, g_strdup_printf("метка %d", (int) i));
+            g_ptr_array_add(sources, g_strdup(src));
+        }
+    }
+    check_int((gint) rows->len, 2, "две строки выводятся");
+    check_int(model_find(sources, "chip0/dev0/temp1"), 0,
+              "сенсор 0 найден по источнику");
+    check_int(model_find(sources, "chip1/dev1/temp1"), -1,
+              "сенсор 1 выключен — не найден");
+    check_int(model_find(sources, "chip2/dev2/temp1"), 1,
+              "сенсор 2 найден по источнику, не по номеру модели");
+
+    /* Включаем сенсор 1: idx == SEN_ROW_NONE, поэтому он встаёт в
+     * КОНЕЦ — и это правильно, порядок вывода задаёт пользователь. */
+    g_ptr_array_add(rows, g_strdup("метка 1"));
+    g_ptr_array_add(sources, g_strdup("chip1/dev1/temp1"));
+    check_int((gint) rows->len, 3, "после включения три строки");
+    check_str((const char *) g_ptr_array_index(sources, 2), "chip1/dev1/temp1",
+              "включённая строка встала в конец");
+
+    /* Повторный клик на уже включённой: idx найден, дубля быть не
+     * должно. Именно это ломало чекбокс — каждый клик добавлял строку. */
+    for (guint i = 0; i < 3; i++) {
+        ModelRow *r = g_ptr_array_index(model, i);
+
+        check_int(model_find(sources, r->source) >= 0, 1,
+                  "повторный клик находит строку");
+    }
+    check_int((gint) rows->len, 3, "повторный клик не добавил дубль");
+
+    /* Снятие последней строки (сенсор 1, он встал в конец): хвост
+     * сдвигается, у оставшихся свои источники. */
+    g_ptr_array_remove_index(rows, 2);
+    g_ptr_array_remove_index(sources, 2);
+    check_int((gint) rows->len, 2, "после снятия две строки");
+    check_str((const char *) g_ptr_array_index(sources, 0), "chip0/dev0/temp1",
+              "первая строка сохранила свой источник");
+    check_str((const char *) g_ptr_array_index(sources, 1), "chip2/dev2/temp1",
+              "вторая получила свой источник, а не чужой");
+    check_int(model_find(sources, "chip1/dev1/temp1"), -1,
+              "снятая строка исчезла из priv");
+
+    /* Снятие из середины: g_ptr_array_remove_index не сдвигает хвост
+     * сам, поэтому порядок вызова обязателен — сначала подпись, потом
+     * источник, иначе строки разъедутся. */
+    g_ptr_array_add(rows, g_strdup("метка 9"));
+    g_ptr_array_add(sources, g_strdup("chip9/dev9/temp1"));
+    g_ptr_array_remove_index(rows, 0);
+    g_ptr_array_remove_index(sources, 0);
+    check_int((gint) rows->len, 2, "после второго снятия две строки");
+    check_str((const char *) g_ptr_array_index(sources, 0), "chip2/dev2/temp1",
+              "хвост сдвинулся на свои значения");
+    check_str((const char *) g_ptr_array_index(sources, 1), "chip9/dev9/temp1",
+              "последняя строка на месте");
+
+    for (guint i = 0; i < model->len; i++)
+        g_free(((ModelRow *) g_ptr_array_index(model, i))->source);
+    g_ptr_array_unref(model);
+    g_ptr_array_unref(rows);
+    g_ptr_array_unref(sources);
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -1278,6 +1381,7 @@ int main(void)
     test_rounding();
     test_rounded_region();
     test_live_tree();
+    test_toggle_row_is_reversible();
     test_bus_kind_and_slot();
     test_name_composed_from_kind_slot();
     test_name_without_device();

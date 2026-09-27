@@ -99,6 +99,58 @@ typedef struct {
     gboolean values_valid;
 } SenPriv;
 
+/* Совпадает ли подпись строки с формой «имя группы · канал»?
+ *
+ * Диалог показывает группу («nct7904-i2c», «drivetemp-scsi»), а полное
+ * имя sensors(1) — с коротким слотом («nct7904-i2c-1-2d»). Подпись
+ * записывается такая, какая была в таблице, поэтому при восстановлении
+ * источника надо понимать обе формы. */
+static gboolean sen_label_is_group_form(const char *label, SensorChip *c,
+                                        const char *channel)
+{
+    char *group = sensor_group_name(c->chip, c->dev_path);
+    char *want = g_strdup_printf("%s · %s", group, channel);
+    gboolean hit = g_strcmp0(want, label) == 0;
+
+    g_free(want);
+    g_free(group);
+    return hit;
+}
+
+/* Источник битый, если не находит сенсор.
+ *
+ * Раньше сюда попадало читаемое имя («nct7904-i2c · temp3») вместо
+ * ключа «чип/устройство/канал». Такая строка молча показывала подпись
+ * без числа — заметить можно было только глазами. */
+static gboolean sen_source_is_broken(SenPriv *priv, SensorList *found,
+                                     const char *source)
+{
+    if (!source || !*source)
+        return TRUE;
+    if (!found)
+        return FALSE;   /* дерево не прочитано — чинить нечего */
+    return sensor_find_reading(found, source) == NULL;
+}
+
+static gboolean sen_config_has_broken_sources(SenPriv *priv)
+{
+    SensorList *found = sensor_list_read("/sys/class/hwmon");
+    gboolean any = FALSE;
+
+    if (!found)
+        return FALSE;
+    for (guint i = 0; i < priv->row_sources->len; i++) {
+        if (sen_source_is_broken(priv, found,
+                                 g_ptr_array_index(priv->row_sources, i))) {
+            any = TRUE;
+            break;
+        }
+    }
+    sensor_list_free(found);
+    return any;
+}
+
+
 /* Контекст диалога. Живёт дольше properties(): контролы держат его
  * указателем, и по имени инстанса находят ЖИВОЙ priv. Имя — это же
  * имя секции конфига. */
@@ -550,7 +602,11 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
          * канал однозначно. Такой конфиг остался от прежнего обработчика
          * галочек, который писал одни подписи, — восстановить один раз при
          * старте дешевле, чем годами показывать строки без чисел. */
-        if (orphan) {
+        /* Миграция нужна и для строк с НЕПРАВИЛЬНЫМ источником, не
+         * только с пустым: прежняя сборка писала в источник читаемое имя
+         * («nct7904-i2c · temp3»), и такая строка тоже не находила
+         * сенсор. Ищем битые заранее. */
+        if (orphan || sen_config_has_broken_sources(priv)) {
             SensorList *found = sensor_list_read("/sys/class/hwmon");
             guint fixed = 0;
 
@@ -560,7 +616,10 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
                     const char *label = g_ptr_array_index(priv->rows, i);
                     gboolean done = FALSE;
 
-                    if (cur && *cur)
+                    /* Пропускаем только тот источник, который реально
+                     * находит сенсор. Битый (в нём читаемое имя вместо
+                     * ключа) чиним так же, как пустой. */
+                    if (cur && *cur && !sen_source_is_broken(priv, found, cur))
                         continue;
                     for (guint k = 0; k < found->chips->len && !done; k++) {
                         SensorChip *c =
@@ -580,6 +639,14 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
                              * два устройства с каналом «Core 1», — поэтому
                              * берём первое и предупреждаем в лог. */
                             if (g_strcmp0(want, label) == 0) {
+                                hit = TRUE;
+                            } else if (sen_label_is_group_form(label, c,
+                                                                   r->label)) {
+                                /* Подпись из диалога собирается из ИМЕНИ
+                                 * ГРУППЫ («nct7904-i2c · temp3»), а не из
+                                 * полного имени sensors(1)
+                                 * («nct7904-i2c-1-2d · temp3»). Обе формы
+                                 * встречаются в конфигах. */
                                 hit = TRUE;
                             } else {
                                 char *legacy = g_strdup_printf("%s %s",
@@ -1080,8 +1147,16 @@ static gint sen_group_cmp(gconstpointer pa, gconstpointer pb)
  * перерисовываются при прокрутке и переиспользуют ячейки неверно —
  * таблица дёргается. Toggle-рендерер рисует себя сам.
  *
- * Строка ищется в priv по ИСТОЧНИКУ, а не по индексу модели: строки
- * переставляются сортировкой, индекс после этого ничего не значит. */
+ * Строка ищется в priv по ИСТОЧНИКУ (колонка 4), а не по индексу
+ * модели: строки переставляются сортировкой, индекс после этого ничего
+ * не значит. И по индексу искать нельзя, и читать колонку 2: там
+ * лежит читаемое имя для человека, а не ключ.
+ *
+ * ОБЯЗАТЕЛЬНО пишем результат обратно в модель. Обработчик меняет
+ * priv, но GtkCellRendererToggle рисует значение из модели, и без
+ * gtk_list_store_set() галочка визуально не зажигается — при том что
+ * строка в апплете появляется.
+ */
 static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
                              gpointer data)
 {
@@ -1091,9 +1166,10 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
     GtkTreeModel *model;
     GtkTreePath *path;
     GtkTreeIter iter;
-    gboolean cur = FALSE;
+    gboolean cur = FALSE, want;
     char *source = NULL;
     char *label = NULL;
+    char *pending = NULL;
     guint idx;
 
     if (!priv || !view || ctx->building)
@@ -1106,30 +1182,41 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
         gtk_tree_path_free(path);
         return;
     }
-    /* Колонка 0 — галочка, 2 — полное имя (источник), 3 — метка. */
-    gtk_tree_model_get(model, &iter, 0, &cur, 2, &source, 3, &label, -1);
-    gtk_tree_path_free(path);
-    if (!source)
+    /* 0 — галочка, 3 — метка, 4 — источник, 5 — отложенная метка. */
+    gtk_tree_model_get(model, &iter, 0, &cur, 3, &label, 4, &source, 5,
+                       &pending, -1);
+    want = !cur;
+    if (!source) {
+        gtk_tree_path_free(path);
         goto out;
+    }
     idx = sen_row_index(priv, source);
 
-    if (!cur) {   /* включили */
-        if (idx != SEN_ROW_NONE)
-            goto out;   /* уже выводится: клик не должен менять порядок */
-        g_ptr_array_add(priv->rows, g_strdup(label ? label : ""));
-        g_ptr_array_add(priv->row_sources, g_strdup(source));
-        if (priv->values)
-            g_ptr_array_add(priv->values, NULL);
-    } else {      /* выключили */
-        if (idx == SEN_ROW_NONE)
-            goto out;
-        /* g_ptr_array_remove_index не сдвигает хвост — следующая строка
-         * получила бы чужой источник. */
-        g_ptr_array_remove_index(priv->rows, idx);
-        g_ptr_array_remove_index(priv->row_sources, idx);
-        if (priv->values && (guint) idx < priv->values->len)
-            g_ptr_array_remove_index(priv->values, idx);
+    if (want) {
+        if (idx == SEN_ROW_NONE) {
+            /* Отложенная метка (введённая до включения) важнее полного
+             * имени: пользователь её уже напечатал. */
+            const char *use = pending && *pending ? pending : label;
+
+            g_ptr_array_add(priv->rows, g_strdup(use ? use : ""));
+            g_ptr_array_add(priv->row_sources, g_strdup(source));
+            if (priv->values)
+                g_ptr_array_add(priv->values, NULL);
+        }
+    } else {
+        if (idx != SEN_ROW_NONE) {
+            /* g_ptr_array_remove_index не сдвигает хвост — следующая
+             * строка получила бы чужой источник. */
+            g_ptr_array_remove_index(priv->rows, idx);
+            g_ptr_array_remove_index(priv->row_sources, idx);
+            if (priv->values && idx < priv->values->len)
+                g_ptr_array_remove_index(priv->values, idx);
+        }
     }
+    /* Галочка в модели — иначе не зажжётся. */
+    gtk_list_store_set(GTK_LIST_STORE(model), &iter, 0, want, -1);
+    gtk_tree_path_free(path);
+
     sen_save(priv);
     sen_read_values(priv);
     sen_rebuild_cache(priv, priv->width, priv->height);
@@ -1139,12 +1226,15 @@ static void sen_tree_toggled(GtkCellRendererToggle *cell, gchar *path_str,
 out:
     g_free(source);
     g_free(label);
+    g_free(pending);
 }
 
 /* Правка метки прямо в таблице: колонка 3.
  *
- * Идентификатор строки берём из модели (колонка 2), а не из индекса:
- * после сортировки по заголовку индекс указывает на другую строку. */
+ * Метку можно ввести и ДО включения галочки — она лежит в колонке 5
+ * и подставляется при включении. Раньше она вешалась на renderer, а он
+ * один на всю таблицу: правка одной строки затирала другую.
+ */
 static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
                                   gchar *new_text, gpointer data)
 {
@@ -1159,8 +1249,8 @@ static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
 
     if (!priv || !view || ctx->building)
         return;
-    /* Пустая метка вывела бы голое число без подписи, поэтому
-     * игнорируем её: строка остаётся с прежним текстом. */
+    /* Пустая метка вывела бы голое число без подписи, поэтому её
+     * игнорируем: строка остаётся с прежним текстом. */
     if (!new_text || !*new_text)
         return;
     model = gtk_tree_view_get_model(view);
@@ -1171,20 +1261,21 @@ static void sen_tree_label_edited(GtkCellRendererText *cell, gchar *path_str,
         gtk_tree_path_free(path);
         return;
     }
-    gtk_tree_model_get(model, &iter, 2, &source, -1);
+    gtk_tree_model_get(model, &iter, 4, &source, -1);
     gtk_tree_path_free(path);
     if (!source)
         goto out;
     idx = sen_row_index(priv, source);
+
     if (idx == SEN_ROW_NONE) {
-        /* Строка не выводится: сохраняем подпись, чтобы при включении
-         * галочки не подставился полный sensors-идентификатор. */
-        g_object_set_data_full(G_OBJECT(cell), "xs-pending-label",
-                              g_strdup(new_text), g_free);
+        /* Строка не выводится — откладываем метку до включения. */
+        gtk_list_store_set(GTK_LIST_STORE(model), &iter, 3, new_text, 5,
+                           new_text, -1);
         goto out;
     }
     g_free(g_ptr_array_index(priv->rows, idx));
     g_ptr_array_index(priv->rows, idx) = g_strdup(new_text);
+    gtk_list_store_set(GTK_LIST_STORE(model), &iter, 3, new_text, -1);
     sen_save(priv);
     sen_read_values(priv);
     sen_rebuild_cache(priv, priv->width, priv->height);
@@ -1223,8 +1314,22 @@ static GtkWidget *sen_group_table(SenDialogContext *ctx, const char *group,
     gtk_widget_set_size_request(scroll, -1, 132);
     gtk_container_add(GTK_CONTAINER(scroll), outer);
 
-    store = gtk_list_store_new(4, G_TYPE_BOOLEAN, G_TYPE_STRING,
-                               G_TYPE_STRING, G_TYPE_STRING);
+    /* Шесть колонок, и порядок важен — на нём держится вся идентификация:
+     *   0 вывод    — галочка, TRUE если строка выводится
+     *   1 устройство — короткий слот («1-10», «8100»)
+     *   2 канал    — полное имя sensors(1), для чтения человеком
+     *   3 метка    — редактируемое поле
+     *   4 источник — устойчивый ключ «чип/устройство/канал» (СКРЫТЫЙ)
+     *   5 отложено  — метка, введённая ДО включения галочки
+     *
+     * Источник обязан лежать в модели отдельной колонкой. Раньше его там
+     * не было, обработчики читали колонку 2 (читаемое имя), и
+     * sen_row_index() всегда возвращал SEN_ROW_NONE: включение добавляло
+     * строку в priv, но галочка не зажигалась и повторный клик добавлял
+     * дубль, а снятие не работало вовсе. */
+    store = gtk_list_store_new(6, G_TYPE_BOOLEAN, G_TYPE_STRING,
+                               G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
+                               G_TYPE_STRING);
     view = GTK_TREE_VIEW(gtk_tree_view_new_with_model(
         GTK_TREE_MODEL(store)));
     gtk_tree_view_set_headers_visible(view, TRUE);
@@ -1283,8 +1388,14 @@ static GtkWidget *sen_group_table(SenDialogContext *ctx, const char *group,
         gtk_list_store_append(store, &it);
         /* Метка по умолчанию — полное имя сенсора: пользователь видит, что
          * выбрал, и переименовывает то, что ему нужно. */
-        gtk_list_store_set(store, &it, 0, active, 1, slot, 2, full,
-                           3, row_label ? row_label : full, -1);
+        gtk_list_store_set(store, &it,
+                           0, active,          /* вывод     */
+                           1, slot,             /* устройство */
+                           2, full,             /* канал     */
+                           3, row_label ? row_label : full,  /* метка */
+                           4, source,           /* источник (скрытый) */
+                           5, NULL,             /* отложено   */
+                           -1);
         g_free(full);
     }
     /* Модель нужна колонке «метка» для записи отредактированного текста,
