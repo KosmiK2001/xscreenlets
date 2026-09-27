@@ -611,6 +611,194 @@ static void t_font_metrics(void)
     printf("  t_font_metrics: ок\n");
 }
 
+
+/* ── Разбор SGR: чужой цвет вывода должен выживать ───────────────
+ *
+ * Раньше escape вырезался целиком, и раскраска ls --color терялась.
+ * Здесь контракт: строка без SGR — один прогон со стилем строки;
+ * SGR делит строку на прогоны и задаёт стиль каждому. */
+static void t_sgr_plain(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs = conlog_sgr_parse("hello", base, &n);
+
+    check(runs != NULL, "разбор без SGR возвращает результат");
+    check(n == 1, "строка без SGR — ровно один прогон");
+    if (runs && n == 1) {
+        check(g_strcmp0(runs[0].text, "hello") == 0, "текст прогона сохранён");
+        check(!runs[0].style.has_fg, "свой цвет не задан");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_plain: ок\n");
+}
+
+static void t_sgr_splits(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs =
+        conlog_sgr_parse("\033[31mкрас\033[0m обычный", base, &n);
+
+    check(runs != NULL, "разбор SGR возвращает результат");
+    check(n == 2, "SGR посередине делит строку на два прогона");
+    if (runs && n == 2) {
+        check(g_strcmp0(runs[0].text, "крас") == 0,
+              "текст до сброса без escape-последовательностей");
+        check(runs[0].style.has_fg, "красный задан явно");
+        check(g_strcmp0(runs[1].text, " обычный") == 0, "текст после сброса цел");
+        check(!runs[1].style.has_fg, "после сброса цвет по умолчанию");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_splits: ок\n");
+}
+
+static void t_sgr_state_carries(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs =
+        conlog_sgr_parse("\033[1;32mжирный зелёный", base, &n);
+
+    check(runs && n == 1, "комбинация 1;32 — один прогон");
+    if (runs && n == 1) {
+        check(runs[0].style.bold, "жирность из кода 1");
+        check(runs[0].style.has_fg, "зелёный из кода 32");
+        check(g_strcmp0(runs[0].text, "жирный зелёный") == 0, "текст цел");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_state_carries: ок\n");
+}
+
+static void t_sgr_reset_forms(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs = conlog_sgr_parse("\033[39mдефолт", base, &n);
+
+    check(runs && n == 1, "код 39 — один прогон");
+    if (runs && n == 1)
+        check(!runs[0].style.has_fg, "39 снимает собственный цвет");
+    conlog_sgr_free(runs, n);
+
+    runs = conlog_sgr_parse("\033[0;39;49mчисто", base, &n);
+    check(runs && n == 1, "комбинация сброса — один прогон");
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_reset_forms: ок\n");
+}
+
+static void t_sgr_bright_and_256(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs;
+
+    runs = conlog_sgr_parse("\033[91mяркокрасный", base, &n);
+    check(runs && n == 1, "код 91 разобран");
+    if (runs && n == 1) {
+        check(runs[0].style.has_fg, "у 91 есть свой цвет");
+        check(runs[0].style.fg[0] > 0.9 && runs[0].style.fg[1] < 0.5,
+              "91 красно-оранжевый, а не красный");
+    }
+    conlog_sgr_free(runs, n);
+
+    runs = conlog_sgr_parse("\033[38;5;208m256", base, &n);
+    check(runs && n == 1, "код 38;5;N разобран");
+    if (runs && n == 1) {
+        check(runs[0].style.has_fg, "у 256 есть свой цвет");
+        check(runs[0].style.fg[0] > runs[0].style.fg[2],
+              "оранжевый 208 красно-оранжевый");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_bright_and_256: ок\n");
+}
+
+static void t_sgr_truecolor(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs =
+        conlog_sgr_parse("\033[38;2;255;128;0mградиент", base, &n);
+
+    check(runs && n == 1, "код 38;2;R;G;B разобран");
+    if (runs && n == 1) {
+        check(runs[0].style.has_fg, "truecolor задаёт свой цвет");
+        check(runs[0].style.fg[0] > 0.99
+              && runs[0].style.fg[1] > 0.49 && runs[0].style.fg[1] < 0.51
+              && runs[0].style.fg[2] < 0.01, "цвет точно 255,128,0");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_truecolor: ок\n");
+}
+
+static void t_sgr_no_escape_leak(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs =
+        conlog_sgr_parse("\033[1mbold\033[0m plain \033[4munderline",
+                         base, &n);
+
+    check(runs && n == 3, "три прогона: bold, plain, underline");
+    if (runs && n == 3) {
+        check(g_strcmp0(runs[0].text, "bold") == 0, "первый прогон без мусора");
+        check(g_strcmp0(runs[1].text, " plain ") == 0, "второй с пробелами");
+        check(g_strcmp0(runs[2].text, "underline") == 0, "третий без мусора");
+        check(runs[0].style.bold, "стиль первого прогона");
+        check(!runs[1].style.bold, "стиль сброшен после 0");
+        check(runs[2].style.underline, "подчёркивание в третьем");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_no_escape_leak: ок\n");
+}
+
+static void t_sgr_has_sgr(void)
+{
+    check(!conlog_has_sgr("обычный текст"), "без escape — нет SGR");
+    check(conlog_has_sgr("\033[31mда"), "31m — это SGR");
+    check(!conlog_has_sgr("\033]0;title\007текст"),
+          "OSC-последовательность не SGR");
+    printf("  t_sgr_has_sgr: ок\n");
+}
+
+static void t_sgr_empty_and_edges(void)
+{
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+    guint n = 0;
+    ConLogRun *runs = conlog_sgr_parse("", base, &n);
+
+    check(n == 0, "пустая строка — ни одного прогона");
+    conlog_sgr_free(runs, n);
+
+    /* SGR без единого символа текста не даёт прогона: видеть нечего,
+     * а пустые прогоны в отрисовке стоили бы лишнего мерки. */
+    runs = conlog_sgr_parse("\033[31m", base, &n);
+    check(n == 0, "SGR без текста — ни одного прогона");
+    conlog_sgr_free(runs, n);
+
+    runs = conlog_sgr_parse("\033[31m\033[32m", base, &n);
+    check(n == 0, "два SGR подряд без текста — тоже ноль");
+    conlog_sgr_free(runs, n);
+
+    /* Смена стиля при наличии текста — наоборот, делит строку. */
+    runs = conlog_sgr_parse("\033[31mA\033[32mB", base, &n);
+    check(runs && n == 2, "смена стиля посреди текста даёт два прогона");
+    if (runs && n == 2) {
+        check(g_strcmp0(runs[0].text, "A") == 0, "первый прогон");
+        check(g_strcmp0(runs[1].text, "B") == 0, "второй прогон");
+        /* Красный 31 = яркий доминирует по R, зелёный 32 — по G.
+         * Сравнивать каналы надо по доминирующему, иначе проверка
+         * проходит случайно. */
+        check(runs[0].style.fg[0] > 0.9 && runs[0].style.fg[1] < 0.6,
+              "первый прогон красный");
+        check(runs[1].style.fg[1] > 0.9 && runs[1].style.fg[0] < 0.6,
+              "второй прогон зелёный");
+    }
+    conlog_sgr_free(runs, n);
+    printf("  t_sgr_empty_and_edges: ок\n");
+}
+
+
 int main(void)
 {
     t_basic();
@@ -636,6 +824,15 @@ int main(void)
     t_level_endings();
     t_title_zone();
     t_font_metrics();
+    t_sgr_plain();
+    t_sgr_splits();
+    t_sgr_state_carries();
+    t_sgr_reset_forms();
+    t_sgr_bright_and_256();
+    t_sgr_truecolor();
+    t_sgr_no_escape_leak();
+    t_sgr_has_sgr();
+    t_sgr_empty_and_edges();
     printf("\n");
     if (failures)
         printf("CONLOG_FAIL: %d проверок, %d провалов\n", checks, failures);

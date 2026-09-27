@@ -92,6 +92,7 @@ struct _ConlogPriv {
     gboolean     colorize;     /* подсветка по уровню */
     gboolean     wrap;         /* перенос длинных строк */
     gboolean     strip_ansi;   /* вырезать escape-последовательности */
+    gboolean     keep_ansi;    /* СОХРАНЯТЬ чужой цвет (SGR) в выводе */
     gboolean     autoscroll;   /* следовать за хвостом */
 
     cairo_surface_t *cache;
@@ -102,6 +103,9 @@ struct _ConlogPriv {
     int          widest_cached;
     gboolean     widest_valid;
     guint64      seen_cached;
+
+    /* Кэш ширины прогонов — общий на процесс (см. cl_run_width):
+     * он не зависит от инстанса, только от текста и шрифта. */
 };
 
 /* Живая таблица инстансов: контекст диалога переживает properties(),
@@ -365,6 +369,12 @@ static int cl_text_width(cairo_t *cr, const char *font, const char *text)
     return width;
 }
 
+
+/* Мерка ширины прогона строки с чужим цветом. Определение ниже, после
+ * cl_line_runs_get(), который её вызывает. */
+static int cl_run_width(cairo_t *cr, const char *font, const char *text,
+                        gboolean bold);
+
 /* y_top — координата ВЕРХА текста, как её и показывает pango.
  *
  * Раньше параметр назывался baseline, но pango_cairo_show_layout()
@@ -394,6 +404,115 @@ static void cl_draw_text(cairo_t *cr, const char *font, int x, gdouble y_top,
 
 /* Показываем только строки, влезающие в окно, и только в пределах
  * буфера. */
+/* Ленивая инициализация кэша: он общий на процесс, а не на инстанс. */
+static GHashTable *cl_runcache_ensure(void);
+
+/* ── Кэш разбивки строки на прогоны ─────────────────────────────
+ *
+ * Разбор SGR на каждый кадр стоил 99% CPU: на окне в 40 строк ls
+ * --color это ~400 вызовов conlog_sgr_parse() в секунду, каждый с
+ * g_strdup на каждый прогон.
+ *
+ * Строка в буфере неизменяема после добавления, поэтому ключ кэша —
+ * её порядковый номер (seq). Он монотонен и не переиспользуется,
+ * так что совпадений случайно не будет.
+ */
+typedef struct {
+    ConLogRun *runs;
+    guint      n;
+    gdouble    width;    /* сумма ширин прогонов */
+    gdouble    color[4];
+} ClLineRuns;
+
+static void cl_line_runs_free(gpointer data)
+{
+    ClLineRuns *lr = data;
+
+    if (!lr)
+        return;
+    conlog_sgr_free(lr->runs, lr->n);
+    g_free(lr);
+}
+
+static GHashTable *cl_lineruns;     /* guint64 seq -> ClLineRuns* */
+static int         cl_lineruns_n;
+
+#define CL_LINERUNS_MAX 512
+
+static GHashTable *cl_lineruns_ensure(void)
+{
+    if (!cl_lineruns)
+        cl_lineruns = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                            NULL,
+                                            cl_line_runs_free);
+    return cl_lineruns;
+}
+
+static void cl_lineruns_clear(void)
+{
+    if (!cl_lineruns)
+        return;
+    g_hash_table_destroy(cl_lineruns);
+    cl_lineruns = NULL;
+    cl_lineruns_n = 0;
+}
+
+/* Разбивка строки на прогоны с кэшем по seq. Ширина прогонов меряется
+ * один раз; пересчёт — только когда строка та же, а шрифт сменился
+ * (кэш сбрасывается целиком в cl_font_set). */
+static ClLineRuns *cl_line_runs_get(cairo_t *cr, ConlogPriv *priv,
+                                    const char *text, guint64 seq,
+                                    const gdouble color[4])
+{
+    gint64 key = (gint64) seq;
+    ClLineRuns *lr;
+    gdouble rx;
+
+    cl_lineruns_ensure();
+    lr = g_hash_table_lookup(cl_lineruns, &key);
+    if (lr)
+        return lr;
+    if (cl_lineruns_n >= CL_LINERUNS_MAX)
+        return NULL;      /* переполнен: считаем на лету, не кэшируем */
+
+    lr = g_new0(ClLineRuns, 1);
+    lr->runs = conlog_sgr_parse(text, color, &lr->n);
+    memcpy(lr->color, color, sizeof lr->color);
+    rx = 0.0;
+    for (guint k = 0; k < lr->n; k++) {
+        if (lr->runs[k].text)
+            rx += cl_run_width(cr, priv->row_font, lr->runs[k].text,
+                               lr->runs[k].style.bold);
+    }
+    lr->width = rx;
+    {
+        gint64 *k = g_new(gint64, 1);
+
+        *k = key;
+        g_hash_table_insert(cl_lineruns, k, lr);
+    }
+    cl_lineruns_n++;
+    return lr;
+}
+
+/* Мерка ширины прогона. Кэшируется в cl_line_runs_get(): здесь
+ * функция вызывается только при построении кэша строки, то есть
+ * один раз на строку, а не каждый кадр. */
+static int cl_run_width(cairo_t *cr, const char *font, const char *text,
+                        gboolean bold)
+{
+    (void) bold;   /* жирность пока не влияет на мерку */
+    return cl_text_width(cr, font, text);
+}
+
+/* Отрисовать прогон. Ширина уже посчитана при построении кэша
+ * строки, поэтому здесь только отрисовка. */
+static void cl_draw_run(cairo_t *cr, const char *font, gdouble x, gdouble y,
+                        const char *text, const gdouble color[4])
+{
+    cl_draw_text(cr, font, (int) x, y, text, color);
+}
+
 static cairo_surface_t *cl_render(ConlogPriv *priv, int width, int height)
 {
     cairo_surface_t *surface;
@@ -493,7 +612,32 @@ static cairo_surface_t *cl_render(ConlogPriv *priv, int width, int height)
             break;   /* строка ниже окна — дальше рисовать нечего */
         if (priv->colorize)
             color = priv->level_colors[conlog_level(priv->buf, i)];
-        cl_draw_text(cr, font, CONLOG_MARGIN, y, text, color);
+
+        if (priv->keep_ansi && conlog_has_sgr(text)) {
+            /* Строка с чужим цветом: рисуется по прогонам. Разбивка
+             * и мерка кэшируются по номеру строки — без кэша каждый
+             * кадр заново парсил SGR, и демон уходил в 99% CPU. */
+            guint64 seq = conlog_seq(priv->buf, i);
+            ClLineRuns *lr = cl_line_runs_get(cr, priv, text, seq, color);
+
+            if (lr) {
+                gdouble rx = CONLOG_MARGIN;
+
+                for (guint k = 0; k < lr->n; k++) {
+                    if (!lr->runs[k].text)
+                        continue;
+                    cl_draw_run(cr, font, rx, y, lr->runs[k].text,
+                                lr->runs[k].style.fg);
+                    rx += cl_run_width(cr, font, lr->runs[k].text,
+                                       lr->runs[k].style.bold);
+                }
+            } else {
+                /* кэш переполнен: рисуем строку целиком, без разбора */
+                cl_draw_run(cr, font, CONLOG_MARGIN, y, text, color);
+            }
+        } else {
+            cl_draw_run(cr, font, CONLOG_MARGIN, y, text, color);
+        }
         y += step;
         shown++;
     }
@@ -777,6 +921,15 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     priv->wrap = xs_host_api()->conf_int(kf, p->name, "wrap", 0) != 0;
     priv->strip_ansi = xs_host_api()->conf_int(kf, p->name, "strip_ansi",
                                                1) != 0;
+    /* keep_ansi сохраняет чужой цвет (SGR) вместо вырезания. Он
+     * бессмысленен вместе со strip_ansi: тот вырезает последовательности
+     * до отрисовки, и разбирать было бы уже нечего. */
+    priv->keep_ansi = xs_host_api()->conf_int(kf, p->name, "keep_ansi",
+                                              0) != 0
+                   && !priv->strip_ansi;
+    /* Буферу нужно то же решение: при keep_ansi строка хранится
+     * с escape-последовательностями, иначе разбирать их нечем. */
+    conlog_buffer_set_strip_ansi(priv->buf, !priv->keep_ansi);
     priv->autoscroll = xs_host_api()->conf_int(kf, p->name, "autoscroll",
                                                1) != 0;
     priv->scroll_top = 0;
@@ -932,6 +1085,7 @@ static void cl_save(ConlogPriv *priv)
     xs_host_api()->conf_set_int(kf, n, "colorize", priv->colorize ? 1 : 0);
     xs_host_api()->conf_set_int(kf, n, "wrap", priv->wrap ? 1 : 0);
     xs_host_api()->conf_set_int(kf, n, "strip_ansi", priv->strip_ansi ? 1 : 0);
+    xs_host_api()->conf_set_int(kf, n, "keep_ansi", priv->keep_ansi ? 1 : 0);
     xs_host_api()->conf_set_int(kf, n, "autoscroll", priv->autoscroll ? 1 : 0);
 
     /* Буфер вывода НЕ сохраняется. Он восстанавливается запуском
@@ -965,6 +1119,10 @@ static void cl_title_changed(GtkEditable *e, gpointer data)
      * кэша сбрасываются, а размер пересчитывается до перерисовки —
      * иначе строки наезжали бы на метку до следующего тика. */
     priv->widest_valid = FALSE;
+    /* Мерки прогонов зависят от шрифта, поэтому кэш разбивки
+     * сбрасывается целиком: точечная инвалидация по строкам обошлась
+     * бы дороже полной пересборки. */
+    cl_lineruns_clear();
     cl_recalc_size(priv);
     cl_save(priv);
     cl_rebuild_cache(priv, priv->width, priv->height);
@@ -1082,6 +1240,20 @@ static void cl_int_changed(GtkSpinButton *spin, gpointer data)
         xs_host_api()->invalidate(priv->plugin);
 }
 
+/* Смена режима разбора ANSI требует перезапуска команды: escape в
+ * уже полученных строках либо вырезан, либо сохранён, и пересборка
+ * окна этого не исправит. */
+static void cl_clear_buffer_and_restart(ConlogPriv *priv)
+{
+    if (!priv)
+        return;
+    conlog_clear(priv->buf);
+    priv->scroll_top = 0;
+    conlog_start(priv);
+    priv->widest_valid = FALSE;
+    cl_lineruns_clear();
+}
+
 static void cl_check_changed(GtkToggleButton *cb, gpointer data)
 {
     ConlogCtx *ctx = data;
@@ -1099,8 +1271,23 @@ static void cl_check_changed(GtkToggleButton *cb, gpointer data)
         priv->colorize = on;
     else if (!strcmp(key, "wrap"))
         priv->wrap = on;
-    else if (!strcmp(key, "strip_ansi"))
+    else if (!strcmp(key, "strip_ansi")) {
         priv->strip_ansi = on;
+        if (on)
+            priv->keep_ansi = FALSE;   /* обе опции вместе бессмысленны */
+        conlog_buffer_set_strip_ansi(priv->buf, !priv->keep_ansi);
+        cl_clear_buffer_and_restart(priv);
+    } else if (!strcmp(key, "keep_ansi")) {
+        priv->keep_ansi = on;
+        if (on)
+            priv->strip_ansi = FALSE;
+        conlog_buffer_set_strip_ansi(priv->buf, !priv->keep_ansi);
+        /* Буфер переключается на ходу: escape в уже полученных
+         * строках либо вырезан, либо сохранён. Смена режима без
+         * перезапуска команды оставила бы окно в неверном состоянии
+         * до следующего обновления. */
+        cl_clear_buffer_and_restart(priv);
+    }
     else if (!strcmp(key, "autoscroll")) {
         priv->autoscroll = on;
         if (on)
@@ -1358,6 +1545,8 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
 
         cb = cl_check(ctx, "strip_ansi", priv->strip_ansi);
         cl_row(grid, row++, "Вырезать цвета (ANSI)", cb);
+        cb = cl_check(ctx, "keep_ansi", priv->keep_ansi);
+        cl_row(grid, row++, "Сохранять цвета вывода", cb);
         cb = cl_check(ctx, "colorize", priv->colorize);
         cl_row(grid, row++, "Цвета по уровню", cb);
         cb = cl_check(ctx, "autoscroll", priv->autoscroll);

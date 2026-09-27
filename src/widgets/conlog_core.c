@@ -275,6 +275,345 @@ guint   conlog_max_lines(const ConLogBuffer *b)   { return b ? b->max_lines : 0;
 guint   conlog_len(const ConLogBuffer *b)        { return b ? b->lines->len : 0; }
 guint64 conlog_total_seen(const ConLogBuffer *b) { return b ? b->total_seen : 0; }
 
+
+/* ── Палитра SGR ────────────────────────────────────────────────
+ * Базовые 16 цветов в кубической шкале (0, 95, 135, 175, 215, 255) —
+ * те же значения, что у xterm и VTE, поэтому ls --color выглядит
+ * привычно. */
+static const guint8 sgr_basic[16][3] = {
+    {   0,   0,   0 }, { 205,   0,   0 }, {   0, 205,   0 },
+    { 205, 205,   0 }, {   0,   0, 238 }, { 205,   0, 205 },
+    {   0, 205, 205 }, { 229, 229, 229 }, { 127, 127, 127 },
+    { 255, 114, 114 }, { 114, 255, 114 }, { 255, 255, 114 },
+    { 114, 114, 255 }, { 255, 114, 255 }, { 114, 255, 255 },
+    { 255, 255, 255 }
+};
+
+static void sgr_256_rgb(guint n, gdouble rgb[3])
+{
+    /* 0..15 базовые, 16..231 куб 6x6x6, 232..255 серая шкала. */
+    if (n < 16) {
+        rgb[0] = sgr_basic[n][0] / 255.0;
+        rgb[1] = sgr_basic[n][1] / 255.0;
+        rgb[2] = sgr_basic[n][2] / 255.0;
+    } else if (n < 232) {
+        static const gdouble step[6] = { 0.0, 0.208, 0.416, 0.624, 0.792, 0.953 };
+        guint c = n - 16;
+
+        rgb[0] = step[(c / 36) % 6];
+        rgb[1] = step[(c / 6) % 6];
+        rgb[2] = step[c % 6];
+    } else {
+        gdouble v = (gdouble) (8 + (n - 232) * 10) / 255.0;
+
+        rgb[0] = rgb[1] = rgb[2] = v;
+    }
+}
+
+/* Сравнение стилей по полям, а не memcmp: в структуре есть padding,
+ * и он не обязан совпадать даже между двумя memset-нулями. */
+static gboolean sgr_style_equal(const ConLogStyle *a, const ConLogStyle *b)
+{
+    return a->bold == b->bold && a->italic == b->italic
+        && a->underline == b->underline && a->inverse == b->inverse
+        && a->dim == b->dim
+        && a->has_fg == b->has_fg && a->has_bg == b->has_bg
+        && a->fg[0] == b->fg[0] && a->fg[1] == b->fg[1]
+        && a->fg[2] == b->fg[2] && a->fg[3] == b->fg[3]
+        && a->bg[0] == b->bg[0] && a->bg[1] == b->bg[1]
+        && a->bg[2] == b->bg[2] && a->bg[3] == b->bg[3];
+}
+
+gboolean conlog_has_sgr(const char *line)
+{
+    const char *p;
+
+    if (!line)
+        return FALSE;
+    for (p = line; *p; p++) {
+        if (*p != '\033' || p[1] != '[')
+            continue;
+        p += 2;
+        /* Нужен именно «m»: прочие CSI (курсор, очистка экрана)
+         * цветом не являются. */
+        while (*p && !((guchar) *p >= '@' && (guchar) *p <= '~'))
+            p++;
+        if (*p == 'm')
+            return TRUE;
+        if (!*p)
+            break;
+    }
+    return FALSE;
+}
+
+/* Освобождение временного прогона внутри разбора: и структура, и её
+ * текст. Текст копируется в результат conlog_sgr_parse(), поэтому
+ * здесь он освобождается ровно один раз. */
+static void sgr_run_free(gpointer data)
+{
+    ConLogRun *r = data;
+
+    if (!r)
+        return;
+    g_free(r->text);
+    g_free(r);
+}
+
+void conlog_sgr_free(ConLogRun *runs, guint n_runs)
+{
+    guint i;
+
+    /* n_runs приходит от того же вызова conlog_sgr_parse(), но если
+     * разбор вернул NULL (пустая строка), счётчик всё равно мог бы
+     * остаться ненулевым у вызывающего. Проверка на NULL обязательна:
+     * без неё цикл читал бы runs[0].text из NULL. */
+    if (!runs)
+        return;
+    for (i = 0; i < n_runs; i++) {
+        if (runs[i].text)
+            g_free(runs[i].text);
+    }
+    g_free(runs);
+}
+
+/* Закрыть текущий прогон, если в нём есть что показать. Пустые
+ * прогоны не храним: два SGR подряд без текста между ними — это
+ * смена стиля, а не два видимых куска. */
+static void sgr_flush_run(GPtrArray *out, GString *text,
+                          const ConLogStyle *st, const gdouble line_color[4])
+{
+    ConLogRun run;
+
+    if (text->len == 0)
+        return;
+    memcpy(&run.style, st, sizeof run.style);
+    if (!run.style.has_fg) {
+        memcpy(run.style.fg, line_color, sizeof run.style.fg);
+    }
+    if (run.style.inverse) {
+        gdouble t[4];
+
+        memcpy(t, run.style.fg, sizeof t);
+        if (run.style.has_bg)
+            memcpy(run.style.fg, run.style.bg, sizeof t);
+        else
+            memcpy(run.style.fg, line_color, sizeof t);
+        run.style.fg[3] = 1.0;
+        memcpy(run.style.bg, t, sizeof t);
+    }
+    /* В GPtrArray кладётся УКАЗАТЕЛЬ на прогон, а free_func освобождает
+     * и его, и текст. Итоговый плотный массив собирается разыменованием.
+     * Класть значение (g_memdup2 в pdata) нельзя: тогда элементы
+     * pdata — указатели на структуры, а memcpy с n*sizeof(ConLogRun)
+     * копировал бы сами указатели вместо прогонов. */
+    /* run.text обязателен: структура копируется целиком, и без
+     * присваивания в прогон попадал мусор со стека — g_free() на нём
+     * и давал «free(): invalid size», а runs[i].text показывал
+     * пустую строку. */
+    run.text = g_strdup(text->str);
+    g_ptr_array_add(out, g_memdup2(&run, sizeof run));
+    g_string_truncate(text, 0);
+}
+
+ConLogRun *conlog_sgr_parse(const char *line, const gdouble line_color[4],
+                            guint *n_runs)
+{
+    GPtrArray *out;
+    ConLogStyle st;
+    GString *text;
+    const char *p;
+    gdouble base[4] = { 0.85, 0.85, 0.85, 1.0 };
+
+    if (n_runs)
+        *n_runs = 0;
+    if (!line)
+        return NULL;
+    if (line_color)
+        memcpy(base, line_color, sizeof base);
+
+    memset(&st, 0, sizeof st);
+    text = g_string_new(NULL);
+    out = g_ptr_array_new_with_free_func((GDestroyNotify) sgr_run_free);
+
+    for (p = line; *p; ) {
+        if (*p == '\033' && p[1] == ']') {
+            /* OSC: до BEL или ST (ESC \\). Заголовок окна из xterm
+             * не должен попадать в текст строки. */
+            const char *q = p + 2;
+
+            while (*q && *q != '\007' && !(*q == '\033' && q[1] == '\\'))
+                q++;
+            p = (*q == '\007') ? q + 1 : (*q ? q + 2 : q);
+            continue;
+        }
+        if (*p == '\033' && p[1] == '[') {
+            const char *q = p + 2;
+            /* Инициализация обязательна: при nparams=0 первый параметр
+             * писался в params[0] += цифра, то есть к мусору со
+             * стека. Из-за этого «ESC[31m» давал случайный код
+             * цвета, а прогон не делился. */
+            int params[10] = { 0 };
+            int nparams = 0;
+            gboolean is_sgr = FALSE;
+            int k;
+
+            while (*q && !((guchar) *q >= '@' && (guchar) *q <= '~')) {
+                if (*q >= '0' && *q <= '9') {
+                    if (nparams == 0)
+                        nparams = 1;
+                    if (nparams <= 9)
+                        params[nparams - 1] = params[nparams - 1] * 10
+                                              + (*q - '0');
+                } else if (*q == ';') {
+                    if (nparams < 9)
+                        nparams++;
+                    else
+                        nparams++;   /* переполнение игнорируем */
+                }
+                q++;
+            }
+            is_sgr = (*q == 'm');
+            if (!*q)
+                q = NULL;
+            else
+                q++;
+
+            if (is_sgr) {
+                /* Стиль ДО разбора: если он отличается от текущего,
+                 * прогон закрывается и начинается новый. Раньше прогон
+                 * закрывался только на коде 0, из-за чего «31mA0mB»
+                 * слипался в один кусок и красился одним цветом. */
+                ConLogStyle before = st;
+
+                if (nparams == 0)
+                    params[nparams++] = 0;   /* «ESC[m» = полный сброс */
+                for (k = 0; k < nparams; k++) {
+                    int v = params[k];
+
+                    switch (v) {
+                    case 0:
+                        memset(&st, 0, sizeof st);
+                        break;
+                    case 1:  st.bold = TRUE; break;
+                    case 2:  st.dim = TRUE; break;
+                    case 3:  st.italic = TRUE; break;
+                    case 4:  st.underline = TRUE; break;
+                    case 7:  st.inverse = TRUE; break;
+                    case 22: st.bold = st.dim = FALSE; break;
+                    case 23: st.italic = FALSE; break;
+                    case 24: st.underline = FALSE; break;
+                    case 27: st.inverse = FALSE; break;
+                    case 30: case 31: case 32: case 33:
+                    case 34: case 35: case 36: case 37:
+                        /* 30..37: стандартные цвета терминала. На тёмном
+                         * фоне они нечитаемы, поэтому берём тот же цвет,
+                         * что и у соответствующего яркого кода 90..97. */
+                        st.has_fg = TRUE;
+                        st.fg[0] = sgr_basic[v - 30 + 8][0] / 255.0;
+                        st.fg[1] = sgr_basic[v - 30 + 8][1] / 255.0;
+                        st.fg[2] = sgr_basic[v - 30 + 8][2] / 255.0;
+                        st.fg[3] = 1.0;
+                        break;
+                    case 39: st.has_fg = FALSE; break;
+                    case 90: case 91: case 92: case 93:
+                    case 94: case 95: case 96: case 97:
+                        st.has_fg = TRUE;
+                        st.fg[0] = sgr_basic[v - 90 + 8][0] / 255.0;
+                        st.fg[1] = sgr_basic[v - 90 + 8][1] / 255.0;
+                        st.fg[2] = sgr_basic[v - 90 + 8][2] / 255.0;
+                        st.fg[3] = 1.0;
+                        break;
+                    case 49: st.has_bg = FALSE; break;
+                    case 40: case 41: case 42: case 43:
+                    case 44: case 45: case 46: case 47:
+                        st.has_bg = TRUE;
+                        st.bg[3] = 1.0;
+                        st.bg[0] = sgr_basic[v - 40 + 8][0] / 255.0;
+                        st.bg[1] = sgr_basic[v - 40 + 8][1] / 255.0;
+                        st.bg[2] = sgr_basic[v - 40 + 8][2] / 255.0;
+                        break;
+                    case 38: case 48: {
+                        gboolean fg = (v == 38);
+                        int mode = (k + 1 < nparams) ? params[k + 1] : -1;
+                        gdouble rgb[3];
+
+                        if (mode == 5 && k + 2 < nparams) {
+                            sgr_256_rgb((guint) params[k + 2], rgb);
+                            k += 2;
+                        } else if (mode == 2 && k + 4 < nparams) {
+                            rgb[0] = params[k + 2] / 255.0;
+                            rgb[1] = params[k + 3] / 255.0;
+                            rgb[2] = params[k + 4] / 255.0;
+                            k += 4;
+                        } else {
+                            break;   /* неполярный код: игнорируем */
+                        }
+                        if (fg) {
+                            st.has_fg = TRUE;
+                            memcpy(st.fg, rgb, sizeof rgb);
+                            st.fg[3] = 1.0;
+                        } else {
+                            st.has_bg = TRUE;
+                            memcpy(st.bg, rgb, sizeof rgb);
+                            st.bg[3] = 1.0;
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                }
+                /* Прогон закрывается ДО смены стиля и несёт стиль,
+                 * действовавший, пока набирался его текст. Закрытие
+                 * после разбора давало пустой прогон с уже-новым
+                 * стилем, и весь SGR молча терялся. */
+                if (!sgr_style_equal(&before, &st))
+                    sgr_flush_run(out, text, &before, base);
+                p = q ? q : line + strlen(line);
+                continue;
+            }
+            /* Прочие CSI (курсор, очистка): вырезаем, текст не рвётся. */
+            p = q ? q : line + strlen(line);
+            continue;
+        }
+        if ((guchar) *p < 0x20 && *p != '\t')
+            p++;          /* управляющие символы, кроме табуляции */
+        else
+            g_string_append_c(text, *p), p++;
+    }
+
+    sgr_flush_run(out, text, &st, base);
+    g_string_free(text, TRUE);
+
+    /* Результат — плотный массив ConLogRun, а не GPtrArray:
+     * отрисовка идёт по нему подряд, без разыменования указателей.
+     * Сами прогоны копируются и освобождаются conlog_sgr_free(). */
+    {
+        guint n = out->len;
+        ConLogRun *res;
+
+        if (n_runs)
+            *n_runs = n;
+        if (n == 0) {
+            g_ptr_array_free(out, TRUE);
+            return NULL;
+        }
+        res = g_new(ConLogRun, n);
+        {
+            guint k;
+
+            for (k = 0; k < n; k++) {
+                const ConLogRun *src = g_ptr_array_index(out, k);
+
+                res[k] = *src;
+                res[k].text = g_strdup(src->text);
+            }
+        }
+        g_ptr_array_free(out, TRUE);
+        return res;
+    }
+}
+
 void conlog_append(ConLogBuffer *b, const char *text, ConLogLevel level)
 {
     ConLogLine *line;
@@ -289,6 +628,9 @@ void conlog_append(ConLogBuffer *b, const char *text, ConLogLevel level)
      * а не на сырой порции в conlog_drain(). На порции последовательность
      * может быть разорвана границей чтения («ESC[» | «31m»), и тогда
      * на экране остался бы мусор «31m». */
+    /* keep_ansi: строка сохраняется С escape-последовательностями —
+     * их разберёт conlog_sgr_parse() при отрисовке. Чистить здесь
+     * нельзя: после этого разбирать было бы нечего. */
     if (text && b->strip_ansi) {
         char *clean = conlog_strip_ansi(text, -1);
 
@@ -406,6 +748,13 @@ ConLogLevel conlog_level(const ConLogBuffer *b, guint index)
     const ConLogLine *l = conlog_get(b, index);
 
     return l ? l->level : CONLOG_LEVEL_NORMAL;
+}
+
+guint64 conlog_seq(const ConLogBuffer *b, guint index)
+{
+    if (!b || index >= b->lines->len)
+        return 0;
+    return ((ConLogLine *) g_ptr_array_index(b->lines, index))->seq;
 }
 
 void conlog_clear(ConLogBuffer *b)

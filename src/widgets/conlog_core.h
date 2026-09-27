@@ -97,6 +97,11 @@ const ConLogLine *conlog_get(const ConLogBuffer *b, guint index);
 const char *conlog_text(const ConLogBuffer *b, guint index);
 ConLogLevel conlog_level(const ConLogBuffer *b, guint index);
 
+/* Порядковый номер строки (монотонный, не переиспользуется). Нужен
+ * как ключ кэша разбивки на прогоны: строка неизменна после
+ * добавления, а номер не совпадёт с другой строкой. */
+guint64   conlog_seq(const ConLogBuffer *b, guint index);
+
 /* Очистить всё, но сохранить счётчик total_seen: он нужен, чтобы
  * «новые строки» не переиграли с нуля после очистки. */
 void      conlog_clear(ConLogBuffer *b);
@@ -133,6 +138,62 @@ int         conlog_text_ascent(const char *font_desc, const char *text);
 int         conlog_text_descent(const char *font_desc, const char *text);
 
 
+
+/* ── Собственный цвет вывода (SGR) ─────────────────────────────────
+ *
+ * Команда может присылать готовую раскраску: ls --color, grep
+ * --color, dmesg с подсветкой. Раньше escape-последовательности
+ * вырезались целиком, и чужой цвет терялся: строка красилась одним
+ * цветом по уровню. Conky в этом смысле полезен именно тем, что
+ * сохраняет раскраску, — здесь то же самое, но разбором SGR.
+ *
+ * Прогон — непрерывный отрезок строки с одним стилем. SGR
+ * (Select Graphic Rendition) меняет стиль до конца строки, поэтому
+ * границы прогонов определяются самими последовательностями.
+ *
+ * conlog_sgr_parse() возвращает СПИСОК прогонов в виде строки с
+ * нулевым байтом после каждого (char**-стиль GString-подобный
+ * расклад). Функция выделяет память — вызывающий освобождает через
+ * conlog_sgr_free().
+ */
+
+/* Стиль одного прогона: цвет, жирность, курсив, подчёркивание, инверсия. */
+typedef struct {
+    gdouble fg[4];
+    gboolean has_fg;
+    gdouble bg[4];
+    gboolean has_bg;
+    gboolean bold;
+    gboolean italic;
+    gboolean underline;
+    gboolean inverse;
+    gboolean dim;
+} ConLogStyle;
+
+/* Один прогон строки: кусок текста с одним стилем. SGR меняет стиль
+ * до конца строки, поэтому границы прогонов задают сами
+ * escape-последовательности. */
+typedef struct {
+    char       *text;
+    ConLogStyle style;
+} ConLogRun;
+
+/* Разобрать строку на прогоны.
+ *
+ * Строка без SGR даёт РОВНО ОДИН прогон со стилем строки (цвет по
+ * уровню) — на отрисовке это быстрый путь без лишних замеров.
+ * Тексты прогонов уже свободны от escape-последовательностей.
+ *
+ * line_color — цвет по уровню строки, подставляется туда, где SGR
+ * своего цвета не задал. Возвращает массив из n_runs прогонов;
+ * освобождается через conlog_sgr_free(). */
+ConLogRun  *conlog_sgr_parse(const char *line, const gdouble line_color[4],
+                             guint *n_runs);
+void        conlog_sgr_free(ConLogRun *runs, guint n_runs);
+
+/* Есть ли в строке хоть один SGR. Быстрый путь: строка без цвета
+ * рисуется одним вызовом и не меряется по прогонам. */
+gboolean    conlog_has_sgr(const char *line);
 
 /* Нужна ли прокрутка: строк больше, чем влезет в окно. */
 gboolean    conlog_needs_scroll(const ConLogBuffer *b, int window_height,
