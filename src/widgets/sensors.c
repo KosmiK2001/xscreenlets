@@ -64,6 +64,7 @@ typedef struct {
 
     int width, height;
     gboolean height_auto;   /* высоту не задавали — считаем по строкам */
+    gboolean width_auto;    /* ширину не задавали — считаем по подписям */
     int design_width, design_height;
     int corner_radius;      /* окно; содержимое скругляется тем же */
     int update_ms;
@@ -542,10 +543,16 @@ static cairo_surface_t *sen_render(SenPriv *priv, int width, int height)
              * value_x, как в прежних сборках. */
             if (priv->value_align_right) {
                 int w = sen_text_width(cr, value, value_font);
+                int value_left = width - SEN_MARGIN - w;
 
+                /* Подпись ограничена тем же местом, где начинается
+                 * число. Без этого длинная подпись (а у нас есть
+                 * «coretemp-isa-0000 · Package id 0») уезжала вправо и
+                 * ложилась прямо на значение — обе строки становились
+                 * нечитаемыми. */
                 sen_show_text(cr, label_font, label_x, y, label,
-                              priv->label_color, 0);
-                sen_show_text(cr, value_font, width - SEN_MARGIN - w, y,
+                              priv->label_color, value_left);
+                sen_show_text(cr, value_font, value_left, y,
                               value, priv->value_color, 0);
             } else {
                 sen_show_text(cr, label_font, label_x, y, label,
@@ -617,6 +624,8 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * пишет только плагин. */
     priv->height_auto = xs_host_api()->conf_int(kf, p->name, "height_auto",
                                                 -1) < 0;
+    priv->width_auto = xs_host_api()->conf_int(kf, p->name, "width_auto",
+                                               -1) < 0;
     priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                                         "corner_radius",
                                                         SEN_DEFAULT_RADIUS),
@@ -869,6 +878,12 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
         g_ptr_array_add(priv->values, NULL);
     }
 
+    /* Значения читаем ДО расчёта геометрии: авто-ширина меряет самое
+     * длинное число (SEN_VALUE_GAP между подписью и числом), и без
+     * них окно выходило бы по одним подписям, а числа уезжали бы за
+     * край. */
+    sen_read_values(priv);
+
     /* Дефолт позиции числа — за самой длинной подписью.
      *
      * Считается ПОСЛЕ формирования списка строк, и это не стилистика:
@@ -925,6 +940,46 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
         priv->height = CLAMP(need, SEN_MIN_HEIGHT, 1200);
     }
 
+    /* Ширина по самым длинным подписи и числу — по тому же принципу,
+     * что высота по строкам. Фиксированные 200px не годились, когда
+     * подписи длиннее: «coretemp-isa-0000 · Package id 0» занимала
+     * почти всю ширину, и число ложилось прямо на неё. Обе колонки
+     * становятся нечитаемыми, а дефект выглядит как «шрифт едет».
+     *
+     * Считается ПОСЛЕ того, как известен состав строк, и меряется тем
+     * же шрифтом, которым будет нарисовано, иначе масштаб уехал бы.
+     * Пользовательская ширина уважается: width_auto снимается, как
+     * только пользователь выставил размер вручную. */
+    if (priv->width_auto) {
+        cairo_surface_t *probe =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+        cairo_t *pcr = cairo_create(probe);
+        int widest = 0, need_w;
+
+        for (guint i = 0; i < priv->rows->len; i++) {
+            const char *src = g_ptr_array_index(priv->row_sources, i);
+            int lw = sen_text_width(pcr, g_ptr_array_index(priv->rows, i),
+                                    priv->label_font);
+            const char *val = priv->values_valid && i < priv->values->len
+                                ? g_ptr_array_index(priv->values, i) : NULL;
+            int vw = val ? sen_text_width(pcr, val, priv->value_font) : 0;
+            int w;
+
+            if (lw > widest)
+                widest = lw;
+            /* Зазор нужен даже без числа — иначе «Чтото» и «36.6°C»
+             * встали бы впритык к краю окна. */
+            w = lw + SEN_VALUE_GAP + vw;
+            if (w > widest)
+                widest = w;
+            (void) src;
+        }
+        need_w = priv->label_x + widest + SEN_MARGIN * 2;
+        cairo_destroy(pcr);
+        cairo_surface_destroy(probe);
+        priv->width = CLAMP(need_w, 120, 1200);
+    }
+
     priv->design_width = priv->width;
     priv->design_height = priv->height;
 
@@ -955,6 +1010,10 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
      * значение — пользователь задал высоту руками, её уважаем. */
     g_key_file_set_integer(kf, p->name, "height_auto",
                            priv->height_auto ? -1 : priv->height);
+    /* Признак авто-ширины: -1 — считать по подписям, любое другое
+     * значение — пользователь задал ширину руками, её уважаем. */
+    g_key_file_set_integer(kf, p->name, "width_auto",
+                           priv->width_auto ? -1 : priv->width);
     g_key_file_set_integer(kf, p->name, "corner_radius",
                            priv->corner_radius);
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
@@ -977,7 +1036,6 @@ static int sen_init(XsPlugin *p, GKeyFile *kf)
         p->host->log("sensors: failed to create window");
         return -1;
     }
-    sen_read_values(priv);
     sen_rebuild_cache(priv, priv->width, priv->height);
     xs_host_api()->set_opacity(p, CLAMP(priv->opacity, 0.1, 1.0));
     xs_host_api()->set_tick(p, priv->update_ms);
@@ -1170,7 +1228,13 @@ static void sen_int_changed(GtkSpinButton *spin, gpointer data)
     if (!key)
         return;
     value = gtk_spin_button_get_value_as_int(spin);
-    if (!strcmp(key, "window_width"))            priv->width = value;
+    if (!strcmp(key, "window_width")) {
+        priv->width = value;
+        /* Пользователь задал ширину руками — авто-режим выключается.
+         * Иначе следующая длинная подпись снова растолкнёт окно, и
+         * выставленный размер перестанет держаться. */
+        priv->width_auto = FALSE;
+    }
     else if (!strcmp(key, "window_height")) {
         priv->height = value;
         /* Пользователь задал высоту руками — авто-режим выключается, иначе
