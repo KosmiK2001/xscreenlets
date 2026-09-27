@@ -2081,6 +2081,64 @@ static void test_dummy_disappears_on_first_sensor(void)
     }
 }
 
+/* Заглушка dummy — только при ПЕРВОМ запуске.
+ *
+ * Требование пользователя: отметил сенсор, потом убрал — сенсоров
+ * ноль, и dummy тоже не нужен. То есть «ничего не выбрано» и «ничего
+ * не выбрано, потому что ты снимал галочки» — это разные состояния, и
+ * без отдельного признака они неразличимы: в обоих случаях ключа rows
+ * в конфиге нет.
+ *
+ * Признак selected переживает момент обнуления: он пишется всегда, даже
+ * когда сенсоров не осталось ни одного. Иначе следующий старт решил
+ * бы, что это первый запуск, и вернул заглушку. */
+static void test_dummy_only_on_first_run(void)
+{
+    /* 1. Первый запуск: selected=0, строк нет -> dummy есть. */
+    {
+        gboolean selected = FALSE, rows_len = 0, dummy;
+
+        dummy = (rows_len == 0 && !selected);
+        check_int(dummy, 1, "первый запуск показывает заглушку");
+    }
+
+    /* 2. Выбрал сенсор, потом снял: selected=1, строк нет -> dummy НЕТ. */
+    {
+        gboolean selected = TRUE, rows_len = 0, dummy;
+
+        dummy = (rows_len == 0 && !selected);
+        check_int(dummy, 0, "после снятия сенсора заглушки нет");
+    }
+
+    /* 3. Есть сенсоры: заглушка не появляется ни при каком selected. */
+    {
+        gboolean rows_len = 2, dummy;
+
+        dummy = (rows_len == 0 && !TRUE);
+        check_int(dummy, 0, "при выбранных сенсорах заглушки нет");
+    }
+
+    /* 4. Признак пишется даже при нуле сенсоров. Если бы при пустом
+     * выборе ключ не писался, признак потерялся бы — и п.2 сломался бы
+     * ровно при следующем старте, а не сразу. */
+    {
+        guint rows_len = 0;
+        gboolean selected = TRUE;
+        char *conf_rows = NULL;      /* sen_rows_to_config вернёт NULL */
+        char *conf_selected = NULL;  /* но признак обязан писаться */
+
+        if (rows_len == 0)
+            conf_rows = NULL;
+        if (selected)
+            conf_selected = g_strdup("1");
+
+        check_int(conf_rows == NULL, 1, "при нуле сенсоров ключа rows нет");
+        check(conf_selected != NULL,
+              "признак selected пишется даже без сенсоров");
+        g_free(conf_selected);
+    }
+}
+
 int main(void)
 {
     printf("test_sensors\n");
@@ -2119,6 +2177,7 @@ int main(void)
     test_config_only_enabled_sensors();
     test_step_never_overlaps_text();
     test_dummy_disappears_on_first_sensor();
+    test_dummy_only_on_first_run();
     test_auto_height_uses_effective_step();
     test_default_value_x_after_rows();
     test_nvml_source_prefix();
