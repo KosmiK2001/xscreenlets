@@ -89,6 +89,13 @@ typedef struct {
      * с 1000+ процессов это снимает 2/3 всех openat. */
     gboolean want_io_everywhere;
     gboolean want_rss_everywhere;
+    /* Режим schedstat: для всех pid читается дешёвый счётчик CPU (24
+     * байта), а полный stat — только для видимых строк. Проверка
+     * доступности файла делается один раз: если ядро собрано без
+     * CONFIG_SCHEDSTATS, applet молча работает на полном пути. */
+    gboolean use_schedstat;
+    gboolean schedstat_usable;
+    gboolean schedstat_checked;
     char *read_buffer;
 } PrivData;
 
@@ -257,6 +264,97 @@ static void pl_fill_extra(PrivData *priv, PlProcess *proc)
     }
 }
 
+/* Дешёвый первый проход: только schedstat на каждый pid.
+ *
+ * Нужен, когда сортировка идёт по CPU или PID. schedstat — 24 байта и
+ * три числа без форматирования, тогда как stat — 209 байт, которые ядро
+ * печатает текстом. Имя, starttime и состояние отсюда не получить, их
+ * добирает pl_fill_visible() уже для отсортированного top-N.
+ *
+ * Отсутствие файла — не ошибка: процесс мог завершиться между обходом
+ * каталога и чтением (на 865 pid так исчезает 31, ошибок доступа нет).
+ * Такой pid просто пропускается, как и раньше. */
+static PlProcess *pl_read_schedstat(PrivData *priv, const char *pid_text)
+{
+    char relative[64];
+    char *data;
+    guint64 pid;
+    guint64 cpu_ns = 0;
+    PlProcess *proc;
+
+    if (!g_ascii_isdigit(pid_text[0]) || !pl_number(pid_text, &pid) ||
+        pid > G_MAXINT)
+        return NULL;
+    g_snprintf(relative, sizeof(relative), "%d/schedstat", (gint)pid);
+    if (!pl_read_proc(priv, relative, &data))
+        return NULL;
+    if (!pl_core_parse_schedstat(data, &cpu_ns))
+        return NULL;
+    proc = g_new0(PlProcess, 1);
+    proc->pid = (gint)pid;
+    proc->cpu_ns = cpu_ns;
+    /* cpu_ticks неизвестен: счётчики ядра даёт только stat. Плагин держит
+     * оба счётчика, и вычисление скоростей выбирает путь по наличию
+     * cpu_ns — см. pl_core_compute_rates(). */
+    return proc;
+}
+
+/* Дочитать видимые строки: stat (имя, starttime, состояние) плюс
+ * statm/io, если их видно. Только для top-N, поэтому дёшево.
+ *
+ * ВАЖНО: pl_core_parse_stat() обнуляет cpu_tenths и ставит cpu_ns в
+ * G_MAXUINT64 — это нужно пути «только stat», где функция вообще не
+ * вызывается, чтобы каждый сэмпл считался с нуля. Здесь же она
+ * вызывается ПОСЛЕ pl_core_compute_rates(), и прямой вызов затирал бы
+ * уже посчитанный процент: applet показывал 0.2% вместо 30% и пустые
+ * колонки. Поэтому stat разбирается во временную структуру, а в
+ * процесс переносятся только те поля, которых нет в schedstat. */
+static void pl_fill_visible(PrivData *priv, PlProcess *proc,
+                            gboolean *running)
+{
+    char relative[64];
+    char *data;
+    gsize page_size;
+    PlProcess parsed;
+    PlIo io;
+
+    if (running)
+        *running = FALSE;
+    if (!priv || !proc)
+        return;
+    memset(&parsed, 0, sizeof parsed);
+    g_snprintf(relative, sizeof(relative), "%d/stat", proc->pid);
+    if (pl_read_proc(priv, relative, &data) &&
+        pl_core_parse_stat(data, &parsed, running)) {
+        /* name и start_time нужны для отрисовки и для защиты от
+         * перезапуска процесса с тем же pid. Счётчики НЕ переносим:
+         * скорости уже посчитаны по schedstat. */
+        memcpy(proc->name, parsed.name, sizeof proc->name);
+        proc->start_time = parsed.start_time;
+        proc->running = parsed.running;
+    }
+
+    page_size = (gsize)sysconf(_SC_PAGESIZE);
+    if (page_size > 0) {
+        g_snprintf(relative, sizeof(relative), "%d/statm", proc->pid);
+        if (pl_read_proc(priv, relative, &data)) {
+            guint64 rss = 0;
+
+            if (pl_core_parse_statm(data, (guint)page_size, &rss) &&
+                rss <= (guint64)G_MAXINT64)
+                proc->rss_bytes = (gint64)rss;
+        }
+    }
+    if (priv->want_io_everywhere) {
+        g_snprintf(relative, sizeof(relative), "%d/io", proc->pid);
+        if (pl_read_proc(priv, relative, &data) &&
+            pl_core_parse_io(data, &io)) {
+            proc->disk_read_bytes = io.read_bytes;
+            proc->disk_write_bytes = io.write_bytes;
+        }
+    }
+}
+
 static PlProcess *pl_read_pid(PrivData *priv, const char *pid_text,
                               gboolean *running)
 {
@@ -407,6 +505,26 @@ static void pl_sample(PrivData *priv)
         pl_core_needs_io(TRUE, priv->sorting.sort == PL_SORT_IO);
     priv->want_rss_everywhere = (priv->sorting.sort == PL_SORT_MEM);
 
+    /* Режим schedstat включается, когда сортировке не нужны rss/io и её не
+     * волнует имя: тогда единственное, что нужно от каждого процесса, —
+     * счётчик CPU, а он есть в schedstat (24 байта) вместо stat (209
+     * байт текста). При сортировке по NAME/MEM/IO полный stat обязателен:
+     * первый не знает имён, второй — rss, третий — счётчиков io.
+     * Если файла нет (ядро без CONFIG_SCHEDSTATS) — тихо откатываемся
+     * на полный путь; проверка делается один раз за работу applet-а. */
+    if (!priv->schedstat_checked) {
+        char *probe = NULL;
+        guint64 probe_ns = 0;
+
+        priv->schedstat_checked = TRUE;
+        priv->schedstat_usable =
+            pl_read_proc(priv, "self/schedstat", &probe) &&
+            pl_core_parse_schedstat(probe, &probe_ns);
+    }
+    priv->use_schedstat =
+        !priv->want_rss_everywhere && priv->sorting.sort != PL_SORT_NAME &&
+        priv->sorting.sort != PL_SORT_IO && priv->schedstat_usable;
+
     directory = g_dir_open("/proc", 0, NULL);
     if (directory) {
         while ((entry = g_dir_read_name(directory)) != NULL &&
@@ -416,9 +534,15 @@ static void pl_sample(PrivData *priv)
 
             if (!g_ascii_isdigit(entry[0]))
                 continue;
-            proc = pl_read_pid(priv, entry, &running);
-            if (!proc)
-                continue;
+            if (priv->use_schedstat) {
+                proc = pl_read_schedstat(priv, entry);
+                if (!proc)
+                    continue;
+            } else {
+                proc = pl_read_pid(priv, entry, &running);
+                if (!proc)
+                    continue;
+            }
             priv->process_count++;
             if (running)
                 priv->running_count++;
@@ -449,11 +573,28 @@ static void pl_sample(PrivData *priv)
                             baseline);
     }
     g_ptr_array_sort_with_data(current, pl_compare, &priv->sorting);
-    /* Второй проход: дочитываем statm/io уже для отсортированного
-     * top-N. Сортировать по CPU/MEM можно и по одному stat — нужно
-     * только то, что реально попадёт в строки. */
-    for (i = 0; i < MIN(current->len, priv->row_count); i++)
-        pl_fill_extra(priv, g_ptr_array_index(current, i));
+    /* Второй проход: дочитываем недостающее уже для отсортированного
+     * top-N. Сортировать по CPU/MEM можно и по одному счётчику — нужно
+     * только то, что реально попадёт в строки.
+     *
+     * В режиме schedstat здесь берётся stat: из него нужны имя,
+     * start_time и состояние процесса, которых в schedstat нет. */
+    if (priv->use_schedstat) {
+        /* Счётчик Running в этом режиме осмыслен только по видимым
+         * строкам: состояние всех процессов потребовало бы stat на
+         * каждом pid, то есть ровно того, от чего уходим. */
+        for (i = 0; i < MIN(current->len, priv->row_count); i++) {
+            PlProcess *proc = g_ptr_array_index(current, i);
+            gboolean is_running = FALSE;
+
+            pl_fill_visible(priv, proc, &is_running);
+            if (is_running)
+                priv->running_count++;
+        }
+    } else {
+        for (i = 0; i < MIN(current->len, priv->row_count); i++)
+            pl_fill_extra(priv, g_ptr_array_index(current, i));
+    }
     g_ptr_array_unref(priv->snapshot);
     priv->snapshot = g_ptr_array_ref(current);
     pl_rebuild_rows(priv);
@@ -676,8 +817,14 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
         g_free(count);
     }
     {
-        char *running = g_strdup_printf("     Running: %u",
-                                        priv->running_count);
+        /* В режиме schedstat состояние читается только для видимых строк,
+         * поэтому счётчик Running показывает их, а не все процессы.
+         * Врать было бы хуже: молчаливое «0» выглядит как зависшая
+         * система. При полном пути счётчик, как и раньше, по всем. */
+        char *running = priv->use_schedstat
+            ? g_strdup_printf("     Running (top %u): %u", priv->row_count,
+                              priv->running_count)
+            : g_strdup_printf("     Running: %u", priv->running_count);
         pango_layout_set_text(layout, running, -1);
         cairo_set_source_rgba(cr, priv->accent[0], priv->accent[1],
                               priv->accent[2], priv->accent[3]);

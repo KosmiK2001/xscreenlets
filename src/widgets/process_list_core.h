@@ -28,6 +28,7 @@
 typedef struct {
     gint     pid;
     guint64  cpu_ticks;      /* utime + stime */
+    guint64  cpu_ns;         /* schedstat, наносекунды; G_MAXUINT64 = нет */
     guint64  start_time;     /* поле 22 /proc/pid/stat — идентификатор процесса */
     guint64  disk_read_bytes;   /* G_MAXUINT64 = неизвестно */
     guint64  disk_write_bytes;  /* G_MAXUINT64 = неизвестно */
@@ -103,3 +104,25 @@ void pl_core_compute_rates(PlProcess *cur,
 gint64 pl_core_online_cores(void);
 
 #endif
+
+/* Разбор /proc/<pid>/schedstat — накопленное время CPU в наносекундах.
+ *
+ * Зачем: полный /proc/<pid>/stat стоит 5.5 мс на 830 процессов, и 3.2 мс
+ * из них — генерация текста ядром (utime+stime, имя, starttime, состояние).
+ * Для СОРТИРОВКИ по CPU нужен только счётчик времени, а schedstat отдаёт
+ * ровно его — тремя числами, 24 байта, без форматирования.
+ *
+ * Замер (830 pid, тот же обход, тот же openat):
+ *   stat для всех              5.48 мс
+ *   schedstat всех + stat 8    3.20 мс
+ *
+ * ГРАНИЦЫ, проверенные на живой системе:
+ *  - В schedstat НЕТ имени, starttime и состояния. Их даёт stat.
+ *  - Файла может не быть, если процесс завершился между обходом каталога
+ *    и чтением: на 865 pid так исчезает 31, ошибок доступа нет. Нормально.
+ *  - Значение не убывает, пока процесс жив, и обнуляется при перезапуске:
+ *    спящий процесс его не меняет, нагруженный растёт (299->896 Мнс/0.6с).
+ *  - schedstat есть не у всех: нужен CONFIG_SCHEDSTATS, выключенный во
+ *    многих дистрибутивах. Поэтому вызывающий код обязан иметь запасной
+ *    путь на полный stat. */
+gboolean pl_core_parse_schedstat(const char *text, guint64 *out_cpu_ns);
