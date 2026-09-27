@@ -117,6 +117,23 @@ int         conlog_text_width(const char *font_desc, const char *text);
 /* Высота строки по шрифту, в пикселях (не в единицах Pango!). */
 int         conlog_line_height(const char *font_desc);
 
+/* Высота ОДНОЙ строки текста по Pango: нужна для зоны заголовка, где
+ * высота строки журнала не подходит — заголовок рисуется выше и
+ * разделитель под ним не должен попадать на глифы. */
+int         conlog_text_height(const char *font_desc, const char *text);
+
+/* Ascender и descender по МЕТРИКАМ ШРИФТА (pango_font_get_metrics),
+ * а не по прямоугольнику layout. Extents отсчитываются от верха строки
+ * и ничего не говорят о базовой линии, поэтому читать ascent из
+ * logical.y — ошибка, дающая 1 вместо ~10.
+ *
+ * Нужны, чтобы поставить базовую линию метки так, чтобы её descender
+ * гарантированно не дошёл до разделителя под заголовком. */
+int         conlog_text_ascent(const char *font_desc, const char *text);
+int         conlog_text_descent(const char *font_desc, const char *text);
+
+
+
 /* Нужна ли прокрутка: строк больше, чем влезет в окно. */
 gboolean    conlog_needs_scroll(const ConLogBuffer *b, int window_height,
                                 int first_row_y, int line_step);

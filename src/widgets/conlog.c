@@ -36,6 +36,9 @@
 #define CONLOG_MIN_HEIGHT       60
 #define CONLOG_DEFAULT_FONT     "Monospace 9"
 #define CONLOG_MARGIN          6
+#define CONLOG_ROWS_GAP        4   /* просвет под разделителем */
+#define CONLOG_TITLE_TOP       3   /* отступ рамки до верха метки */
+#define CONLOG_TITLE_PAD       4   /* просвет глифов до разделителя */
 /* Сколько байт читаем за раз. Небольшой кусок нужен, чтобы не съесть
  * кадр на одном гигантском куске вывода: journalctl при перезагрузке
  * может выдать мегабайт истории одним write(). */
@@ -74,8 +77,12 @@ struct _ConlogPriv {
     int          corner_radius;
     double       opacity;
 
+    char        *title;         /* метка пользователя; пусто = без неё */
     char        *title_font;
     char        *row_font;
+    int          title_h;      /* высота зоны заголовка, 0 = нет */
+    int          title_dx;     /* смещение метки по X, px */
+    int          title_dy;     /* смещение метки по Y, px (обычно минус) */
     gdouble      title_color[4];
     gdouble      row_color[4];
     gdouble      level_colors[5][4];
@@ -358,7 +365,15 @@ static int cl_text_width(cairo_t *cr, const char *font, const char *text)
     return width;
 }
 
-static void cl_draw_text(cairo_t *cr, const char *font, int x, int baseline,
+/* y_top — координата ВЕРХА текста, как её и показывает pango.
+ *
+ * Раньше параметр назывался baseline, но pango_cairo_show_layout()
+ * позиционирует layout по его левому ВЕРХНЕМУ углу, а не по базовой
+ * линии. Из-за этого весь апплет уезжал вниз на высоту baseline
+ * layout: метка упиралась в разделитель, первая строка журнала
+ * уезжала ещё ниже, и под разделителем появлялась пустая строка.
+ * Здесь y_top переводится в координату cairo, а имя говорит правду. */
+static void cl_draw_text(cairo_t *cr, const char *font, int x, gdouble y_top,
                          const char *text, const gdouble color[4])
 {
     PangoFontDescription *fd;
@@ -371,7 +386,7 @@ static void cl_draw_text(cairo_t *cr, const char *font, int x, int baseline,
     pango_layout_set_font_description(layout, fd);
     pango_layout_set_text(layout, text, -1);
     cairo_set_source_rgba(cr, color[0], color[1], color[2], color[3]);
-    cairo_move_to(cr, x, baseline);
+    cairo_move_to(cr, x, y_top);
     pango_cairo_show_layout(cr, layout);
     g_object_unref(layout);
     pango_font_description_free(fd);
@@ -384,7 +399,7 @@ static cairo_surface_t *cl_render(ConlogPriv *priv, int width, int height)
     cairo_surface_t *surface;
     cairo_t *cr;
     int step, shown = 0;
-    gdouble y;
+    gdouble y, rows_top;
     guint total, first, last;
     ConLogView view;
     const char *font = priv->row_font;
@@ -419,12 +434,54 @@ static cairo_surface_t *cl_render(ConlogPriv *priv, int width, int height)
      * проверяется тестом. Дублировать её здесь нельзя — однажды копия
      * уже разошлась с оригиналом и показывала пустое окно при полном
      * буфере. */
-    view = conlog_visible_lines(conlog_len(priv->buf), priv->first_row_y,
+    /* Зона заголовка: метка пользователя сверху, ниже неё — разделитель,
+     * и только потом строки журнала. Метка рисуется ТОЛЬКО если задана:
+     * пустой заголовок не должен оставлять дыру, как раньше. */
+    if (priv->title_h > 0) {
+        /* Зона заголовка: [first_row_y, first_row_y + title_h).
+         * Внутри неё базовая линия метки ставится по МЕТРИКАМ ШРИФТА:
+         *   baseline + descent <= divider - CONLOG_TITLE_PAD
+         * Именно это условие держит кириллицу («р», «ц», «у») над
+         * разделителем — descender уходит на 4 px ниже базовой линии.
+         *
+         * Раньше ascent читался как -logical.y из pango_layout_get_extents(),
+         * что давало 1: extents отсчитываются от ВЕРХА строки, а не от
+         * базовой линии. */
+        /* Метка рисуется ВЕРХОМ в зону, разделитель — под зоной.
+         * Верх глифов = верх зоны + отступ рамки. Никакой baseline
+         * тут не нужен: pango позиционирует layout по верху. */
+        gdouble  zone_top = priv->first_row_y + (gdouble) priv->title_h;
+        gdouble  divider  = zone_top + 0.5;
+        /* Метка рисуется ВЕРХОМ в зону, разделитель — под зоной.
+         * title_dy обычно отрицательный: пользователь подтягивает
+         * метку к самому верху окна, не трогая зону строк ниже. */
+        gdouble  label_x  = CONLOG_MARGIN + (gdouble) priv->title_dx;
+        gdouble  label_y  = priv->first_row_y + CONLOG_TITLE_TOP
+                          + (gdouble) priv->title_dy;
+
+        cl_draw_text(cr, priv->title_font, label_x, label_y,
+                     priv->title, priv->title_color);
+        cairo_set_source_rgba(cr, priv->border_color[0], priv->border_color[1],
+                              priv->border_color[2], priv->border_color[3] * 0.55);
+        cairo_set_line_width(cr, 1.0);
+        cairo_move_to(cr, CONLOG_MARGIN, divider);
+        cairo_line_to(cr, width - CONLOG_MARGIN, divider);
+        cairo_stroke(cr);
+    }
+
+    /* Строки журнала начинаются ниже разделителя, с просветом в
+     * несколько пикселей: иначе верхняя строка прилипала бы к линии. */
+    rows_top = priv->first_row_y + priv->title_h + CONLOG_ROWS_GAP;
+    view = conlog_visible_lines(conlog_len(priv->buf), rows_top,
                                 step, height, priv->scroll_top);
     first = view.first;
     last = first + view.count;
     total = conlog_len(priv->buf);
-    y = priv->first_row_y + (gdouble) step;
+    /* y — ВЕРХ первой строки, а не базовая линия: именно так
+     * позиционирует pango_cairo_show_layout(). Раньше здесь стоял
+     * «rows_top + step», то есть на целый шаг ниже зоны строк, и под
+     * разделителем появлялась пустая строка. */
+    y = rows_top;
 
     for (guint i = first; i < last; i++) {
         const char *text = conlog_text(priv->buf, i);
@@ -486,10 +543,20 @@ static void cl_recalc_size(ConlogPriv *priv)
     if (priv->line_step > step)
         step = priv->line_step;
 
+    /* Зона заголовка: ровно одна строка, только если заголовок задан.
+     * Считается здесь, потому что и перерисовка, и расчёт высоты
+     * окна должны знать одно и то же число — иначе строки наезжают
+     * на метку при первом же изменении размера. */
+    /* Зона заголовка: своя высота плюс отступ от рамки. Считается
+     * по строке текста, а не шагом строки журнала. */
+    priv->title_h = (priv->title && *priv->title)
+                  ? conlog_text_height(priv->title_font, priv->title)
+                    + CONLOG_TITLE_TOP : 0;
+
     if (priv->height_auto) {
         /* Все строки, а не только видимые: иначе окно «прыгало» бы
          * при прокрутке. */
-        need_h = priv->first_row_y
+        need_h = priv->first_row_y + priv->title_h + CONLOG_ROWS_GAP
                + (int) conlog_len(priv->buf) * step + 12;
         priv->height = CLAMP(need_h, CONLOG_MIN_HEIGHT, 1200);
     }
@@ -504,6 +571,14 @@ static void cl_recalc_size(ConlogPriv *priv)
 
             for (guint i = 0; i < conlog_len(priv->buf); i++) {
                 int w = cl_text_width(c, priv->row_font, conlog_text(priv->buf, i));
+
+                if (w > widest)
+                    widest = w;
+            }
+            /* Заголовок тоже задаёт ширину: иначе длинная метка
+             * обрезалась бы по краю окна. */
+            if (priv->title && *priv->title) {
+                int w = cl_text_width(c, priv->title_font, priv->title);
 
                 if (w > widest)
                     widest = w;
@@ -685,10 +760,18 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
                                                         "corner_radius", 3),
                                 0, 40);
     priv->opacity = xs_host_api()->conf_dbl(kf, p->name, "opacity", 1.0);
+    s = xs_host_api()->conf_str(kf, p->name, "title", "");
+    priv->title = g_strdup(s ? s : "");
     priv->title_font = xs_host_api()->conf_str(kf, p->name, "title_font",
                                                CONLOG_DEFAULT_FONT);
     priv->row_font = xs_host_api()->conf_str(kf, p->name, "row_font",
                                              CONLOG_DEFAULT_FONT);
+    /* Смещение метки. По умолчанию подтягиваем её к верху окна:
+     * CONLOG_TITLE_TOP — это отступ рамки, а не «дыра» перед текстом. */
+    priv->title_dx = CLAMP(xs_host_api()->conf_int(kf, p->name, "title_dx", 0),
+                           -400, 400);
+    priv->title_dy = CLAMP(xs_host_api()->conf_int(kf, p->name, "title_dy", -2),
+                           -60, 60);
     priv->widest_valid = FALSE;   /* шрифт из конфига — считаем заново */
     priv->colorize = xs_host_api()->conf_int(kf, p->name, "colorize", 1) != 0;
     priv->wrap = xs_host_api()->conf_int(kf, p->name, "wrap", 0) != 0;
@@ -777,6 +860,7 @@ static void cl_shutdown(XsPlugin *p)
     conlog_buffer_free(priv->buf);
     g_free(priv->command);
     g_free(priv->cwd);
+    g_free(priv->title);
     g_free(priv->title_font);
     g_free(priv->row_font);
     g_free(priv);
@@ -818,8 +902,33 @@ static void cl_save(ConlogPriv *priv)
     xs_host_api()->conf_set_int(kf, n, "line_step", priv->line_step);
     xs_host_api()->conf_set_int(kf, n, "first_row_y", priv->first_row_y);
     xs_host_api()->conf_set_dbl(kf, n, "opacity", priv->opacity);
+    xs_host_api()->conf_set_str(kf, n, "title", priv->title ? priv->title : "");
     xs_host_api()->conf_set_str(kf, n, "title_font", priv->title_font);
     xs_host_api()->conf_set_str(kf, n, "row_font", priv->row_font);
+    /* Смещения метки: без них настройка из диалога терялась бы при
+     * перезапуске демона, и окно возвращалось бы к метке по центру. */
+    xs_host_api()->conf_set_int(kf, n, "title_dx", priv->title_dx);
+    xs_host_api()->conf_set_int(kf, n, "title_dy", priv->title_dy);
+    {
+        char rgb[32];
+        /* Цвета тоже должны переживать рестарт, иначе кнопка цвета
+         * в диалоге работала бы только до перезапуска демона. */
+        /* Формат обязан совпадать с cl_parse_rgba(): rgba(r,g,b,a).
+         * Раньше здесь стояло «r,g,b,a», что парсер не читал — цвет
+         * молча сбрасывался к дефолту при каждом пересчёте размера. */
+        g_snprintf(rgb, sizeof rgb, "rgba(%d,%d,%d,%.3f)",
+                   (int) (priv->title_color[0] * 255 + 0.5),
+                   (int) (priv->title_color[1] * 255 + 0.5),
+                   (int) (priv->title_color[2] * 255 + 0.5),
+                   priv->title_color[3]);
+        xs_host_api()->conf_set_str(kf, n, "title_color", rgb);
+        g_snprintf(rgb, sizeof rgb, "rgba(%d,%d,%d,%.3f)",
+                   (int) (priv->row_color[0] * 255 + 0.5),
+                   (int) (priv->row_color[1] * 255 + 0.5),
+                   (int) (priv->row_color[2] * 255 + 0.5),
+                   priv->row_color[3]);
+        xs_host_api()->conf_set_str(kf, n, "row_color", rgb);
+    }
     xs_host_api()->conf_set_int(kf, n, "colorize", priv->colorize ? 1 : 0);
     xs_host_api()->conf_set_int(kf, n, "wrap", priv->wrap ? 1 : 0);
     xs_host_api()->conf_set_int(kf, n, "strip_ansi", priv->strip_ansi ? 1 : 0);
@@ -831,6 +940,38 @@ static void cl_save(ConlogPriv *priv)
      * мегабайтами и делало его нечитаемым без единой пользы. */
     g_key_file_remove_key(kf, n, "last_output", NULL);
     xs_core_plugin_conf_flush(priv->plugin->name);
+}
+
+/* Заголовок окна: меняет только подпись и зону под неё. Команду НЕ
+ * перезапускает — иначе правка метки обрывала бы поток журнала. */
+static void cl_title_changed(GtkEditable *e, gpointer data)
+{
+    ConlogCtx *ctx = data;
+    ConlogPriv *priv = cl_live_priv(ctx);
+    const char *txt = gtk_entry_get_text(GTK_ENTRY(e));
+    char *want = g_strdup(txt ? txt : "");
+
+    if (!priv || ctx->building) {
+        g_free(want);
+        return;
+    }
+    if (g_strcmp0(want, priv->title) == 0) {
+        g_free(want);
+        return;
+    }
+    g_free(priv->title);
+    priv->title = want;
+    /* Заголовок влияет на ширину окна и на зону строк, поэтому оба
+     * кэша сбрасываются, а размер пересчитывается до перерисовки —
+     * иначе строки наезжали бы на метку до следующего тика. */
+    priv->widest_valid = FALSE;
+    cl_recalc_size(priv);
+    cl_save(priv);
+    cl_rebuild_cache(priv, priv->width, priv->height);
+    if (priv->plugin->win) {
+        xs_host_api()->resize(priv->plugin, priv->width, priv->height);
+        xs_host_api()->invalidate(priv->plugin);
+    }
 }
 
 static void cl_cmd_changed(GtkEditable *e, gpointer data)
@@ -863,6 +1004,40 @@ static void cl_cmd_changed(GtkEditable *e, gpointer data)
         xs_host_api()->invalidate(priv->plugin);
 }
 
+/* Смена шрифта метки. Меняется только оформление заголовка, поэтому
+ * команда не перезапускается, но высота зоны и кэш ширины строк
+ * сбрасываются: иначе строки наезжали бы на метку до следующего тика. */
+static void cl_font_set(GtkFontButton *fb, gpointer data)
+{
+    ConlogCtx *ctx = data;
+    ConlogPriv *priv = cl_live_priv(ctx);
+    const char *key = g_object_get_data(G_OBJECT(fb), "xs-key");
+    const char *desc = gtk_font_chooser_get_font(GTK_FONT_CHOOSER(fb));
+    char *want;
+
+    if (!priv || ctx->building || !key || !desc)
+        return;
+    want = g_strdup(desc);
+    if (!g_strcmp0(key, "title_font")) {
+        g_free(priv->title_font);
+        priv->title_font = want;
+    } else if (!g_strcmp0(key, "row_font")) {
+        g_free(priv->row_font);
+        priv->row_font = want;
+    } else {
+        g_free(want);
+        return;
+    }
+    priv->widest_valid = FALSE;
+    cl_recalc_size(priv);
+    cl_save(priv);
+    cl_rebuild_cache(priv, priv->width, priv->height);
+    if (priv->plugin->win) {
+        xs_host_api()->resize(priv->plugin, priv->width, priv->height);
+        xs_host_api()->invalidate(priv->plugin);
+    }
+}
+
 static void cl_int_changed(GtkSpinButton *spin, gpointer data)
 {
     ConlogCtx *ctx = data;
@@ -890,6 +1065,10 @@ static void cl_int_changed(GtkSpinButton *spin, gpointer data)
         priv->line_step = v;
     } else if (!strcmp(key, "first_row_y")) {
         priv->first_row_y = v;
+    } else if (!strcmp(key, "title_dx")) {
+        priv->title_dx = v;
+    } else if (!strcmp(key, "title_dy")) {
+        priv->title_dy = v;
     } else if (!strcmp(key, "opacity")) {
         priv->opacity = gtk_spin_button_get_value(spin);
         xs_host_api()->set_opacity(priv->plugin, CLAMP(priv->opacity, 0.1, 1.0));
@@ -965,6 +1144,18 @@ static void cl_color_set(GtkColorButton *cb, gpointer data)
                (int) (c.red * 255), (int) (c.green * 255),
                (int) (c.blue * 255), c.alpha);
     g_key_file_set_string(priv->kf, priv->plugin->name, key, buf);
+    /* Конфиг обновлён, но отрисовка берёт цвет из priv: без этой
+     * строки кнопка цвета меняла файл, но картинка оставалась прежней
+     * до перезапуска демона. */
+    if (!g_strcmp0(key, "title_color")) {
+        cl_parse_rgba(buf, priv->title_color);
+    } else if (!g_strcmp0(key, "row_color")) {
+        cl_parse_rgba(buf, priv->row_color);
+    } else if (!g_strcmp0(key, "background_color")) {
+        cl_parse_rgba(buf, priv->background_color);
+    } else if (!g_strcmp0(key, "border_color")) {
+        cl_parse_rgba(buf, priv->border_color);
+    }
     xs_core_plugin_conf_flush(priv->plugin->name);
     cl_rebuild_cache(priv, priv->cache_width, priv->cache_height);
     if (priv->plugin->win)
@@ -986,7 +1177,11 @@ static GtkWidget *cl_entry(ConlogCtx *ctx, const char *key, const char *value)
     gtk_entry_set_text(GTK_ENTRY(e), value ? value : "");
     gtk_widget_set_hexpand(e, TRUE);
     g_object_set_data_full(G_OBJECT(e), "xs-key", g_strdup(key), g_free);
-    g_signal_connect(e, "changed", G_CALLBACK(cl_cmd_changed), ctx);
+    /* Обработчик выбирается по ключу: заголовок не должен
+     * перезапускать команду, а команда — игнорировать заголовок. */
+    g_signal_connect(e, "changed",
+                     G_CALLBACK(g_strcmp0(key, "title") == 0
+                                ? cl_title_changed : cl_cmd_changed), ctx);
     return e;
 }
 
@@ -1084,7 +1279,8 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_widget_set_margin_bottom(box, 8);
     {
         GtkWidget *hint = gtk_label_new(
-            "Выполняется через /bin/sh -c. Примеры:\n"
+            "Аргументы передаются процессу напрямую, без оболочки.\n"
+            "Примеры:\n"
             "  journalctl -f -n 20\n"
             "  dmesg -w\n"
             "  tail -F /var/log/messages\n"
@@ -1092,12 +1288,60 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
         gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
         gtk_box_pack_start(GTK_BOX(box), hint, FALSE, FALSE, 0);
     }
+    /* Заголовок окна: метка пользователя сверху. Пустая строка — окно
+     * без заголовка, зона не резервируется. */
+    {
+        GtkWidget *cap = gtk_label_new("Заголовок окна (необязательно)");
+
+        gtk_label_set_xalign(GTK_LABEL(cap), 0.0);
+        gtk_box_pack_start(GTK_BOX(box), cap, FALSE, FALSE, 0);
+    }
+    gtk_box_pack_start(GTK_BOX(box),
+                       cl_entry(ctx, "title", priv->title), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box),
                        cl_entry(ctx, "command", priv->command), FALSE, FALSE, 0);
     btn = gtk_button_new_with_label("Очистить вывод");
     g_signal_connect(btn, "clicked", G_CALLBACK(cl_clear_clicked), ctx);
     gtk_box_pack_start(GTK_BOX(box), btn, FALSE, FALSE, 0);
     gtk_container_add(GTK_CONTAINER(frame), box);
+    gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
+
+    /* --- Вид: оформление метки окна ---
+     * Шрифт, цвет и смещения метки задаются отдельно от строк журнала:
+     * заголовок обычно крупнее или жирнее, и двигать его вправо нужно
+     * независимо от текста. */
+    frame = gtk_frame_new("Вид: метка окна");
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start(box, 8);
+    gtk_widget_set_margin_end(box, 8);
+    gtk_widget_set_margin_top(box, 8);
+    gtk_widget_set_margin_bottom(box, 8);
+    grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+    {
+        GtkWidget *fb = gtk_font_button_new_with_font(priv->title_font);
+
+        g_object_set_data_full(G_OBJECT(fb), "xs-key",
+                               g_strdup("title_font"), g_free);
+        g_signal_connect(fb, "font-set", G_CALLBACK(cl_font_set), ctx);
+        cl_row(grid, 0, "Шрифт метки", fb);
+    }
+    cl_row(grid, 1, "Цвет метки", cl_color(ctx, "title_color", priv->title_color));
+    /* Диапазоны совпадают с CLAMP в cl_init(), иначе значение из
+     * конфига обрезалось бы самим spin-кнопкой. */
+    cl_row(grid, 2, "Смещение по X",
+           cl_spin(ctx, "title_dx", priv->title_dx, -400, 400));
+    cl_row(grid, 3, "Смещение по Y",
+           cl_spin(ctx, "title_dy", priv->title_dy, -60, 60));
+    {
+        GtkWidget *hint = gtk_label_new(
+            "Смещение по Y: отрицательное значение подтягивает метку вверх.");
+
+        gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
+        gtk_grid_attach(GTK_GRID(grid), hint, 0, 4, 2, 1);
+    }
+    gtk_container_add(GTK_CONTAINER(box), grid);
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Поведение --- */

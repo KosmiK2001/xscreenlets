@@ -566,6 +566,51 @@ static void t_level_endings(void)
     printf("  t_level_endings: ок\n");
 }
 
+
+/* Заголовок окна резервирует зону, и строки журнала начинаются НИЖЕ
+ * неё. Проверяем конц��ольную арифметику: без заголовка first=0,
+ * с заголовком 20 px строки сдвигаются, а число видимых строк
+ * на ту же высоту уменьшается. */
+static void t_title_zone(void)
+{
+    ConLogView plain = conlog_visible_lines(200, 6, 14, 200, 0);
+    ConLogView titled = conlog_visible_lines(200, 6 + 20, 14, 200, 0);
+
+    check(plain.first == 0 && titled.first == 0,
+          "начало списка не сдвигается — сдвигается только рисуемая зона");
+    check(plain.count > titled.count,
+          "заголовок отнимает высоту у журнала");
+    /* Заголовок 20 px при шаге 14 отнимает ОДНУ строку, а не две:
+     * округление идёт по целой строке, а не по пикселям. */
+    check(plain.count == 14 && titled.count == 13,
+          "без заголовка 14 строк, с заголовком 20 px — 13");
+    printf("  t_title_zone: ок\n");
+}
+
+
+/* Ascender и descender берутся из МЕТРИК ШРИФТА, а не из
+ * pango_layout_get_extents(): extents отсчитываются от верха строки,
+ * поэтому ascent = -logical.y давал 1, descender считался как вс��
+ * высота, и зона заголовка выходила вдвое больше нужного — под
+ * разделителем появлялась пустая строка. */
+static void t_font_metrics(void)
+{
+    int a = conlog_text_ascent("Monospace 9", "системный журнал");
+    int d = conlog_text_descent("Monospace 9", "системный журнал");
+    int h = conlog_text_height("Monospace 9", "системный журнал");
+
+    check(a > 5, "ascender — настоящая высота вверх от базовой линии");
+    check(d > 0, "descender есть: в кириллице «р» и «ц» уходят вниз");
+    check(h == a + d, "высота строки равна ascent + descent");
+    check(a != h, "ascender не равен всей высоте — это была ошибка");
+
+    check(conlog_text_height("Monospace 9", "") == 0,
+          "пустой текст не резервирует зону");
+    check(conlog_text_ascent("Monospace 9", "") == 0,
+          "ascender пустого текста нулевой");
+    printf("  t_font_metrics: ок\n");
+}
+
 int main(void)
 {
     t_basic();
@@ -589,6 +634,8 @@ int main(void)
     t_utf8_survives_filter();
     t_visible_lines();
     t_level_endings();
+    t_title_zone();
+    t_font_metrics();
     printf("\n");
     if (failures)
         printf("CONLOG_FAIL: %d проверок, %d провалов\n", checks, failures);

@@ -10,6 +10,7 @@
 #include "conlog_core.h"
 
 #include <string.h>
+#include <pango/pango.h>
 #include <pango/pangocairo.h>
 #include <cairo.h>
 
@@ -473,6 +474,91 @@ int conlog_line_height(const char *font_desc)
     cairo_surface_destroy(surface);
     pango_font_description_free(fd);
     return height;
+}
+
+int conlog_text_height(const char *font_desc, const char *text)
+{
+    PangoFontDescription *fd;
+    PangoLayout *layout;
+    PangoRectangle logical;
+    cairo_surface_t *surface;
+    cairo_t *cr;
+    int height;
+
+    if (!text || !*text)
+        return 0;
+    fd = pango_font_description_from_string(font_desc ? font_desc : "Monospace 9");
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cr = cairo_create(surface);
+    layout = pango_cairo_create_layout(cr);
+    pango_layout_set_font_description(layout, fd);
+    pango_layout_set_text(layout, text, -1);
+    pango_layout_get_extents(layout, NULL, &logical);
+    /* Высота строки целиком. Координаты отсчитываются от верха, поэтому
+     * достаточно одного logical.height. */
+    height = logical.height / PANGO_SCALE;
+    if (height < 1)
+        height = 1;
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+    pango_font_description_free(fd);
+    return height;
+}
+
+int conlog_font_metric(const char *font_desc, int which)
+{
+    PangoFontDescription *fd;
+    PangoFontMetrics *m;
+    cairo_surface_t *surface;
+    cairo_t *cr;
+    int v;
+
+    fd = pango_font_description_from_string(font_desc ? font_desc : "Monospace 9");
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cr = cairo_create(surface);
+    /* pango_font_map_load_font() возвращает PangoFont*, а метрики
+     * лежат на нём же: get_metrics(). Путать эти два типа — ошибка
+     * компиляции, а не runtime. */
+    {
+        /* Второй аргумент pango_font_map_load_font() — PangoContext*,
+         * а pango_font_get_metrics() принимает PangoLanguage*. Я передал
+         * контекст в оба места: первый сработал, второй — ошибка
+         * компиляции. Язык NULL означает «системный по умолчанию». */
+        PangoContext *pc = pango_cairo_create_context(cr);
+        PangoFont *f = pango_font_map_load_font(pango_cairo_font_map_get_default(),
+                                                pc, fd);
+
+        m = f ? pango_font_get_metrics(f, NULL) : NULL;
+        if (f)
+            g_object_unref(f);
+        g_object_unref(pc);
+    }
+    if (m) {
+        v = (which == 0 ? pango_font_metrics_get_ascent(m)
+                        : pango_font_metrics_get_descent(m)) / PANGO_SCALE;
+        pango_font_metrics_unref(m);
+    } else {
+        v = 0;
+    }
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+    pango_font_description_free(fd);
+    return v;
+}
+
+int conlog_text_ascent(const char *font_desc, const char *text)
+{
+    if (!text || !*text)
+        return 0;
+    return conlog_font_metric(font_desc, 0);
+}
+
+int conlog_text_descent(const char *font_desc, const char *text)
+{
+    if (!text || !*text)
+        return 0;
+    return conlog_font_metric(font_desc, 1);
 }
 
 gboolean conlog_needs_scroll(const ConLogBuffer *b, int window_height,
