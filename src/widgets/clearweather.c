@@ -904,7 +904,7 @@ static gboolean cw_parse_openmeteo(CwPriv *priv, const char *text,
 
                 if (!t || !today || !g_str_has_prefix(t, today))
                     continue;
-                if (atoi(t + 11) <= cur_hour)
+                if (strlen(t) >= 13 && atoi(t + 11) <= cur_hour)
                     start = i;
             }
             g_free(today);
@@ -921,9 +921,23 @@ static gboolean cw_parse_openmeteo(CwPriv *priv, const char *text,
                 if (!t)
                     continue;
                 memset(&h, 0, sizeof(h));
-                h.label = g_strdup(t + 11);   /* "HH:MM" -> часы */
-                if (h.label[2] == ':')
-                    h.label[2] = '\0';
+                /* Часы из "ГГГГ-ММ-ДДTЧЧ:ММ". Смещение 11 фиксировано,
+                 * и без проверки длины это чтение за пределом строки:
+                 * на укороченном значении g_strdup копировал мусор до
+                 * первого нуля, и в подписи появлялись юникод-символы.
+                 * Проверяем и разбор длины, что часы вообще есть. */
+                if (strlen(t) >= 13) {
+                    h.label = g_strdup(t + 11);   /* "ЧЧ:ММ" -> часы */
+                    if (h.label[2] == ':')
+                        h.label[2] = '\0';
+                } else if (strlen(t) >= 2 && g_ascii_isdigit(t[0])
+                           && g_ascii_isdigit(t[1])) {
+                    char two[3] = { t[0], t[1], '\0' };
+
+                    h.label = g_strdup(two);
+                } else {
+                    h.label = g_strdup("--");
+                }
                 h.temp = nv ? json_node_get_double(nv) : 0.0;
                 h.kind = nc ? cw_wmo_kind((int)json_node_get_int(nc))
                             : CW_W_N;
@@ -2029,7 +2043,14 @@ static int cw_text_markup(cairo_t *cr, PangoLayout *layout, const char *text,
 {
     int tw = 0, th = 0;
 
-    pango_layout_set_markup(layout, text ? text : "", -1);
+        /* Атрибуты layout живут отдельно от текста: pango_layout_set_text()
+     * и pango_layout_set_markup() НЕ сбрасывают список, который заполнил
+     * предыдущий вызов. Старые атрибуты висят на новом тексте, и это
+     * было видно: подпись дня «Вт» после колонки с <b>/<i> получала от
+     * Pango ширину 35 px при реальных 19, и после букв дорисовывался
+     * лишний глиф. Сбрасываем перед каждой установкой текста. */
+    pango_layout_set_attributes(layout, NULL);
+pango_layout_set_markup(layout, text ? text : "", -1);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
@@ -2045,7 +2066,14 @@ static int cw_text_markup_right(cairo_t *cr, PangoLayout *layout,
 {
     int tw = 0, th = 0;
 
-    pango_layout_set_markup(layout, text ? text : "", -1);
+        /* Атрибуты layout живут отдельно от текста: pango_layout_set_text()
+     * и pango_layout_set_markup() НЕ сбрасывают список, который заполнил
+     * предыдущий вызов. Старые атрибуты висят на новом тексте, и это
+     * было видно: подпись дня «Вт» после колонки с <b>/<i> получала от
+     * Pango ширину 35 px при реальных 19, и после букв дорисовывался
+     * лишний глиф. Сбрасываем перед каждой установкой текста. */
+    pango_layout_set_attributes(layout, NULL);
+pango_layout_set_markup(layout, text ? text : "", -1);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
@@ -2080,7 +2108,14 @@ static int cw_text_width(cairo_t *cr, PangoLayout *layout, const char *font,
 
     pango_layout_set_font_description(layout, fd);
     pango_font_description_free(fd);
-    pango_layout_set_text(layout, text ? text : "", -1);
+        /* Атрибуты layout живут отдельно от текста: pango_layout_set_text()
+     * и pango_layout_set_markup() НЕ сбрасывают список, который заполнил
+     * предыдущий вызов. Старые атрибуты висят на новом тексте, и это
+     * было видно: подпись дня «Вт» после колонки с <b>/<i> получала от
+     * Pango ширину 35 px при реальных 19, и после букв дорисовывался
+     * лишний глиф. Сбрасываем перед каждой установкой текста. */
+    pango_layout_set_attributes(layout, NULL);
+pango_layout_set_text(layout, text ? text : "", -1);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
     return tw;
@@ -2091,7 +2126,14 @@ static int cw_text_right(cairo_t *cr, PangoLayout *layout, const char *text,
 {
     int tw = 0, th = 0;
 
-    pango_layout_set_text(layout, text ? text : "", -1);
+        /* Атрибуты layout живут отдельно от текста: pango_layout_set_text()
+     * и pango_layout_set_markup() НЕ сбрасывают список, который заполнил
+     * предыдущий вызов. Старые атрибуты висят на новом тексте, и это
+     * было видно: подпись дня «Вт» после колонки с <b>/<i> получала от
+     * Pango ширину 35 px при реальных 19, и после букв дорисовывался
+     * лишний глиф. Сбрасываем перед каждой установкой текста. */
+    pango_layout_set_attributes(layout, NULL);
+pango_layout_set_text(layout, text ? text : "", -1);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
@@ -2105,7 +2147,14 @@ static int cw_text(cairo_t *cr, PangoLayout *layout, const char *text,
 {
     int tw = 0, th = 0;
 
-    pango_layout_set_text(layout, text ? text : "", -1);
+        /* Атрибуты layout живут отдельно от текста: pango_layout_set_text()
+     * и pango_layout_set_markup() НЕ сбрасывают список, который заполнил
+     * предыдущий вызов. Старые атрибуты висят на новом тексте, и это
+     * было видно: подпись дня «Вт» после колонки с <b>/<i> получала от
+     * Pango ширину 35 px при реальных 19, и после букв дорисовывался
+     * лишний глиф. Сбрасываем перед каждой установкой текста. */
+    pango_layout_set_attributes(layout, NULL);
+pango_layout_set_text(layout, text ? text : "", -1);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
     pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
@@ -2281,14 +2330,23 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         if (cw->days->len > 0) {
             CwDay *d0 = &g_array_index(cw->days, CwDay, 0);
 
-            g_snprintf(tmp, sizeof(tmp), "%.0f\u00b0", cw_temp(priv, d0->tmax));
-            lh = cw_text(g, layout, tmp, &priv->hour_color, colx, coly, FALSE);
-            g_snprintf(tmp, sizeof(tmp), "%.0f\u00b0", cw_temp(priv, d0->tmin));
-            cw_text(g, layout, tmp, &priv->hour_color, colx, coly + lh, FALSE);
+            /* Максимум и минимум — жирные, как температура и город в
+             * оригинале (там '<b>temp</b>' и '<b>where</b>'). */
+            g_snprintf(tmp, sizeof(tmp), "<b>%.0f\u00b0</b>", cw_temp(priv, d0->tmax));
+            lh = cw_text_markup(g, layout, tmp, &priv->hour_color, colx, coly, FALSE);
+            g_snprintf(tmp, sizeof(tmp), "<b>%.0f\u00b0</b>", cw_temp(priv, d0->tmin));
+            cw_text_markup(g, layout, tmp, &priv->hour_color, colx, coly + lh, FALSE);
         }
         if (cw->humidity > 0.0) {
-            g_snprintf(tmp, sizeof(tmp), "%.0f%%", cw->humidity);
-            cw_text(g, layout, tmp, &priv->hour_color, colx, coly + 2 * lh, FALSE);
+            /* Процент — курсивом, как в оригинале:
+             * draw_text(ctx,'<i>' + weather[1]["dayppcp"] + '%</i>', 68, 40,
+             * ..., 5, ..., ALIGN_RIGHT) — там тоже стоял процент, и тоже
+             * курсивом, в той же зоне x=68. То есть курсив здесь не
+             * украшение, а способ отличить долю от температур. */
+            /* Курсив без жирного: доля, а не температура. */
+            g_snprintf(tmp, sizeof(tmp), "<i>%.0f%%</i>", cw->humidity);
+            cw_text_markup(g, layout, tmp, &priv->hour_color,
+                           colx, coly + 2 * lh, FALSE);
         }
     }
 
