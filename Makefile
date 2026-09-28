@@ -4,10 +4,11 @@ CC = gcc
 # soft-debug USE-флаг (напр. "debug"), потому что ловец на каждый
 # аварийный сигнал пишет стек в файл и завершает процесс — в обычной
 # сборке пользователю это не нужно. Включать при расследовании падений.
-CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0)
+CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0 json-glib-1.0 gio-2.0)
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
 LDFLAGS_RSS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 libxml-2.0) -lm
+LDFLAGS_WEATHER_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 json-glib-1.0 gio-2.0) -lm
 LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm -lX11
 
 PREFIX ?= $(HOME)
@@ -21,6 +22,7 @@ TARGET_CAL_PLUGIN = $(BUILD_DIR)/calendar.so
 TARGET_LAU_PLUGIN = $(BUILD_DIR)/launcher.so
 TARGET_FL_PLUGIN = $(BUILD_DIR)/frame_launcher.so
 TARGET_RSS_PLUGIN = $(BUILD_DIR)/clearrss.so
+TARGET_WEATHER_PLUGIN = $(BUILD_DIR)/clearweather.so
 TARGET_CPU_PLUGIN = $(BUILD_DIR)/cpu_monitor.so
 TARGET_MEMORY_PLUGIN = $(BUILD_DIR)/memory_monitor.so
 TARGET_DISK_PLUGIN = $(BUILD_DIR)/disk_monitor.so
@@ -53,7 +55,7 @@ OBJS_TRAY_DBG = $(BUILD_DIR)/tray_dbg.o
 OBJS_CLOCK_DBG = $(BUILD_DIR)/clock_dbg.o
 OBJS_STANDALONE_DBG = $(BUILD_DIR)/standalone_dbg.o
 
-all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_DISK_PLUGIN) $(TARGET_NETWORK_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE) $(TARGET_SENSORS_PLUGIN)
+all: $(TARGET_DAEMON) $(TARGET_PLUGIN) $(TARGET_CAL_PLUGIN) $(TARGET_LAU_PLUGIN) $(TARGET_FL_PLUGIN) $(TARGET_RSS_PLUGIN) $(TARGET_WEATHER_PLUGIN) $(TARGET_CPU_PLUGIN) $(TARGET_MEMORY_PLUGIN) $(TARGET_DISK_PLUGIN) $(TARGET_NETWORK_PLUGIN) $(TARGET_PROCESS_PLUGIN) $(TARGET_STANDALONE) $(TARGET_SENSORS_PLUGIN)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -124,6 +126,11 @@ $(TARGET_CONLOG_PLUGIN): $(BUILD_DIR) build/conlog.o build/conlog_core.o
 # Урезанная версия conlog: только вывод строк, без conlog_core.
 # Что убрано и как возвращать — src/widgets/CONLOG-FUNCTIONALITY.md.
 # conlog.c и conlog_core.c остаются на месте нетронутыми.
+$(BUILD_DIR)/clearweather.o: src/widgets/clearweather.c include/xs_api.h src/core/common.h
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+$(TARGET_WEATHER_PLUGIN): $(BUILD_DIR) build/clearweather.o
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/clearweather.o $(LDFLAGS_WEATHER_PLUGIN)
+
 $(BUILD_DIR)/conlog_min.o: src/widgets/conlog_min.c include/xs_api.h src/core/common.h
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 $(BUILD_DIR)/conlog_min.so: $(BUILD_DIR) build/conlog_min.o
