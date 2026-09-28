@@ -57,6 +57,7 @@
  * потому что видны только CONLOG_MAX_LINES строк. */
 #define CONLOG_REDRAW_MS        100
 
+
 typedef struct {
     double r, g, b, a;
 } ConlogColor;
@@ -90,6 +91,10 @@ struct _ConlogPriv {
     int           title_h;     /* 0 = заголовка нет, зона не резервируется */
     ConlogColor   row_color, bg_color, title_color;
 };
+
+
+/* Порядок определений: init ниже свойств, нужен прототип. */
+static void cl_properties(XsPlugin *p, GtkNotebook *nb);
 
 /* ---------------------------------------------------------------- отрисовка */
 
@@ -331,6 +336,33 @@ static PangoFontDescription *cl_font(const char *spec)
     return d ? d : pango_font_description_from_string(CONLOG_DEFAULT_FONT);
 }
 
+/* Пересчитать высоту зоны заголовка по реальным метрикам шрифта. Считает
+ * один раз, а не на каждом кадре: pango в cl_draw меряет заново. */
+static void cl_recalc_title_h(ConlogPriv *priv)
+{
+    cairo_surface_t *surf;
+    cairo_t *cr;
+    PangoLayout *l;
+    PangoFontDescription *tf;
+    int tw = 0, th = 0;
+
+    priv->title_h = 0;
+    if (!priv->title || !priv->title[0])
+        return;
+    surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cr = cairo_create(surf);
+    l = pango_cairo_create_layout(cr);
+    tf = cl_font(priv->title_font);
+    pango_layout_set_font_description(l, tf);
+    pango_layout_set_text(l, priv->title, -1);
+    pango_layout_get_pixel_size(l, &tw, &th);
+    priv->title_h = th + CONLOG_TITLE_TOP;
+    pango_font_description_free(tf);
+    g_object_unref(l);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surf);
+}
+
 static void cl_rounded(cairo_t *cr, double x, double y, double w, double h,
                        double r)
 {
@@ -546,29 +578,7 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     cl_rgba(priv, "background_color", def_bg, &priv->bg_color);
     cl_rgba(priv, "title_color", def_title, &priv->title_color);
 
-    /* Высота зоны заголовка — по реальным метрикам шрифта, иначе
-     * строки наезжали бы на метку. Считаем один раз: pango в cl_draw
-     * делает это заново на каждом кадре. */
-    if (priv->title && priv->title[0]) {
-        cairo_surface_t *surf = cairo_image_surface_create(
-            CAIRO_FORMAT_ARGB32, 1, 1);
-        cairo_t *cr = cairo_create(surf);
-        PangoLayout *l = pango_cairo_create_layout(cr);
-        PangoFontDescription *tf = cl_font(priv->title_font);
-
-        pango_layout_set_font_description(l, tf);
-        pango_layout_set_text(l, priv->title, -1);
-        {
-            int tw = 0, th = 0;
-
-            pango_layout_get_pixel_size(l, &tw, &th);
-            priv->title_h = th + CONLOG_TITLE_TOP;
-        }
-        pango_font_description_free(tf);
-        g_object_unref(l);
-        cairo_destroy(cr);
-        cairo_surface_destroy(surf);
-    }
+    cl_recalc_title_h(priv);
 
     p->priv = priv;
     /* Единственный таймер отрисовки на всё время жизни applet-а. */
@@ -607,6 +617,270 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     return 0;
 }
 
+/* ---------------------------------------------------------------- свойства */
+
+/* Обработчики пишут значение в конфиг и перерисовывают окно. Конфиг
+ * сбрасывать не нужно: applet читает ключи через xs_host_api()->conf_*,
+ * а после flush я перечитываю изменённые поля здесь же. */
+static void cl_save(XsPlugin *p)
+{
+    xs_core_plugin_conf_flush(p->name);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
+}
+
+static void cl_entry_changed(GtkEditable *e, gpointer data)
+{
+    XsPlugin *p = data;
+    ConlogPriv *priv = p ? p->priv : NULL;
+    const char *key = g_object_get_data(G_OBJECT(e), "xs-key");
+    const char *text;
+
+    if (!priv || !key)
+        return;
+    text = gtk_entry_get_text(GTK_ENTRY(e));
+    if (strcmp(key, "command") == 0) {
+        g_free(priv->command);
+        priv->command = g_strdup(text ? text : "");
+        /* Команда сменилась — перезапускаем процесс: иначе в окне так и
+         * останется вывод старой команды. */
+        cl_start(priv);
+    } else if (strcmp(key, "title") == 0) {
+        g_free(priv->title);
+        priv->title = g_strdup(text ? text : "");
+        cl_recalc_title_h(priv);
+    } else if (strcmp(key, "row_font") == 0) {
+        g_free(priv->row_font);
+        priv->row_font = g_strdup(text ? text : CONLOG_DEFAULT_FONT);
+    } else if (strcmp(key, "title_font") == 0) {
+        g_free(priv->title_font);
+        priv->title_font = g_strdup(text ? text : CONLOG_DEFAULT_FONT);
+        cl_recalc_title_h(priv);
+    }
+    g_key_file_set_string(priv->kf, p->name, key, text ? text : "");
+    cl_save(p);
+}
+
+static void cl_spin_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *p = data;
+    ConlogPriv *priv = p ? p->priv : NULL;
+    const char *key = g_object_get_data(G_OBJECT(spin), "xs-key");
+    int v;
+
+    if (!priv || !key)
+        return;
+    v = (int) gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin));
+    if (strcmp(key, "max_lines") == 0)
+        priv->max_lines = (guint) CLAMP(v, 10, 10000);
+    else if (strcmp(key, "line_step") == 0)
+        priv->line_step = CLAMP(v, 0, 60);
+    else if (strcmp(key, "first_row_y") == 0)
+        priv->first_row_y = CLAMP(v, 0, 60);
+    g_key_file_set_integer(priv->kf, p->name, key, v);
+    cl_save(p);
+}
+
+static void cl_size_changed(GtkSpinButton *spin, gpointer data)
+{
+    XsPlugin *p = data;
+    ConlogPriv *priv = p ? p->priv : NULL;
+    const char *key = g_object_get_data(G_OBJECT(spin), "xs-key");
+    int v;
+
+    if (!priv || !key)
+        return;
+    v = (int) gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin));
+    if (strcmp(key, "window_width") == 0)
+        priv->width = CLAMP(v, 120, 2000);
+    else if (strcmp(key, "window_height") == 0)
+        priv->height = CLAMP(v, 60, 2000);
+    g_key_file_set_integer(priv->kf, p->name, key, v);
+    if (p->win)
+        gtk_widget_set_size_request(p->win, priv->width, priv->height);
+    cl_save(p);
+}
+
+static void cl_color_set(GtkColorButton *btn, gpointer data)
+{
+    XsPlugin *p = data;
+    ConlogPriv *priv = p ? p->priv : NULL;
+    const char *key = g_object_get_data(G_OBJECT(btn), "xs-key");
+    GdkRGBA c;
+    char *s;
+
+    if (!priv || !key)
+        return;
+    gtk_color_chooser_get_rgba(GTK_COLOR_CHOOSER(btn), &c);
+    if (strcmp(key, "row_color") == 0) {
+        priv->row_color.r = c.red; priv->row_color.g = c.green;
+        priv->row_color.b = c.blue; priv->row_color.a = c.alpha;
+    } else if (strcmp(key, "background_color") == 0) {
+        priv->bg_color.r = c.red; priv->bg_color.g = c.green;
+        priv->bg_color.b = c.blue; priv->bg_color.a = c.alpha;
+    } else if (strcmp(key, "title_color") == 0) {
+        priv->title_color.r = c.red; priv->title_color.g = c.green;
+        priv->title_color.b = c.blue; priv->title_color.a = c.alpha;
+    }
+    s = g_strdup_printf("%g,%g,%g,%g", c.red, c.green, c.blue, c.alpha);
+    g_key_file_set_string(priv->kf, p->name, key, s);
+    g_free(s);
+    cl_save(p);
+}
+
+static void cl_font_set(GtkFontButton *btn, gpointer data)
+{
+    XsPlugin *p = data;
+    ConlogPriv *priv = p ? p->priv : NULL;
+    const char *key = g_object_get_data(G_OBJECT(btn), "xs-key");
+    const char *fname;
+
+    if (!priv || !key)
+        return;
+    fname = gtk_font_chooser_get_font(GTK_FONT_CHOOSER(btn));
+    if (!fname)
+        return;
+    if (strcmp(key, "row_font") == 0) {
+        g_free(priv->row_font);
+        priv->row_font = g_strdup(fname);
+    } else if (strcmp(key, "title_font") == 0) {
+        g_free(priv->title_font);
+        priv->title_font = g_strdup(fname);
+        cl_recalc_title_h(priv);
+    }
+    g_key_file_set_string(priv->kf, p->name, key, fname);
+    cl_save(p);
+}
+
+/* Страница настроек: описание сверху, как у других апплетов. */
+static GtkWidget *cl_props_group(GtkNotebook *nb, const char *title,
+                                 const char *info)
+{
+    GtkWidget *page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+
+    gtk_container_set_border_width(GTK_CONTAINER(page), 10);
+    if (info && info[0]) {
+        GtkWidget *lbl = gtk_label_new(info);
+        GtkWidget *sep;
+
+        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(page), lbl, FALSE, FALSE, 7);
+        sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+        gtk_box_pack_start(GTK_BOX(page), sep, FALSE, FALSE, 5);
+    }
+    gtk_notebook_append_page(nb, page, gtk_label_new(title));
+    return page;
+}
+
+static void cl_properties(XsPlugin *p, GtkNotebook *nb)
+{
+    ConlogPriv *priv = p ? p->priv : NULL;
+    GtkWidget *page, *w;
+    GtkBox *box;
+
+    if (!priv)
+        return;
+    page = cl_props_group(nb, "Command",
+                          "Показывать вывод команды. Буфер и разметка — "
+                          "ниже; applet намеренно ничего не разбирает.");
+    box = GTK_BOX(page);
+
+    w = xs_prop_add_string(box, "Command",
+                           "Команда, вывод которой показывать. Выполняется "
+                           "через /bin/sh -c, поэтому работают кавычки, "
+                           "перенаправление и переменные. Пример: "
+                           "journalctl -f -n 15, dmesg --follow, "
+                           "tail -F /var/log/messages.log",
+                           priv->command);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("command"), g_free);
+    g_signal_connect(w, "changed", G_CALLBACK(cl_entry_changed), p);
+
+    w = xs_prop_add_string(box, "Title",
+                           "Надпись над списком строк. Пусто — не рисуется "
+                           "вовсе, вместе с разделителем.",
+                           priv->title);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("title"), g_free);
+    g_signal_connect(w, "changed", G_CALLBACK(cl_entry_changed), p);
+
+    xs_prop_add_group_header(box, "Буфер и разметка");
+
+    w = xs_prop_add_int(box, "Max lines",
+                        "Сколько строк хранить. Более старые вытесняются. "
+                        "Нагрузку это не ограничивает: applet всё равно "
+                        "читает весь поток, предел приёма задан в коде.",
+                        priv->max_lines, 10, 10000, 10);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("max_lines"),
+                           g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cl_spin_changed), p);
+
+    w = xs_prop_add_int(box, "Line height",
+                        "Высота строки в пикселях. 0 — считать по шрифту.",
+                        priv->line_step, 0, 60, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("line_step"),
+                           g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cl_spin_changed), p);
+
+    w = xs_prop_add_int(box, "First row offset",
+                        "Отступ от верхней рамки до зоны заголовка.",
+                        priv->first_row_y, 0, 60, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("first_row_y"),
+                           g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cl_spin_changed), p);
+
+    xs_prop_add_group_header(box, "Шрифты и цвета");
+
+    w = xs_prop_add_font(box, "Text font", "Шрифт строк вывода.",
+                         priv->row_font);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("row_font"),
+                           g_free);
+    g_signal_connect(w, "font-set", G_CALLBACK(cl_font_set), p);
+
+    w = xs_prop_add_font(box, "Title font", "Шрифт надписи.",
+                         priv->title_font);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("title_font"),
+                           g_free);
+    g_signal_connect(w, "font-set", G_CALLBACK(cl_font_set), p);
+
+    w = xs_prop_add_color(box, "Text color", "Цвет строк вывода.",
+                          priv->row_color.r, priv->row_color.g,
+                          priv->row_color.b, priv->row_color.a);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("row_color"),
+                           g_free);
+    g_signal_connect(w, "color-set", G_CALLBACK(cl_color_set), p);
+
+    w = xs_prop_add_color(box, "Background", "Фон окна; alpha задаёт "
+                          "прозрачность.",
+                          priv->bg_color.r, priv->bg_color.g,
+                          priv->bg_color.b, priv->bg_color.a);
+    g_object_set_data_full(G_OBJECT(w), "xs-key",
+                           g_strdup("background_color"), g_free);
+    g_signal_connect(w, "color-set", G_CALLBACK(cl_color_set), p);
+
+    w = xs_prop_add_color(box, "Title color", "Цвет надписи; им же красится "
+                          "разделитель.",
+                          priv->title_color.r, priv->title_color.g,
+                          priv->title_color.b, priv->title_color.a);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("title_color"),
+                           g_free);
+    g_signal_connect(w, "color-set", G_CALLBACK(cl_color_set), p);
+
+    xs_prop_add_group_header(box, "Размер окна");
+
+    w = xs_prop_add_int(box, "Width", "Ширина окна в пикселях.",
+                        priv->width, 120, 2000, 10);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_width"),
+                           g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cl_size_changed), p);
+
+    w = xs_prop_add_int(box, "Height", "Высота окна в пикселях.",
+                        priv->height, 60, 2000, 10);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("window_height"),
+                           g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cl_size_changed), p);
+
+    gtk_widget_show_all(page);
+}
+
 /* ---------------------------------------------------------------- экспорт */
 
 static const XsPluginOps cl_ops = {
@@ -614,7 +888,7 @@ static const XsPluginOps cl_ops = {
     .draw = cl_draw,
     .tick = cl_tick,
     .shutdown = cl_shutdown,
-    .properties = NULL,
+    .properties = cl_properties,
 };
 
 static XsPluginDesc cl_desc = {
