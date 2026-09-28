@@ -635,6 +635,7 @@ static void cw_body_done(GObject *src, GAsyncResult *res, gpointer data)
 
     if (job->generation != priv->generation || !priv->alive) {
         g_clear_error(&error);
+        g_clear_pointer(&bytes, g_bytes_unref);
         cw_job_free(job);
         return;
     }
@@ -647,6 +648,7 @@ static void cw_body_done(GObject *src, GAsyncResult *res, gpointer data)
         cw_log(priv->plugin, "пустой ответ");
         g_clear_error(&error);
         cw_try_next(priv, "пустой ответ");
+        g_clear_pointer(&bytes, g_bytes_unref);
         cw_job_free(job);
         return;
     }
@@ -657,6 +659,10 @@ static void cw_body_done(GObject *src, GAsyncResult *res, gpointer data)
         cw_apply_result(priv, job->source, text);
         g_free(text);
     }
+    /* g_task_propagate_pointer передаёт владение вызывающему: уничтожающий
+     * нотификатор у GBytes не сработает, и без unref каждый ответ утекал
+     * целиком. */
+    g_clear_pointer(&bytes, g_bytes_unref);
     cw_job_free(job);
 }
 
@@ -1320,9 +1326,20 @@ static void cw_apply_result(CwPriv *priv, int source, const char *text)
         ok = cw_parse_openmeteo(priv, text, &w);
     else
         ok = cw_parse_wttr(priv, text, &w);
+    cw_log(priv->plugin, "разбор %s: %s", source == CW_SRC_OPENMETEO
+                                   ? "open-meteo" : "wttr.in",
+           ok ? "ок" : "не разобрался");
+    if (!ok || !w) {
+        cw_try_next(priv, "непонятный ответ");
+        return;
+    }
     /* Ночь влияет на выбор иконки: в теме есть варианты с луной.
-     * Оба агрегатора отдают местное время наблюдения, сравниваем
-     * с локальным же now. */
+     * Обе агрегатора отдают местное время, сравниваем с локальным now.
+     *
+     * Считать это можно только после проверки !ok || !w: оба парсера
+     * при неудаче оставляют w равным NULL, и обращение к w->night
+     * разыменовывало NULL. Любой сбой источника — то есть ровно тот
+     * случай, ради которого написан cw_try_next, — убивал апплет. */
     {
         GDateTime *now = g_date_time_new_now_local();
         int hr = now ? g_date_time_get_hour(now) : 12;
@@ -1331,13 +1348,6 @@ static void cw_apply_result(CwPriv *priv, int source, const char *text)
             g_date_time_unref(now);
         w->night = (hr >= 20 || hr < 6);
         priv->night = w->night;
-    }
-    cw_log(priv->plugin, "разбор %s: %s", source == CW_SRC_OPENMETEO
-                                   ? "open-meteo" : "wttr.in",
-           ok ? "ок" : "не разобрался");
-    if (!ok || !w) {
-        cw_try_next(priv, "непонятный ответ");
-        return;
     }
     cw_weather_free(priv->weather);
     priv->weather = w;
@@ -2510,6 +2520,38 @@ static void cw_on_view(GtkComboBox *c, gpointer data)
     cw_start(p);
 }
 
+static gboolean cw_on_city_focus(GtkWidget *w, GdkEventFocus *ev, gpointer data)
+{
+    (void)ev;
+    cw_on_city(GTK_ENTRY(w), data);
+    return FALSE;
+}
+
+/* Каталог темы. Раньше поле было только помечено cw_tag(entry,
+ * "theme_dir") и к нему не подключалось ни одного обработчика: путь не
+ * сохранялся и не применялся, то есть настройка была мёртвой. При
+ * смене каталога тему надо перечитать целиком, а cw_theme_load() под
+ * флагом theme_ok повторно не входит — поэтому сбрасываем флаг и кэш. */
+static void cw_on_theme_dir(GtkEntry *e, gpointer data)
+{
+    XsPlugin *p = data;
+    CwPriv *priv = p ? p->priv : NULL;
+    const char *path;
+
+    if (!priv)
+        return;
+    path = gtk_entry_get_text(e);
+    g_free(priv->theme_dir);
+    priv->theme_dir = g_strdup(path);
+    xs_host_api()->conf_set_str(priv->kf, p->name, "theme_dir", path);
+    cw_theme_free(priv);
+    priv->theme_ok = FALSE;
+    cw_theme_load(priv);
+    cw_save(priv);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
+}
+
 static void cw_on_round_corner(GtkSpinButton *sp, gpointer data)
 {
     XsPlugin *p = data;
@@ -2731,8 +2773,13 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
     entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(entry), priv->city ? priv->city : "");
     cw_tag(entry, "city");
+    /* Только "activate": при "changed" каждый введённый символ сбрасывал
+     * город, ключи геокодинга и запускал cw_start(), то есть набрать
+     * «Симферополь» означало семь геокодингов подряд. Старые запросы
+     * гасились по generation, но каждый всё равно уходил в сеть. */
     g_signal_connect(entry, "activate", G_CALLBACK(cw_on_city), p);
-    g_signal_connect(entry, "changed", G_CALLBACK(cw_on_city), p);
+    g_signal_connect(entry, "focus-out-event",
+                     G_CALLBACK(cw_on_city_focus), p);
     cw_row(grid, r++, "Город или индекс:", entry);
 
     entry = gtk_entry_new();
@@ -2803,10 +2850,12 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
         cw_row(grid, r++, "Фон:", cb);
     }
     {
-        /* Цвет подложки с альфой — ARGB. У режима «панель темы» он не
-         * применяется, и тогда строка гасится, чтобы не вводить в
-         * заблуждение, что настройка что-то меняет. */
-        GtkWidget *b = cw_color_button(&priv->bg_color, "background_color");
+        /* Цвет подложки с альфой — ARGB. Ключ обязан быть "bg_color":
+         * cw_on_color() разбирает только его, и с "background_color"
+         * target оставался NULL, колбэк выходил молча, и кнопка не
+         * писала ничего. У режима «панель темы» подложка не
+         * применяется, и тогда строка гасится. */
+        GtkWidget *b = cw_color_button(&priv->bg_color, "bg_color");
 
         priv->bg_color_btn = b;
         gtk_widget_set_sensitive(b, priv->use_bg != 1);
@@ -2828,6 +2877,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry),
                                    "каталог темы (пусто = искать самим)");
     cw_tag(entry, "theme_dir");
+    g_signal_connect(entry, "activate", G_CALLBACK(cw_on_theme_dir), p);
     cw_row(grid, r++, "Каталог темы:", entry);
 
     spin = gtk_spin_button_new_with_range(160, 800, 10);
@@ -2892,29 +2942,48 @@ static void cw_menu_cmd(XsPlugin *p, const char *cmd)
     }
 }
 
-static void cw_menu(XsPlugin *p, GtkMenu *m)
+/* Пункты контекстного меню.
+ *
+ * Раньше стояло g_signal_connect_swapped(item, "activate", cw_menu_cmd,
+ * "refresh"). _swapped подставляет user_data ПЕРВЫМ аргументом, то
+ * есть вызов выходил как cw_menu_cmd("refresh", item), и первым
+ * параметром — ожидаемый XsPlugin * — становился строковый литерал из
+ * .rodata. Первое же p->priv читало по адресу в .rodata, то есть
+ * segfault на любом из трёх пунктов меню. */
+typedef struct {
+    XsPlugin   *plugin;
+    const char *cmd;
+} CwMenuAct;
+
+static void cw_menu_activate(GtkMenuItem *item, gpointer data)
 {
-    GtkWidget *item;
+    CwMenuAct *act = data;
 
-    (void)p;
-
-    item = gtk_menu_item_new_with_label("Обновить сейчас");
-    g_signal_connect_swapped(item, "activate",
-                             G_CALLBACK(cw_menu_cmd), (gpointer)"refresh");
-    gtk_menu_shell_append(GTK_MENU_SHELL(m), item);
-
-    item = gtk_menu_item_new_with_label("Соединение: напрямую");
-    g_signal_connect_swapped(item, "activate",
-                             G_CALLBACK(cw_menu_cmd), (gpointer)"direct");
-    gtk_menu_shell_append(GTK_MENU_SHELL(m), item);
-
-    item = gtk_menu_item_new_with_label("Соединение: через прокси");
-    g_signal_connect_swapped(item, "activate",
-                             G_CALLBACK(cw_menu_cmd), (gpointer)"proxy");
-    gtk_menu_shell_append(GTK_MENU_SHELL(m), item);
-    gtk_widget_show_all(item);
+    (void)item;
+    g_free(act);
+    cw_menu_cmd(act->plugin, act->cmd);
 }
 
+static void cw_menu_item_add(GtkMenuShell *m, XsPlugin *p, const char *label,
+                             const char *cmd)
+{
+    GtkWidget *item = gtk_menu_item_new_with_label(label);
+    CwMenuAct *act = g_new0(CwMenuAct, 1);
+
+    act->plugin = p;
+    act->cmd = cmd;
+    g_signal_connect(item, "activate", G_CALLBACK(cw_menu_activate), act);
+    gtk_menu_shell_append(m, item);
+}
+
+static void cw_menu(XsPlugin *p, GtkMenu *m)
+{
+    GtkMenuShell *sh = GTK_MENU_SHELL(m);
+
+    cw_menu_item_add(sh, p, "Обновить сейчас", "refresh");
+    cw_menu_item_add(sh, p, "Соединение: напрямую", "direct");
+    cw_menu_item_add(sh, p, "Соединение: через прокси", "proxy");
+}
 /* ------------------------------------------------------------------ */
 /* точки входа                                                         */
 /* ------------------------------------------------------------------ */
@@ -3095,6 +3164,7 @@ static void cw_shutdown(XsPlugin *p)
     g_free(priv->temp_font);
     g_free(priv->desc_font);
     g_free(priv->hour_font);
+    g_free(priv->stat_font);
     g_free(priv);
     p->priv = NULL;
 }
