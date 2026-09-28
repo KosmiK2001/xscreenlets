@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <gio/gio.h>
+#include <unistd.h>
 #include <gio/gfiledescriptorbased.h>
 
 #define CONLOG_DEFAULT_COMMAND  "journalctl -f -n 20"
@@ -232,6 +233,19 @@ static gboolean cl_on_io(GIOChannel *chan, GIOCondition cond, gpointer data)
 
 static void cl_stop(ConlogPriv *priv)
 {
+    /* Порядок и владение здесь критичны.
+     *
+     * 1. Источник снимается ПЕРВЫМ: пока он жив, GIOChannel держит
+     *    ссылку, и его удаление может произойти уже во время следующей
+     *    итерации main loop.
+     * 2. Канал закрывается через g_io_channel_shutdown(), а не просто
+     *    unref: обёртка должна разорвать связь с дескриптором до того,
+     *    как дескриптор закроет GSubprocess.
+     * 3. in_stream НЕ unref-ится здесь: он принадлежит GSubprocess,
+     *    и его finalize происходит асинхронно, когда отработает
+     *    child-watch. Наш unref поверх чужой ссылки давал SIGSEGV в
+     *    g_object_unref внутри g_main_context_iteration.
+     *    Ссылка, полученная в cl_start, снимается там же сразу. */
     if (priv->watch_id) {
         g_source_remove(priv->watch_id);
         priv->watch_id = 0;
@@ -240,16 +254,16 @@ static void cl_stop(ConlogPriv *priv)
      * перезапуске команды, и таймер отрисовки переживает перезапуск —
      * он принадлежит applet-у, а не процессу. Снимает его cl_shutdown. */
     if (priv->chan) {
+        g_io_channel_shutdown(priv->chan, FALSE, NULL);
         g_io_channel_unref(priv->chan);
         priv->chan = NULL;
     }
-    if (priv->in_stream) {
-        g_object_unref(priv->in_stream);
-        priv->in_stream = NULL;
-    }
+    priv->in_stream = NULL;
     if (priv->proc) {
-        if (priv->running)
-            g_subprocess_force_exit(priv->proc);
+        g_subprocess_force_exit(priv->proc);
+        /* g_subprocess_newv() — transfer full, ссылка наша: unref
+         * обязателен, иначе процесс и его каналы текут на каждом
+         * перезапуске команды. */
         g_object_unref(priv->proc);
         priv->proc = NULL;
     }
@@ -297,19 +311,30 @@ static void cl_start(ConlogPriv *priv)
     {
         GOutputStream *stdin_stream = g_subprocess_get_stdin_pipe(priv->proc);
 
-        if (stdin_stream) {
+        /* Ссылка BORROWED: g_subprocess_get_stdin_pipe() не даёт
+         * transfer full, unref-ить её нельзя — это и убивало демон. */
+        if (stdin_stream)
             g_output_stream_close(stdin_stream, NULL, NULL);
-            g_object_unref(stdin_stream);
-        }
     }
     priv->in_stream = g_subprocess_get_stdout_pipe(priv->proc);
     if (!priv->in_stream)
         return;
     /* Дескриптор берём через g_file_descriptor_based_get_fd: это публичный
-     * интерфейс GIO, в отличие от GUnixInputStream из gio-unix-2.0. */
+     * интерфейс GIO, в отличие от GUnixInputStream из gio-unix-2.0.
+     * Дублируем fd: канал не должен зависеть от жизни GSubprocess. */
     fd = g_file_descriptor_based_get_fd(
              G_FILE_DESCRIPTOR_BASED(priv->in_stream));
-    priv->chan = (fd >= 0) ? g_io_channel_unix_new(fd) : NULL;
+    if (fd >= 0) {
+        int dup_fd = dup(fd);
+
+        if (dup_fd >= 0) {
+            priv->chan = g_io_channel_unix_new(dup_fd);
+            g_io_channel_set_close_on_unref(priv->chan, TRUE);
+        }
+    }
+    /* Ссылка на поток BORROWED и остаётся валидной, пока жив
+     * GSubprocess: сохраняем для shutdown, unref-ить нельзя. */
+    priv->in_stream = NULL;   /* дескриптор скопирован, ссылка не нужна */
     if (!priv->chan)
         return;
     g_io_channel_set_encoding(priv->chan, NULL, NULL);

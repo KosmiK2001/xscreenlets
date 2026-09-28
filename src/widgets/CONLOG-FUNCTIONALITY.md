@@ -170,6 +170,47 @@ CPU». На живом `journalctl -f -n 15`:
 - `cl_start()` из обработчика `command` обязателен: иначе в окне навсегда
   останется вывод предыдущей команды, пока applet не перезапустят.
 
+### 6. SIGSEGV при смене команды в Properties (самое дорогое по последствиям)
+
+Ввод команды в Properties ронял демон мгновенно. Воспроизводится
+только через GUI: та же команда, прописанная в конфиг руками, работает
+без единого падения — потому что при ручной правке applet стартует один
+раз, а из GUI он стартует второй раз поверх уже работающего.
+
+Причина в том, что `g_subprocess_get_stdin_pipe()` и
+`g_subprocess_get_stdout_pipe()` возвращают **borrowed**-ссылку
+(в `gsubprocess.h` у них нет `(transfer full)`), а я unref-ил их в
+`cl_stop()`. Падало уже в следующей итерации main loop, когда
+отрабатывал child-watch:
+
+```
+#0  g_type_check_instance_is_fundamentally_a ()
+#1  g_object_unref ()
+#2  ??? () from libgio-2.0.so.0     <- async finalize потока
+#3  g_object_unref ()                <- g_main_context_iteration
+```
+
+Правила владения, которые здесь действуют:
+
+| объект | кто владеет | что можно |
+|---|---|---|
+| `GSubprocess` от `g_subprocess_newv()` | мы (transfer full) | unref обязателен, иначе течёт на каждом перезапуске |
+| stdin/stdout из `g_subprocess_get_*_pipe()` | `GSubprocess` (borrowed) | **unref нельзя**, только использовать |
+| `GIOChannel` от `g_io_channel_unix_new()` | мы | unref, и дескриптор ему свой |
+
+Рабочая схема: `dup(fd)` для канала, `g_io_channel_set_close_on_unref()`,
+наши ссылки на потоки не unref-ятся, `GSubprocess` unref-ится в
+`cl_stop()` после `g_subprocess_force_exit()`.
+
+Порядок в `cl_stop()` тоже важен: сначала `g_source_remove(watch_id)`,
+затем `g_io_channel_shutdown()`, и только потом освобождение процесса —
+пока источник жив, канал держит ссылку.
+
+Как ловить: падение происходит не в момент правки, а на следующей
+итерации main loop, поэтому в crash-логе и логе демона может не быть
+ничего. Проверять надо exit code (`139` = SIGSEGV) и `g_object_unref` в
+трейсе.
+
 ## Порядок возврата функциональности
 
 Если понадобится, по одному пункту за раз, с замером после каждого.
