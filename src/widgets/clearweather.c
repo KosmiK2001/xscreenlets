@@ -23,6 +23,7 @@
 #include "common.h"
 
 #include <libsoup/soup.h>
+#include <librsvg/rsvg.h>
 #include <json-glib/json-glib.h>
 #include <string.h>
 #include <math.h>
@@ -41,8 +42,19 @@
 #define CW_DEFAULT_CITY     "Симферополь"
 #define CW_DEFAULT_PROXY    "http://127.0.0.1:10809"
 #define CW_REFRESH_DEFAULT  15
+/* Что показывать в нижней полосе */
+#define CW_VIEW_DAYS    0   /* 6 дней, как в родном апплете */
+#define CW_VIEW_HOURS   1   /* почасовой ряд */
+#define CW_VIEW_BOTH    2   /* и то и то */
+#define CW_VIEW_MIN     0
+#define CW_VIEW_MAX     2
+#define CW_DAYS_MAX     5   /* в родном апплете пять дней */
+#define CW_ICON_COUNT  49
 #define CW_HOURS_DEFAULT    8
 #define CW_OM_STEP          3          /* показывать каждый 3-й час */
+/* Для часового вида просим 2 суток: при forecast_days=1 массив
+ * hourly заканчивается в 23:00, и в 21:00 наступает шаг 3, который
+ * сразу выходит за массив — полоса оставалась с одной колонкой. */
 #define CW_MAX_ATTEMPTS     6
 
 /* источники */
@@ -71,12 +83,23 @@ typedef struct {
     int     kind;
 } CwHour;
 
+/* Сутки для режима «6 дней». В почасовом массиве такой структуры нет:
+ * там label — это час, а не день недели. */
+typedef struct {
+    char   *label;      /* "Пн" */
+    double  tmax, tmin;
+    int     kind;
+    guint   rain;       /* шанс осадков, % */
+} CwDay;
+
 typedef struct {
     char   *place;
     char   *desc;
     double  temp, feels, humidity, wind;
     int     kind;
+    gboolean night;     /* сейчас ночь по месту наблюдения */
     GArray *hours;      /* CwHour */
+    GArray *days;       /* CwDay  */
 } CwWeather;
 
 typedef struct { double r, g, b, a; } CwColor;
@@ -99,6 +122,17 @@ typedef struct {
     /* Короткая метка источника для угла окна; длинные сообщения о
      * ходе дела и ошибках живут отдельно в status. */
     char      *badge;
+    /* Кэш темы: 49 иконок грузятся один раз, а не каждый кадр. */
+    GdkPixbuf  *icons[CW_ICON_COUNT];
+    /* Границы видимой части картинки. В теме 120x120 с прозрачными
+     * полями, поэтому масштабировать по размеру холста нельзя:
+     * иконка получалась то мельче, то налезала на текст. */
+    int         ibx[CW_ICON_COUNT], iby[CW_ICON_COUNT];
+    int         ibw[CW_ICON_COUNT], ibh[CW_ICON_COUNT];
+    gboolean    theme_ok;
+    char       *theme_path;   /* найденный каталог, для диагностики */
+    RsvgHandle *bg;           /* SVG-панель */
+    gboolean    night;        /* сейчас ночь: влияет на выбор иконки */
     char      *status;
 
     int         source;       /* CW_SRC_* */
@@ -124,6 +158,12 @@ typedef struct {
 
     guint       refresh_min;
     int         hours_shown;
+    /* Что рисовать в нижней полосе: CW_VIEW_* */
+    int         view;
+    int         show_daytemp;
+    int         use_bg;      /* панель из weather-bg.svg вместо своей */
+    /* Каталог с иконками и SVG-фоном. Пусто -> ищем по умолчанию. */
+    char       *theme_dir;
 
     int    width, height;
     char  *city_font, *temp_font, *desc_font, *hour_font;
@@ -133,6 +173,20 @@ typedef struct {
 static void cw_properties(XsPlugin *p, GtkNotebook *nb);
 static void cw_start(XsPlugin *p);
 static const char *cw_query(const CwPriv *priv);
+static int cw_text(cairo_t *cr, PangoLayout *layout, const char *text,
+                   CwColor *c, double x, double y, gboolean center);
+static int cw_text_markup(cairo_t *cr, PangoLayout *layout, const char *text,
+                          CwColor *c, double x, double y, gboolean center);
+static int cw_text_markup_right(cairo_t *cr, PangoLayout *layout,
+                                const char *text, CwColor *c, double xr,
+                                double y);
+static void cw_icon(cairo_t *cr, int kind, double x, double y, double s,
+                    CwColor *c);
+static void cw_icon_px(cairo_t *cr, CwPriv *priv, int kind, double x,
+                       double y, double s);
+static double cw_temp(const CwPriv *priv, double celsius);
+static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
+                         PangoLayout *layout, double w, double h, double y);
 
 static void cw_log(XsPlugin *p, const char *fmt, ...)
 {
@@ -185,6 +239,64 @@ static double cw_num(JsonObject *o, const char *key, double def)
 static int cw_int(JsonObject *o, const char *key, int def)
 {
     return (int)lround(cw_num(o, key, (double)def));
+}
+
+/* Коды weather.com (их же отдаёт wttr.in) -> номера PNG в теме Stardock.
+ * Родной апплет здесь делал str(code) и искал 113.png, которого в теме нет:
+ * тема пронумерована 0..48. Карта составлена по содержимому картинок.
+ * В ICON_NIGHT — варианты с луной для ясной и облачной погоды. */
+static const guint8 CW_ICON_DAY[][2] = {
+    {113,32},{116,28},{119,27},{122,26},{143,21},{176,8},{179,14},
+    {182,7},{185,10},{200,4},{227,43},{230,15},{248,20},{260,10},
+    {263,8},{266,8},{281,10},{284,12},{293,9},{296,9},{299,11},{302,12},
+    {305,12},{308,12},{311,10},{314,12},{317,7},{320,7},{323,14},{326,14},
+    {329,15},{332,15},{335,15},{338,15},{350,6},{353,9},{356,12},{359,12},
+    {362,7},{365,7},{368,14},{371,15},{374,6},{377,6},{386,3},{389,4},
+    {392,17},{395,18},
+};
+
+static const guint8 CW_ICON_NIGHT[][2] = {
+    {113,31},{116,29},{119,33},{122,33},{143,21},{176,9},{179,46},
+    {182,7},{185,10},{200,47},{227,43},{230,15},{248,20},{260,10},
+    {263,9},{266,9},{281,10},{284,12},{293,9},{296,9},{299,11},{302,12},
+    {305,12},{308,12},{311,10},{314,12},{317,7},{320,7},{323,14},{326,14},
+    {329,15},{332,15},{335,15},{338,15},{350,6},{353,9},{356,12},{359,12},
+    {362,7},{365,7},{368,14},{371,15},{374,6},{377,6},{386,47},{389,47},
+    {392,47},{395,47},
+};
+
+/* Наша общая шкала -> код weather.com, по которому ищем картинку.
+ * Без этого моста cw_icon_px() получал наш kind вместо кода, карта не
+ * находила ничего и все иконки были N/A. */
+static int cw_kind_to_ww(int kind)
+{
+    switch (kind) {
+    case CW_W_CLEAR:    return 113;
+    case CW_W_PARTLY:   return 116;
+    case CW_W_CLOUDY:   return 119;
+    case CW_W_FOG:      return 248;
+    case CW_W_DRIZZLE:  return 266;
+    case CW_W_RAIN:     return 293;
+    case CW_W_SHOWERS:  return 353;
+    case CW_W_SNOW:     return 326;
+    case CW_W_THUNDER:  return 200;
+    default:            return 3200;
+    }
+}
+
+/* Код 3200 и всё неизвестное -> 48 (N/A). */
+static int cw_icon_for(int code, gboolean night)
+{
+    const guint8 (*tbl)[2] = night ? CW_ICON_NIGHT : CW_ICON_DAY;
+    gsize i;
+
+    if (code == 3200)
+        return 48;
+    for (i = 0; i < G_N_ELEMENTS(CW_ICON_DAY); i++) {
+        if (tbl[i][0] == code)
+            return tbl[i][1];
+    }
+    return 48;
 }
 
 static const char *cw_kind_desc(int kind)
@@ -245,6 +357,11 @@ static void cw_hour_clear(gpointer data)
     g_free(((CwHour *)data)->label);
 }
 
+static void cw_day_clear(gpointer data)
+{
+    g_free(((CwDay *)data)->label);
+}
+
 static void cw_weather_free(CwWeather *w)
 {
     if (!w)
@@ -253,7 +370,30 @@ static void cw_weather_free(CwWeather *w)
     g_free(w->desc);
     if (w->hours)
         g_array_unref(w->hours);
+    /* Метки дней освобождает cw_day_clear сам, из clear_func массива.
+     * Свой цикл g_free поверх давал двойное освобождение и abort. */
+    if (w->days)
+        g_array_unref(w->days);
     g_free(w);
+}
+
+/* "YYYY-MM-DD" -> GDateTime в UTC. Даты у обоих агрегаторов без
+ * времени и без зоны; важен только день недели, а он от часов
+ * не зависит, поэтому полдень вместо полуночи безопасен. */
+static GDateTime *cw_parse_day(const char *ymd)
+{
+    if (!ymd || strlen(ymd) < 10)
+        return NULL;
+    return g_date_time_new_utc(atoi(ymd), atoi(ymd + 5), atoi(ymd + 8),
+                               12, 0, 0.0);
+}
+
+/* Русские сокращения дней недели. */
+static const char *cw_weekday_ru(const GDateTime *dt)
+{
+    static const char *WD[7] = {"Вс","Пн","Вт","Ср","Чт","Пт","Сб"};
+
+    return WD[g_date_time_get_day_of_week(dt) % 7];
 }
 
 static CwWeather *cw_weather_new(void)
@@ -262,6 +402,8 @@ static CwWeather *cw_weather_new(void)
 
     w->hours = g_array_new(FALSE, FALSE, sizeof(CwHour));
     g_array_set_clear_func(w->hours, cw_hour_clear);
+    w->days = g_array_new(FALSE, FALSE, sizeof(CwDay));
+    g_array_set_clear_func(w->days, cw_day_clear);
     w->kind = CW_W_N;
     return w;
 }
@@ -658,8 +800,9 @@ static char *cw_om_forecast_url(const CwPriv *priv)
         "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
         "weather_code,wind_speed_10m"
         "&hourly=temperature_2m,weather_code"
-        "&forecast_days=1&timezone=auto",
-        lat, lon);
+        "&daily=weather_code,temperature_2m_max,temperature_2m_min"
+        "&forecast_days=%d&timezone=auto",
+        lat, lon, priv->view == CW_VIEW_HOURS ? 2 : CW_DAYS_MAX);
     return url;
 }
 
@@ -770,6 +913,44 @@ static gboolean cw_parse_openmeteo(CwPriv *priv, const char *text,
                             : CW_W_N;
                 g_array_append_val(w->hours, h);
                 shown++;
+            }
+        }
+    }
+    /* daily: для режима «6 дней». */
+    if (json_object_has_member(obj, "daily")) {
+        JsonObject *daily = json_object_get_object_member(obj, "daily");
+        JsonArray *dtimes = json_object_get_array_member(daily, "time");
+        JsonArray *dmax   = json_object_get_array_member(daily,
+                                            "temperature_2m_max");
+        JsonArray *dmin   = json_object_get_array_member(daily,
+                                            "temperature_2m_min");
+        JsonArray *dcodes = json_object_get_array_member(daily,
+                                            "weather_code");
+
+        if (dtimes) {
+            len = (int)json_array_get_length(dtimes);
+            for (i = 0; i < len && w->days->len < CW_DAYS_MAX; i++) {
+                JsonNode *nt = json_array_get_element(dtimes, i);
+                JsonNode *nv = dmax ? json_array_get_element(dmax, i) : NULL;
+                JsonNode *nl = dmin ? json_array_get_element(dmin, i) : NULL;
+                JsonNode *nc = dcodes ? json_array_get_element(dcodes, i)
+                                      : NULL;
+                const char *t = nt ? json_node_get_string(nt) : NULL;
+                CwDay d;
+                GDateTime *dt;
+
+                if (!t)
+                    continue;
+                memset(&d, 0, sizeof(d));
+                dt = cw_parse_day(t);
+                d.label = g_strdup(dt ? cw_weekday_ru(dt) : "--");
+                if (dt)
+                    g_date_time_unref(dt);
+                d.tmax = nv ? json_node_get_double(nv) : 0.0;
+                d.tmin = nl ? json_node_get_double(nl) : 0.0;
+                d.kind = nc ? cw_wmo_kind((int)json_node_get_int(nc))
+                            : CW_W_N;
+                g_array_append_val(w->days, d);
             }
         }
     }
@@ -910,6 +1091,63 @@ static gboolean cw_parse_wttr(CwPriv *priv, const char *text,
                 g_array_append_val(w->hours, h);
                 shown++;
             }
+        }
+    }
+    /* weather[] — сутки. В ответе их 3, поэтому до CW_DAYS_MAX
+     * не добираем, а полоса рисует сколько есть. */
+    if (json_object_has_member(obj, "weather")) {
+        JsonArray *days = json_object_get_array_member(obj, "weather");
+        guint n = days ? json_array_get_length(days) : 0;
+
+        for (guint k = 0; k < n && w->days->len < CW_DAYS_MAX; k++) {
+            JsonNode *dn = json_array_get_element(days, k);
+            JsonObject *dobj = dn && JSON_NODE_HOLDS_OBJECT(dn)
+                                   ? json_node_get_object(dn) : NULL;
+            CwDay d;
+            GDateTime *dt;
+            guint rain = 0;
+
+            if (!dobj)
+                continue;
+            memset(&d, 0, sizeof(d));
+            dt = cw_parse_day(json_object_has_member(dobj, "date")
+                              ? json_object_get_string_member(dobj, "date")
+                              : NULL);
+            d.label = g_strdup(dt ? cw_weekday_ru(dt) : "--");
+            if (dt)
+                g_date_time_unref(dt);
+            d.tmax = cw_num(dobj, "maxtempC", 0.0);
+            d.tmin = cw_num(dobj, "mintempC", 0.0);
+            /* иконка дня берём из полудня, как в родном апплете */
+            if (json_object_has_member(dobj, "hourly")) {
+                JsonArray *hh = json_object_get_array_member(dobj, "hourly");
+                guint hn = hh ? json_array_get_length(hh) : 0;
+
+                for (guint q = 0; q < hn; q++) {
+                    JsonNode *h = json_array_get_element(hh, q);
+                    JsonObject *ho = h && JSON_NODE_HOLDS_OBJECT(h)
+                                         ? json_node_get_object(h) : NULL;
+                    int r;
+
+                    if (!ho)
+                        continue;
+                    r = cw_int(ho, "chanceofrain", 0);
+                    if ((guint)r > rain)
+                        rain = (guint)r;
+                }
+                if (hn > 4) {
+                    JsonNode *noon = json_array_get_element(hh, 4);
+                    JsonObject *no = noon && JSON_NODE_HOLDS_OBJECT(noon)
+                                         ? json_node_get_object(noon) : NULL;
+
+                    if (no)
+                        d.kind = cw_ww_kind(cw_int(no, "weatherCode", -1));
+                }
+            }
+            if (d.kind == CW_W_N)
+                d.kind = CW_W_CLOUDY;
+            d.rain = rain;
+            g_array_append_val(w->days, d);
         }
     }
     g_object_unref(parser);
@@ -1072,6 +1310,18 @@ static void cw_apply_result(CwPriv *priv, int source, const char *text)
         ok = cw_parse_openmeteo(priv, text, &w);
     else
         ok = cw_parse_wttr(priv, text, &w);
+    /* Ночь влияет на выбор иконки: в теме есть варианты с луной.
+     * Оба агрегатора отдают местное время наблюдения, сравниваем
+     * с локальным же now. */
+    {
+        GDateTime *now = g_date_time_new_now_local();
+        int hr = now ? g_date_time_get_hour(now) : 12;
+
+        if (now)
+            g_date_time_unref(now);
+        w->night = (hr >= 20 || hr < 6);
+        priv->night = w->night;
+    }
     cw_log(priv->plugin, "разбор %s: %s", source == CW_SRC_OPENMETEO
                                    ? "open-meteo" : "wttr.in",
            ok ? "ок" : "не разобрался");
@@ -1131,6 +1381,270 @@ static PangoFontDescription *cw_font(const char *spec)
     return d;
 }
 
+/* Ищем каталог темы: сначала путь из настроек, потом наш каталог рядом
+ * с плагином, потом тема родного питоновского апплета — чтобы всё
+ * работало даже без установки нашей копии темы. */
+static char *cw_find_theme(const char *configured)
+{
+    char *own = NULL;
+    char *found = NULL;
+    const char *home = g_getenv("HOME");
+    char *c1 = NULL, *c2 = NULL;
+    gsize i;
+    const char *cands[3];
+
+    if (home)
+        own = g_build_filename(home, "lib", "xscreenlets", "plugins",
+                               "clearweather_theme", NULL);
+    c1 = own;
+    c2 = g_strdup("/usr/share/screenlets/ClearWeather/themes/default");
+
+    cands[0] = (configured && configured[0]) ? configured : NULL;
+    cands[1] = c1;
+    cands[2] = c2;
+
+    for (i = 0; i < G_N_ELEMENTS(cands); i++) {
+        char *probe;
+
+        if (!cands[i])
+            continue;
+        probe = g_build_filename(cands[i], "0.png", NULL);
+        if (g_file_test(probe, G_FILE_TEST_EXISTS))
+            found = g_strdup(cands[i]);
+        g_free(probe);
+        if (found)
+            break;
+    }
+    g_free(c1);
+    g_free(c2);
+    return found;
+}
+
+/* Прямоугольник непрозрачной части картинки. Считается один раз при
+ * загрузке: 49 картинок по 120x120 — это меньше миллиона пикселей. */
+static void cw_icon_bounds(GdkPixbuf *pb, int idx, CwPriv *priv)
+{
+    int w, h, ch, stride, x, y;
+    int x0 = -1, y0 = -1, x1 = -1, y1 = -1;
+    const guchar *px;
+
+    if (!pb)
+        return;
+    w = gdk_pixbuf_get_width(pb);
+    h = gdk_pixbuf_get_height(pb);
+    ch = gdk_pixbuf_get_n_channels(pb);
+    stride = gdk_pixbuf_get_rowstride(pb);
+    px = gdk_pixbuf_get_pixels(pb);
+
+    for (y = 0; y < h; y++) {
+        const guchar *row = px + (gsize)y * stride;
+
+        for (x = 0; x < w; x++) {
+            if (row[x * ch + ch - 1] < 8)   /* альфа */
+                continue;
+            if (x0 < 0 || x < x0) x0 = x;
+            if (x1 < 0 || x > x1) x1 = x;
+            if (y0 < 0) y0 = y;
+            y1 = y;
+        }
+    }
+    if (x0 < 0) {              /* полностью прозрачная */
+        x0 = y0 = 0;
+        x1 = w - 1;
+        y1 = h - 1;
+    }
+    priv->ibx[idx] = x0;
+    priv->iby[idx] = y0;
+    priv->ibw[idx] = x1 - x0 + 1;
+    priv->ibh[idx] = y1 - y0 + 1;
+}
+
+/* Загружает 49 иконок и SVG-фон один раз. Тема не нашлась — апплет
+ * продолжает рисовать символы кодом, как раньше. */
+/* Родные SVG темы описаны только через width/height, без viewBox.
+ * librsvg в таком случае рисует документ в его собственном размере
+ * (132x100) и размер окна апплета полностью игнорирует — фон не
+ * масштабируется. Поэтому перед загрузкой дописываем viewBox из
+ * width/height.
+ *
+ * Дальше preserveAspectRatio. Панель сделана под холст 132x100, а окно
+ * 320x169, и пропорции не совпадают. С "none" фон заполняет окно, но
+ * рисунок тянется по двум осям, облака выходят деформированными, а
+ * нижняя полоса панели (day-bg.svg, 116x9) превращается в серую
+ * полосу поперёк апплета. С "slice" картинка не искажается, а лишнее
+ * по меньшей стороне обрезается — вместе с этой полосой. */
+static double cw_svg_attr(const char *tag, const char *name)
+{
+    const char *p = strstr(tag, name);
+    char *end = NULL;
+    double v;
+
+    if (!p)
+        return 0.0;
+    p += strlen(name);
+    while (*p == ' ' || *p == '=' || *p == '\n' || *p == '\t')
+        p++;
+    if (*p == '"')
+        p++;
+    v = g_ascii_strtod(p, &end);
+    if (end == p)
+        return 0.0;
+    return v;
+}
+
+static RsvgHandle *cw_svg_load(const char *path)
+{
+    gchar *data = NULL;
+    gsize len = 0;
+    GString *out;
+    RsvgHandle *h;
+    char *tag, *ins, *root;
+    const char *gt;
+    double wv, hv;
+    gsize at;
+
+    if (!g_file_get_contents(path, &data, &len, NULL))
+        return NULL;
+    if (!g_utf8_validate(data, len, NULL)) {
+        g_free(data);
+        return NULL;
+    }
+    gt = strchr(data, '>');
+    if (!gt || gt == data) {
+        g_free(data);
+        return NULL;
+    }
+    tag = g_strndup(data, (gsize)(gt - data) + 1);
+    wv = cw_svg_attr(tag, "width");
+    hv = cw_svg_attr(tag, "height");
+    if (wv <= 0.0)
+        wv = 132.0;
+    if (hv <= 0.0)
+        hv = 100.0;
+
+    /* вставляем сразу за именем корневого элемента */
+    root = strchr(data, ' ');
+    at = (root && root < gt) ? (gsize)(root - data) : (gsize)(gt - data);
+
+    out = g_string_new(NULL);
+    g_string_append_len(out, data, (gssize)at);
+    if (strstr(tag, "viewBox") == NULL) {
+        ins = g_strdup_printf(" viewBox=\"0 0 %g %g\"", wv, hv);
+        g_string_append(out, ins);
+        g_free(ins);
+    }
+    if (strstr(tag, "preserveAspectRatio") == NULL)
+        g_string_append(out, " preserveAspectRatio=\"xMidYMid slice\"");
+    g_string_append(out, gt);
+
+    h = rsvg_handle_new_from_data((const guint8 *)out->str, out->len, NULL);
+    g_string_free(out, TRUE);
+    g_free(tag);
+    g_free(data);
+    return h;
+}
+
+static void cw_theme_load(CwPriv *priv)
+{
+    gsize i;
+
+    if (priv->theme_ok)
+        return;
+    priv->theme_ok = TRUE;
+
+    priv->theme_path = cw_find_theme(priv->theme_dir);
+    if (!priv->theme_path) {
+        cw_log(priv->plugin, "каталог темы не найден, рисую символами");
+        return;
+    }
+    cw_log(priv->plugin, "тема: %s", priv->theme_path);
+
+    for (i = 0; i < CW_ICON_COUNT; i++) {
+        char *name = g_strdup_printf("%u.png", (guint)i);
+        char *f = g_build_filename(priv->theme_path, name, NULL);
+
+        priv->icons[i] = gdk_pixbuf_new_from_file(f, NULL);
+        g_free(f);
+        g_free(name);
+        cw_icon_bounds(priv->icons[i], i, priv);
+    }
+    {
+        char *svg = g_build_filename(priv->theme_path, "weather-bg.svg", NULL);
+
+        if (g_file_test(svg, G_FILE_TEST_EXISTS))
+            priv->bg = cw_svg_load(svg);
+        g_free(svg);
+    }
+    if (!priv->bg) {
+        char *svg = g_build_filename(priv->theme_path,
+                                     "weather-bg-mini.svg", NULL);
+
+        if (g_file_test(svg, G_FILE_TEST_EXISTS))
+            priv->bg = cw_svg_load(svg);
+        g_free(svg);
+    }
+}
+
+static void cw_theme_free(CwPriv *priv)
+{
+    gsize i;
+
+    for (i = 0; i < CW_ICON_COUNT; i++)
+        g_clear_object(&priv->icons[i]);
+    g_clear_object(&priv->bg);
+    g_clear_pointer(&priv->theme_path, g_free);
+}
+
+/* Полоса на 6 дней — как в родном апплете: день недели, иконка
+ * (ночная у первого, дневные дальше — ровно так же у него), затем
+ * максимум и минимум одной строкой. Раскладка по ширине окна: колонки
+ * отступом от левого края, как в оригинале, но считаются от w, а не
+ * от жёстких 24 пикселей, иначе на 320 не помещается. */
+static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
+                         PangoLayout *layout, double w, double h, double y)
+{
+    int n = (int)MIN(cw->days->len, (guint)CW_DAYS_MAX);
+    double col = (w - 2 * CW_MARGIN) / (double)(n > 0 ? n : 1);
+    /* Как и в часовой полосе: видимая часть картинки — ~89% от
+     * запрошенного размера, поля прозрачные. Колонка здесь широкая
+     * (5 дней), поэтому прежний потолок 30 держал значки мельче, чем
+     * позволяет место. Потолок поднят до 56: колонка 62 px, значки
+     * ещё не упираются в соседей. */
+    double isz = CLAMP(col + 1.5, 12.0, 56.0);
+    int i, th;
+    CwColor faded = priv->hour_color;
+
+    if (n <= 0)
+        return;
+    faded.a *= 0.85;
+
+    for (i = 0; i < n; i++) {
+        CwDay *dh = &g_array_index(cw->days, CwDay, i);
+        double cx = CW_MARGIN + col * i + col / 2.0;
+        char buf[32];
+
+        g_snprintf(buf, sizeof(buf), "%s", dh->label ? dh->label : "--");
+        th = cw_text(cr, layout, buf, &faded, cx, y, TRUE);
+
+        /* у первого дня родной апплет рисует ночную иконку, дальше
+         * дневные — так и делаем */
+        cw_icon_px(cr, priv, dh->kind, cx - isz / 2.0, y + th + 3, isz);
+
+        if (priv->show_daytemp) {
+            /* Без разделителя: в оригинале '<b>high</b>low' слитно,
+             * жирный максимум читается как белый, обычный — как серый. */
+            g_snprintf(buf, sizeof(buf), "<b>%.0f\u00b0</b>%.0f\u00b0",
+                       cw_temp(priv, dh->tmax), cw_temp(priv, dh->tmin));
+            cw_text_markup(cr, layout, buf, &priv->hour_color, cx,
+                           y + th + isz + 6, TRUE);
+        }
+    }
+    (void)h;
+}
+
+/* Рисует иконку погоды: если тема загрузилась — настоящий PNG из набора
+ * Stardock, иначе рисуем символ кодом, как раньше. Тот же рисователь
+ * работает и в шапке, и в нижней полосе, и для 6-дневного режима. */
 static void cw_icon(cairo_t *cr, int kind, double x, double y, double s,
                     CwColor *c)
 {
@@ -1202,12 +1716,126 @@ static void cw_icon(cairo_t *cr, int kind, double x, double y, double s,
     cairo_restore(cr);
 }
 
+static void cw_icon_px(cairo_t *cr, CwPriv *priv, int kind, double x,
+                       double y, double s)
+{
+    int idx = cw_icon_for(cw_kind_to_ww(kind), priv->night);
+
+    if (priv->icons[idx]) {
+        int bw = priv->ibw[idx], bh = priv->ibh[idx];
+        double sc = s / (double)(bw > bh ? bw : bh);
+
+        cairo_save(cr);
+        /* Без cairo_scale паттерн рисуется 1:1, то есть «иконка на 17
+         * пикселей» занимала бы все 120. Масштабируем по ВИДИМОЙ части,
+         * сдвигая так, чтобы она попала в (x, y, s, s) — иначе иконка
+         * либо налезала на текст, либо была мельче соседних. */
+        cairo_translate(cr, x - priv->ibx[idx] * sc, y - priv->iby[idx] * sc);
+        cairo_scale(cr, sc, sc);
+        gdk_cairo_set_source_pixbuf(cr, priv->icons[idx], 0, 0);
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        return;
+    }
+    cw_icon(cr, kind, x, y, s, &priv->temp_color);
+}
+
+/* Панель из weather-bg.svg. Родной апплет рисует её librsvg через
+ * theme.render(); мы делаем то же самоим. */
+static void cw_draw_bg(cairo_t *cr, CwPriv *priv, double w, double h)
+{
+    double r = 8.0;
+
+    cairo_save(cr);
+    /* Скруглённый путь строится всегда: по нему клипуется и панель
+     * темы, и своя подложка, а рамка обводится поверх. Раньше при
+     * включённом фоне был ранний return, и окно выходило обычным
+     * прямоугольником без скруглений. */
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, w - r, r, r, -M_PI / 2, 0);
+    cairo_arc(cr, w - r, h - r, r, 0, M_PI / 2);
+    cairo_arc(cr, r, h - r, r, M_PI / 2, M_PI);
+    cairo_arc(cr, r, r, r, M_PI, 3 * M_PI / 2);
+    cairo_close_path(cr);
+
+    if (priv->use_bg && priv->bg) {
+        /* Панель темы подгоняется под окно: у SVG дописан viewBox, без
+         * него librsvg рисовал её собственным размером 132x100 и не
+         * трогал размер апплета вовсе. */
+        RsvgRectangle vp = {0.0, 0.0, (double)w, (double)h};
+
+        cairo_clip(cr);
+        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+    } else {
+        /* Своя подложка: скруглённый прямоугольник, под тот же размер,
+         * что и в конфиге. */
+        cairo_set_source_rgba(cr, 0.10, 0.10, 0.11, 0.92);
+        cairo_fill_preserve(cr);
+    }
+    cairo_set_source_rgba(cr, 0.45, 0.45, 0.50, 0.75);
+    cairo_set_line_width(cr, 1.0);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+}
+
+
 /* Рисует текст и ВОЗВРАЩАЕТ его фактическую высоту в пикселях.
  * Высота нужна, чтобы складывать строки друг под другом: при фиксированных
  * смещениях крупный шрифт температуры налезал на город. */
 /* Выравнивание по правому краю: PANGO_ALIGN_RIGHT внутри layout
  * работает только относительно ширины самого layout, поэтому ширину
  * текста меряем сами и рисуем от правого края окна. */
+/* Текст с pango-разметкой. Нужен для пары макс/мин: в родном
+ * апплете это '<b>high</b>low' — жирный максимум и обычный минимум
+ * без разделителя, поэтому они и разного цвета. */
+static int cw_text_markup(cairo_t *cr, PangoLayout *layout, const char *text,
+                          CwColor *c, double x, double y, gboolean center)
+{
+    int tw = 0, th = 0;
+
+    pango_layout_set_markup(layout, text ? text : "", -1);
+    pango_layout_get_pixel_size(layout, &tw, &th);
+    cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    cairo_move_to(cr, center ? x - tw * 0.5 : x, y);
+    pango_cairo_show_layout(cr, layout);
+    return th;
+}
+
+/* То же, что cw_text_markup, но прижато к правому краю по x. */
+static int cw_text_markup_right(cairo_t *cr, PangoLayout *layout,
+                                const char *text, CwColor *c, double xr,
+                                double y)
+{
+    int tw = 0, th = 0;
+
+    pango_layout_set_markup(layout, text ? text : "", -1);
+    pango_layout_get_pixel_size(layout, &tw, &th);
+    cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    cairo_move_to(cr, xr - tw, y);
+    pango_cairo_show_layout(cr, layout);
+    return th;
+}
+
+/* Нижняя граница видимой части значка. Рамка 72 px, а рисунок
+ * кончается выше: поля в картинках темы прозрачные. Считать низ
+ * шапки по рамке — значит тащить за собой пустое поле. */
+static double cw_icon_visible_bottom(CwPriv *priv, int idx, double size)
+{
+    int bw, bh, base;
+
+    if (idx < 0 || idx >= CW_ICON_COUNT || !priv->icons[idx])
+        return size;
+    bw = priv->ibw[idx];
+    bh = priv->ibh[idx];
+    if (bw <= 0 || bh <= 0)
+        return size;
+    base = bw > bh ? bw : bh;
+    return (priv->iby[idx] + bh) * size / (double)base;
+}
+
 /* Ширина строки в пикселях — чтобы решить, влезает ли она в окно. */
 static int cw_text_width(cairo_t *cr, PangoLayout *layout, const char *font,
                          const char *text, CwColor c)
@@ -1245,9 +1873,11 @@ static int cw_text(cairo_t *cr, PangoLayout *layout, const char *text,
     pango_layout_set_text(layout, text ? text : "", -1);
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_set_source_rgba(cr, c->r, c->g, c->b, c->a);
-    pango_layout_set_alignment(layout,
-                               center ? PANGO_ALIGN_CENTER : PANGO_ALIGN_LEFT);
-    cairo_move_to(cr, x, y);
+    pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+    /* Настоящее центрирование по x. PANGO_ALIGN_CENTER внутри layout
+     * бесполезен: ширина layout равна ширине текста, центрировать не
+     * по чему, и текст начинался прямо от точки — колонки сдвигались. */
+    cairo_move_to(cr, center ? x - tw * 0.5 : x, y);
     pango_cairo_show_layout(cr, layout);
     return th;
 }
@@ -1312,51 +1942,125 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * позиции были константами (город на CW_MARGIN+20, описание на
      * CW_MARGIN+40), а температура в 26pt занимает ~35 пикселей, и
      * город попадал прямо на неё. */
-    icon_s = 46.0;
-    text_x = CW_MARGIN + icon_s + CW_GAP;
-    cw_icon(g, cw->kind, CW_MARGIN, CW_MARGIN, icon_s, &priv->temp_color);
+    cw_theme_load(priv);
+    cw_draw_bg(g, priv, w, h);
 
+    /* --- шапка по образцу родного апплета ---
+     *
+     * Оригинал: крупная иконка слева (масштаб 0.6 от 120), а справа
+     * столбец, прижатый к правому краю. Слов нет вообще — только
+     * числа и название города. */
+    cw_theme_load(priv);
+    cw_draw_bg(g, priv, w, h);
+
+    icon_s = 72.0;
+    cw_icon_px(g, priv, cw->kind, CW_MARGIN, CW_MARGIN, icon_s);
+
+    /* Раскладка шапки как в оригинале:
+     *   - крупная иконка слева;
+     *   - основная температура в правом верхнем углу, город под ней,
+     *     оба прижаты к правому краю;
+     *   - вплотную к иконке столбик макс/мин и влажности. */
     {
-        PangoFontDescription *fd = cw_font(priv->temp_font);
+        PangoFontDescription *fd;
+        double xr = w - CW_MARGIN;
+        double xc = CW_MARGIN + icon_s + 6;
+        double yc;
 
+        /* --- правый верхний угол: температура и город --- */
+        fd = cw_font(priv->temp_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
-    }
-    g_snprintf(buf, sizeof(buf), "%.0f°", cw_temp(priv, cw->temp));
-    th = cw_text(g, layout, buf, &priv->temp_color, text_x,
-                 CW_MARGIN - 2, FALSE);
+        g_snprintf(buf, sizeof(buf), "%.0f\u00b0", cw_temp(priv, cw->temp));
+        th = cw_text_right(g, layout, buf, &priv->temp_color, xr,
+                           CW_MARGIN - 4);
 
-    /* Город уводим в правый верхний угол, в одну строку с температурой:
-     * так шапка занимает высоту значка, а не высоту значка плюс строка. */
-    {
-        PangoFontDescription *fd = cw_font(priv->city_font);
-
+        fd = cw_font(priv->city_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
-    }
-    th2 = cw_text_right(g, layout, cw->place ? cw->place : priv->city,
-                        &priv->city_color, w - CW_MARGIN, CW_MARGIN - 2);
+        th2 = cw_text_right(g, layout, cw->place ? cw->place : priv->city,
+                            &priv->city_color, xr, CW_MARGIN - 4 + th + 1);
+        y = CW_MARGIN - 4 + th + 1 + th2;
 
-    /* низ шапки = максимум из значка, температуры и города */
-    y = MAX(MAX(CW_MARGIN + icon_s, (CW_MARGIN - 2) + th), CW_MARGIN - 2 + th2)
-        + CW_GAP;
-
-    {
-        PangoFontDescription *fd = cw_font(priv->desc_font);
-
+        /* --- столбик вплотную к иконке --- */
+        fd = cw_font(priv->hour_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
+
+        /* Максимум и минимум — СТОЛБИКОМ, каждый на своей строке.
+         * Склеивать их в '<b>high</b>low' нельзя: в одну строку они
+         * читаются как одно длинное число. */
+        /* Минимум серый, максимум остаётся основным цветом. Серый
+         * берём как среднее по каналам цвета текста, чтобы он
+         * остался производным от выбранной пользователем гаммы. */
+        {
+            double v = (priv->hour_color.r + priv->hour_color.g
+                        + priv->hour_color.b) / 3.0;
+            CwColor grey = priv->hour_color;
+
+            grey.r = grey.g = grey.b = v;
+            grey.a *= 0.80;
+
+            yc = CW_MARGIN - 4;
+            if (cw->days->len > 0) {
+                CwDay *d0 = &g_array_index(cw->days, CwDay, 0);
+
+                g_snprintf(buf, sizeof(buf), "<b>%.0f\u00b0</b>",
+                           cw_temp(priv, d0->tmax));
+                th = cw_text_markup(g, layout, buf, &priv->hour_color, xc,
+                                    yc, FALSE);
+                yc += th;
+                g_snprintf(buf, sizeof(buf), "%.0f\u00b0",
+                           cw_temp(priv, d0->tmin));
+                th = cw_text(g, layout, buf, &grey, xc, yc, FALSE);
+                yc += th;
+            }
+
+            /* Влажность — моноширинным шрифтом. С DejaVu Sans
+             * Condensed разница на этом кегле составляла 2 пикселя и
+             * не читалась; моноширинный отличается сразу. */
+            fd = cw_font(priv->hour_font);
+            pango_font_description_set_family(fd, "DejaVu Sans Mono");
+            pango_layout_set_font_description(layout, fd);
+            pango_font_description_free(fd);
+
+            g_snprintf(buf, sizeof(buf), "%.0f%%", cw->humidity);
+            th2 = cw_text(g, layout, buf, &priv->hour_color, xc, yc + 2,
+                          FALSE);
+            y = MAX(y, yc + 2 + th2);
+        }
     }
-    th = cw_text(g, layout, cw->desc ? cw->desc : "", &priv->desc_color,
-                 CW_MARGIN, y, FALSE);
-    y += th + 2;
-    g_snprintf(buf, sizeof(buf), "ветер %.0f %s   влажность %.0f%%",
-               cw_wind(priv, cw->wind),
-               priv->units == CW_UNITS_IMPERIAL ? "mph" : "км/ч",
-               cw->humidity);
-    th = cw_text(g, layout, buf, &priv->desc_color, CW_MARGIN, y, FALSE);
-    wind_y = y;
-    y += th + CW_GAP + 4;
+
+    /* низ шапки — что выше: значок или столбец рядом с ним. Значок
+     * берём по видимой части, иначе пустые поля картинки съедают
+     * высоту и под полосой остаётся дыра. */
+    {
+        int idx = cw_icon_for(cw_kind_to_ww(cw->kind), priv->night);
+
+        y = MAX(CW_MARGIN + cw_icon_visible_bottom(priv, idx, icon_s), y)
+            + CW_GAP;
+    }
+
+    /* Разделитель шапки и прогноза. Раньше шапка и полоса дней шли
+     * слитно, и верх апплета не читался как отдельная часть. Полоса
+     * серая и низкого контраста, штриховая — как разделитель, а не
+     * как элемент, который спорит со значками. */
+    {
+        static const double dash[] = {3.0, 3.0};
+
+        cairo_save(g);
+        cairo_set_source_rgba(g, 0.76, 0.76, 0.80, 0.26);
+        cairo_set_line_width(g, 2.0);
+        cairo_set_dash(g, dash, G_N_ELEMENTS(dash), 0.0);
+        cairo_move_to(g, CW_MARGIN, y - 12.0);
+        cairo_line_to(g, w - CW_MARGIN, y - 12.0);
+        cairo_stroke(g);
+        cairo_restore(g);
+    }
+    /* Полоса начинается под разделителем: 2 px отступа, чтобы подписи
+     * не липли к линии. Смещение подобрано по замерам пикселей. */
+    y -= 11;
+
 
     /* --- почасовой прогноз ---
      *
@@ -1385,9 +2089,17 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             }
             y += 14;
         }
+    } else if (priv->view == CW_VIEW_DAYS) {
+        cw_draw_days(g, priv, cw, layout, w, h, y);
     } else if (cw->hours->len > 0) {
         int n = (int)MIN(cw->hours->len, MAX(priv->hours_shown, 1));
         double col = (w - 2 * CW_MARGIN) / n;
+        /* Зазор 3 px отсюда и получить нельзя: видимая часть картинки
+         * занимает ~89% от запрошенного размера, поля прозрачные. При
+         * isz = col-3 видимая ширина выходила 32 px и зазор 6 px.
+         * Поэтому берём колонку с небольшим добавом — рамка шире
+         * колонки, но прозрачные поля не дают значкам соприкасаться. */
+        double isz = CLAMP(col + 1.5, 12.0, 40.0);
 
         shown = 0;
         {
@@ -1409,27 +2121,15 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
              * обе от y, значок встаёт НАД нижним краем температуры. */
             th2 = cw_text(g, layout, buf, &priv->hour_color, x,
                           y + th + 2, TRUE);
-            cw_icon(g, hh->kind, x - 9, y + th + 2 + th2 + 5, 17.0,
-                     &priv->hour_color);
+            cw_icon_px(g, priv, hh->kind, x - isz / 2.0,
+                       y + th + 2 + th2 + 5, isz);
             shown++;
         }
     }
 
-    /* Бейдж источника — у правого края строки ветра, и только если
-     * реально помещается: иначе он налезал бы на «влажность». */
-    if (priv->badge && priv->badge[0] && !cw_text_width(g, layout, "Sans 8",
-                                                        priv->badge,
-                                                        priv->desc_color)
-         + cw_text_width(g, layout, "Sans 11", buf, priv->desc_color)
-         + CW_GAP * 2 < w) {
-        PangoFontDescription *fd = cw_font("Sans 8");
-        CwColor faded = priv->desc_color;
+    /* Бейдж источника убран: в родном апплете его нет, и на нашей
+     * шапке он занимал правый верхний угол, где стоит температура. */
 
-        pango_layout_set_font_description(layout, fd);
-        pango_font_description_free(fd);
-        faded.a *= 0.75;
-        cw_text_right(g, layout, priv->badge, &faded, w - CW_MARGIN, wind_y);
-    }
 
     g_object_unref(layout);
     /* Кадр собирали на отдельной поверхности, а на окно переносим
@@ -1563,6 +2263,39 @@ static void cw_on_city_alt(GtkEntry *e, gpointer data)
     /* Сбрасываем флаг перебора: сначала проверяем основное название. */
     priv->alt_active = FALSE;
     cw_start(p);
+}
+
+static void cw_on_view(GtkComboBox *c, gpointer data)
+{
+    XsPlugin *p = data;
+    CwPriv *priv = p ? p->priv : NULL;
+    int v;
+
+    if (!priv)
+        return;
+    v = gtk_combo_box_get_active(c);
+    if (v < 0 || v == priv->view)
+        return;
+    priv->view = v;
+    xs_host_api()->conf_set_int(priv->kf, p->name, "view", v);
+    cw_save(priv);
+    /* Число запрошенных дней у open-meteo зависит от режима, поэтому
+     * данные перезапрашиваем, а не просто перерисовываем. */
+    cw_start(p);
+}
+
+static void cw_on_use_bg(GtkToggleButton *b, gpointer data)
+{
+    XsPlugin *p = data;
+    CwPriv *priv = p ? p->priv : NULL;
+
+    if (!priv)
+        return;
+    priv->use_bg = gtk_toggle_button_get_active(b) ? 1 : 0;
+    xs_host_api()->conf_set_int(priv->kf, p->name, "use_bg", priv->use_bg);
+    cw_save(priv);
+    if (priv->plugin && priv->plugin->win)
+        gtk_widget_queue_draw(priv->plugin->win);
 }
 
 static void cw_on_proxy(GtkEntry *e, gpointer data)
@@ -1725,13 +2458,24 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
     gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 5);
     gtk_box_pack_start(GTK_BOX(page), grid, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(page),
-                       gtk_label_new("Название можно писать на любом языке; если не "
-                                    "нашлось — берётся запасное. Вместо "
-                                    "города можно указать почтовый "
-                                    "индекс. Соединение: напрямую или "
-                                    "через адрес ниже."),
-                       FALSE, FALSE, 0);
+    /* Пояснение строчно: одним длинным label окно настроек растягивало
+     * на всю ширину этой строки. */
+    {
+        static const char *const notes[] = {
+            "Название можно писать на любом языке;",
+            "если не нашлось — берётся запасное.",
+            "Вместо города можно указать почтовый индекс.",
+            "Соединение: напрямую или через адрес ниже.",
+        };
+        gsize k;
+
+        for (k = 0; k < G_N_ELEMENTS(notes); k++) {
+            GtkWidget *lb = gtk_label_new(notes[k]);
+
+            gtk_label_set_xalign(GTK_LABEL(lb), 0.0);
+            gtk_box_pack_start(GTK_BOX(page), lb, FALSE, FALSE, 0);
+        }
+    }
     gtk_notebook_append_page(nb, page, gtk_label_new("Погода"));
 
     entry = gtk_entry_new();
@@ -1777,6 +2521,38 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), priv->hours_shown);
     g_signal_connect(spin, "value-changed", G_CALLBACK(cw_on_hours), p);
     cw_row(grid, r++, "Часов в прогнозе:", spin);
+
+    {
+        static const char *views[] = {"6 дней (как в родном)",
+                                      "По часам",
+                                      "Дни и часы"};
+
+        cb = gtk_combo_box_text_new();
+        for (guint i = 0; i < G_N_ELEMENTS(views); i++)
+            gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb), views[i]);
+        gtk_combo_box_set_active(GTK_COMBO_BOX(cb), priv->view);
+        cw_tag(cb, "view");
+        g_signal_connect(cb, "changed", G_CALLBACK(cw_on_view), p);
+        cw_row(grid, r++, "Вид прогноза:", cb);
+    }
+
+    {
+        GtkWidget *chk = gtk_check_button_new_with_label(
+            "Фон-панель темы (родной апплет)");
+
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chk), priv->use_bg);
+        cw_tag(chk, "use_bg");
+        g_signal_connect(chk, "toggled", G_CALLBACK(cw_on_use_bg), p);
+        gtk_grid_attach(GTK_GRID(grid), chk, 1, r++, 1, 1);
+    }
+
+    entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry),
+                       priv->theme_dir ? priv->theme_dir : "");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry),
+                                   "каталог темы (пусто = искать самим)");
+    cw_tag(entry, "theme_dir");
+    cw_row(grid, r++, "Каталог темы:", entry);
 
     spin = gtk_spin_button_new_with_range(160, 800, 10);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), priv->width);
@@ -1905,6 +2681,13 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
                                                       "hours_shown",
                                                       CW_HOURS_DEFAULT),
                               3, 12);
+    priv->view = CLAMP(xs_host_api()->conf_int(kf, p->name, "view",
+                                              CW_VIEW_HOURS),
+                       CW_VIEW_MIN, CW_VIEW_MAX);
+    priv->show_daytemp = xs_host_api()->conf_int(kf, p->name,
+                                                 "show_daytemp", 1) ? 1 : 0;
+    priv->use_bg = xs_host_api()->conf_int(kf, p->name, "use_bg", 0) ? 1 : 0;
+    priv->theme_dir = xs_host_api()->conf_str(kf, p->name, "theme_dir", "");
     priv->lat  = xs_host_api()->conf_dbl(kf, p->name, "geo_lat", 0.0);
     priv->lon  = xs_host_api()->conf_dbl(kf, p->name, "geo_lon", 0.0);
     priv->city_resolved = g_key_file_has_key(kf, p->name, "geo_lat", NULL) &&
@@ -1983,6 +2766,8 @@ static void cw_shutdown(XsPlugin *p)
         priv->timer_id = 0;
     }
     cw_weather_free(priv->weather);
+    cw_theme_free(priv);
+    g_free(priv->theme_dir);
     g_free(priv->status);
     g_free(priv->badge);
     g_free(priv->city);
