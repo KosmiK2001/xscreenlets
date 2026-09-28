@@ -552,17 +552,38 @@ static void cl_rgba(ConlogPriv *priv, const char *key, const double d[4],
     char *v = xs_host_api()->conf_str(priv->kf, priv->plugin->name, key, NULL);
 
     out->r = d[0]; out->g = d[1]; out->b = d[2]; out->a = d[3];
-    if (v) {
-        int r, g, b, a = 255;
+    if (!v || !v[0])
+        return;
+    /* Два формата в дикой природе:
+     *   rgba(217,217,217,255)  — пишет оригинальный conlog.c и мы;
+     *   rgba(25,25,25,0.480916) — alpha дробный, и sscanf("%d") брал
+     *                            только «0», то есть прозрачность
+     *                            становилась нулевой;
+     *   0,1,0,1                — старый conlog_core, четыре float.
+     * alpha читаем как double — иначе дробное значение обрезается. */
+    {
+        double r, g, b, a;
 
-        if (v[0] == 'r' && sscanf(v, "rgba(%d,%d,%d,%d)", &r, &g, &b, &a) == 4) {
+        if (sscanf(v, "rgba(%lf,%lf,%lf,%lf)", &r, &g, &b, &a) == 4) {
             out->r = r / 255.0;
             out->g = g / 255.0;
             out->b = b / 255.0;
-            out->a = a / 255.0;
+            out->a = a;
+        } else if (sscanf(v, "%lf,%lf,%lf,%lf", &r, &g, &b, &a) == 4 &&
+                   r >= 0.0 && r <= 1.0 && g >= 0.0 && g <= 1.0 &&
+                   b >= 0.0 && b <= 1.0 && a >= 0.0 && a <= 1.0) {
+            /* Проверка диапазона обязательна: в старых конфигах есть
+             * шестикомпонентный мусор вида
+             * 0,870588,0,866667,0,854902,1, где первые четыре — не
+             * компоненты цвета. Без проверки из него получалось
+             * g=870588 и текст становился нечитаемым. */
+            out->r = r;
+            out->g = g;
+            out->b = b;
+            out->a = a;
         }
-        g_free(v);
     }
+    g_free(v);
 }
 
 static int cl_init(XsPlugin *p, GKeyFile *kf)
@@ -747,7 +768,15 @@ static void cl_color_set(GtkColorButton *btn, gpointer data)
         priv->title_color.r = c.red; priv->title_color.g = c.green;
         priv->title_color.b = c.blue; priv->title_color.a = c.alpha;
     }
-    s = g_strdup_printf("%g,%g,%g,%g", c.red, c.green, c.blue, c.alpha);
+    /* Формат ДОЛЖЕН совпадать с тем, что читает cl_rgba():
+     * rgba(r,g,b,a) в байтах 0..255. Раньше писалось "%g,%g,%g,%g",
+     * а читалось "rgba(%d,...)" — форматы не совпадали, и выбранный
+     * цвет молча терялся при рестарте: applet читал дефолт.
+     * Именно в этом формате пишет и оригинальный conlog.c, так что
+     * ключи из его конфигов читаются без правок. */
+    s = g_strdup_printf("rgba(%d,%d,%d,%.3f)",
+                       (int) (c.red * 255), (int) (c.green * 255),
+                       (int) (c.blue * 255), c.alpha);
     g_key_file_set_string(priv->kf, p->name, key, s);
     g_free(s);
     cl_save(p);
