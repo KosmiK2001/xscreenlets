@@ -168,6 +168,11 @@ test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DI
 clean:
 	rm -rf $(BUILD_DIR)
 
+# ВНИМАНИЕ, ЛОВУШКА: install ставит ТЯЖЁЛЫЙ build/conlog.so как
+# plugins/conlog.so и молча откатит урезанный applet (с его 90% CPU на
+# большом потоке). Урезанный вариант ставится вручную:
+#   cp build/conlog_min.so ~/lib/xscreenlets/plugins/conlog.so
+# Подробности — src/widgets/CONLOG-FUNCTIONALITY.md
 install: all
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin
 	$(INSTALL) -m 0755 $(TARGET_DAEMON) $(DESTDIR)$(PREFIX)/bin/xscreenletsd

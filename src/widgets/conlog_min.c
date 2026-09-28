@@ -221,6 +221,9 @@ static gboolean cl_on_io(GIOChannel *chan, GIOCondition cond, gpointer data)
             g_string_truncate(priv->pending, 0);
         }
         priv->running = FALSE;
+        priv->watch_id = 0;   /* источник сейчас умрёт: сбрось id,
+                               * иначе следующий cl_stop() дёрнет
+                               * g_source_remove() по мёртвому id */
         cl_request_redraw(priv);
         return G_SOURCE_REMOVE;
     }
@@ -318,8 +321,12 @@ static void cl_start(ConlogPriv *priv)
             g_output_stream_close(stdin_stream, NULL, NULL);
     }
     priv->in_stream = g_subprocess_get_stdout_pipe(priv->proc);
-    if (!priv->in_stream)
+    if (!priv->in_stream) {
+        /* Не оставляем процесс висеть: без читателя он упрётся в
+         * заполненный pipe и заблокируется навсегда. */
+        g_subprocess_force_exit(priv->proc);
         return;
+    }
     /* Дескриптор берём через g_file_descriptor_based_get_fd: это публичный
      * интерфейс GIO, в отличие от GUnixInputStream из gio-unix-2.0.
      * Дублируем fd: канал не должен зависеть от жизни GSubprocess. */
@@ -336,10 +343,18 @@ static void cl_start(ConlogPriv *priv)
     /* Ссылка на поток BORROWED и остаётся валидной, пока жив
      * GSubprocess: сохраняем для shutdown, unref-ить нельзя. */
     priv->in_stream = NULL;   /* дескриптор скопирован, ссылка не нужна */
-    if (!priv->chan)
+    if (!priv->chan) {
+        g_subprocess_force_exit(priv->proc);
         return;
+    }
     g_io_channel_set_encoding(priv->chan, NULL, NULL);
-    g_io_channel_set_buffered(priv->chan, TRUE);
+    /* Буферизацию ВЫКЛЮЧАЕМ намеренно. При set_buffered(TRUE) GLib
+     * читает во внутренний буфер размером G_IO_NICE_BUF_SIZE = 1024
+     * байт, сколько бы мы ни просили, то есть read() идёт тысячебайтными
+     * кусками и замысел "крупный кусок = 16K" не выполняется.
+     * Замерено на чтении 256 КиБ: 268 read() с буферизацией против
+     * 28 без неё. */
+    g_io_channel_set_buffered(priv->chan, FALSE);
     /* Неблокирующий режим обязателен: read() в обработчике main loop
      * повесил бы весь интерфейс. */
     g_io_channel_set_flags(priv->chan, G_IO_FLAG_NONBLOCK, NULL);
@@ -662,20 +677,28 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
                                                       CONLOG_MAX_LINES);
     if (priv->max_lines == 0 || priv->max_lines > 10000)
         priv->max_lines = CONLOG_MAX_LINES;
-    priv->command = g_strdup(xs_host_api()->conf_str(kf, p->name, "command",
-                                                    CONLOG_DEFAULT_COMMAND));
-    priv->title = g_strdup(xs_host_api()->conf_str(kf, p->name, "title", ""));
-    priv->row_font = g_strdup(xs_host_api()->conf_str(kf, p->name, "row_font",
-                                                     CONLOG_DEFAULT_FONT));
-    priv->title_font = g_strdup(xs_host_api()->conf_str(kf, p->name,
-                                                       "title_font",
-                                                       CONLOG_DEFAULT_FONT));
-    priv->line_step = xs_host_api()->conf_int(kf, p->name, "line_step", 0);
-    priv->first_row_y = xs_host_api()->conf_int(kf, p->name, "first_row_y", 6);
-    priv->width = xs_host_api()->conf_int(kf, p->name, "window_width",
-                                          CONLOG_DEFAULT_WIDTH);
-    priv->height = xs_host_api()->conf_int(kf, p->name, "window_height",
-                                           CONLOG_DEFAULT_HEIGHT);
+    /* conf_str() уже возвращает СВЕЖУЮ копию (g_key_file_get_string),
+     * поэтому g_strdup вокруг него просто терял строку. */
+    priv->command = xs_host_api()->conf_str(kf, p->name, "command",
+                                            CONLOG_DEFAULT_COMMAND);
+    priv->title = xs_host_api()->conf_str(kf, p->name, "title", "");
+    priv->row_font = xs_host_api()->conf_str(kf, p->name, "row_font",
+                                            CONLOG_DEFAULT_FONT);
+    priv->title_font = xs_host_api()->conf_str(kf, p->name, "title_font",
+                                              CONLOG_DEFAULT_FONT);
+    /* Клампим и при чтении: в конфиг из Properties писалось сырое
+     * значение спиннера, так что ручная правка файла тоже обязана
+     * давать разумные числа, а не окно в -5000 пикселей. */
+    priv->line_step = CLAMP(xs_host_api()->conf_int(kf, p->name, "line_step", 0),
+                            0, 60);
+    priv->first_row_y = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                                      "first_row_y", 6), 0, 60);
+    priv->width = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_width",
+                                                CONLOG_DEFAULT_WIDTH),
+                        120, 2000);
+    priv->height = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_height",
+                                                 CONLOG_DEFAULT_HEIGHT),
+                         60, 2000);
     cl_rgba(priv, "row_color", def_row, &priv->row_color);
     cl_rgba(priv, "background_color", def_bg, &priv->bg_color);
     cl_rgba(priv, "title_color", def_title, &priv->title_color);
@@ -850,7 +873,8 @@ static void cl_font_set(GtkFontButton *btn, gpointer data)
     XsPlugin *p = data;
     ConlogPriv *priv = p ? p->priv : NULL;
     const char *key = g_object_get_data(G_OBJECT(btn), "xs-key");
-    const char *fname;
+    char *fname;   /* gtk_font_chooser_get_font() отдаёт transfer full,
+                    * строка принадлежит нам и её надо освободить */
 
     if (!priv || !key)
         return;
@@ -866,6 +890,7 @@ static void cl_font_set(GtkFontButton *btn, gpointer data)
         cl_recalc_title_h(priv);
     }
     g_key_file_set_string(priv->kf, p->name, key, fname);
+    g_free(fname);
     cl_save(p);
 }
 
