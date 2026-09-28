@@ -34,6 +34,11 @@
 
 #define CW_DEFAULT_W        320
 #define CW_DEFAULT_H        180
+/* Высота, под которую вёрстка подобрана замерами: значки, шрифты и
+ * отступы считаются от неё. Окно 320x242 повторяет пропорции
+ * оригинала 132x100, но пять колонок по 62 px не заполняют такую
+ * высоту, поэтому всё масштабируется целиком. */
+#define CW_REF_H            169.0
 #define CW_MARGIN           8.0
 #define CW_GAP              4.0
 #define CW_MAX_BYTES        (2U * 1024U * 1024U)
@@ -164,6 +169,7 @@ typedef struct {
     int         use_bg;      /* 0 — дымчатое стекло, 1 — панель темы,
                                  2 — своя подложка */
     int         round_corner;/* радиус скругления окна, px */
+    double      scale;      /* вёрстка от высоты окна, см. CW_REF_H */
     /* Каталог с иконками и SVG-фоном. Пусто -> ищем по умолчанию. */
     char       *theme_dir;
 
@@ -1373,13 +1379,22 @@ static gboolean cw_timer(gpointer data)
 /* отрисовка                                                           */
 /* ------------------------------------------------------------------ */
 
+static double cw_scale = 1.0;   /* действует на время отрисовки */
+static double cw_strip_gap = 3.0; /* промежуток в полосе прогноза */
+
 static PangoFontDescription *cw_font(const char *spec)
 {
     PangoFontDescription *d = pango_font_description_from_string(
         spec && spec[0] ? spec : "Sans 10");
+    int pt;
 
     if (!d)
         d = pango_font_description_from_string("Sans 10");
+    if (cw_scale > 0.01 && cw_scale != 1.0) {
+        pt = pango_font_description_get_size(d) / PANGO_SCALE;
+        pango_font_description_set_absolute_size(
+            d, (double)(int)(pt * cw_scale) * PANGO_SCALE);
+    }
     return d;
 }
 
@@ -1658,17 +1673,52 @@ static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
     int n = (int)MIN(cw->days->len, (guint)CW_DAYS_MAX);
     double col = (w - 2 * CW_MARGIN) / (double)(n > 0 ? n : 1);
     /* Как и в часовой полосе: видимая часть картинки — ~89% от
-     * запрошенного размера, поля прозрачные. Колонка здесь широкая
-     * (5 дней), поэтому прежний потолок 30 держал значки мельче, чем
-     * позволяет место. Потолок поднят до 56: колонка 62 px, значки
-     * ещё не упираются в соседей. */
-    double isz = CLAMP(col + 1.5, 12.0, 56.0);
+     * запрошенного размера, поля прозрачные. Потолок теперь по высоте
+     * полосы, а не константа: при окне 320x242 под пять дней остаётся
+     * ��иже, чем при 320x169, и значки должны занять её целиком. */
+    /* Потолок по колонке, а не по высоте окна: пять колонок по 62 px
+     * не растянутся вместе с окном, иначе значки заходят друг на
+     * друга. Лишняя высота уходит в шапку и отступы. */
+    double isz = CLAMP(MIN(col * 0.95, h * 0.55), 12.0, 90.0);
     int i, th;
     CwColor faded = priv->hour_color;
 
     if (n <= 0)
         return;
     faded.a *= 0.85;
+
+    /* Пять значков в колонках по 62 px не растут вместе с окном, и при
+     * высоком окне снизу остаётся пустота. Поэтому остаток высоты
+     * растягиваем на промежутки между подписью, значком и температурой:
+     * значки остаются читаемого размера, а полоса занимает своё место. */
+    {
+        PangoFontDescription *fd;
+        int lab = 0, tmp = 0, slack;
+        double gap;
+
+        /* Высоты текста меряем тем же pango, что и при отрисовке:
+         * оценка на глаз оставляла снизу лишние пиксели. */
+        fd = cw_font(priv->desc_font);
+        pango_layout_set_font_description(layout, fd);
+        pango_font_description_free(fd);
+        pango_layout_set_text(layout, "Пн", -1);
+        pango_layout_get_pixel_size(layout, NULL, &lab);
+
+        fd = cw_font(priv->hour_font);
+        pango_font_description_set_family(fd, "DejaVu Sans Mono");
+        pango_layout_set_font_description(layout, fd);
+        pango_font_description_free(fd);
+        pango_layout_set_text(layout, "18\u00b0", -1);
+        pango_layout_get_pixel_size(layout, NULL, &tmp);
+
+        /* Промежутка ровно два: подпись→значок и значок→температура,
+         * поэтому остаток делим на два, иначе снизу остаётся треть. */
+        slack = (int)h - lab - tmp - (int)isz;
+        gap = slack > 0 ? slack / 2.0 : 2.0;
+        if (gap > 60.0)
+            gap = 60.0;
+        cw_strip_gap = gap;
+    }
 
     for (i = 0; i < n; i++) {
         CwDay *dh = &g_array_index(cw->days, CwDay, i);
@@ -1680,7 +1730,8 @@ static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
 
         /* у первого дня родной апплет рисует ночную иконку, дальше
          * дневные — так и делаем */
-        cw_icon_px(cr, priv, dh->kind, cx - isz / 2.0, y + th + 3, isz);
+        cw_icon_px(cr, priv, dh->kind, cx - isz / 2.0,
+                   y + th + cw_strip_gap, isz);
 
         if (priv->show_daytemp) {
             /* Без разделителя: в оригинале '<b>high</b>low' слитно,
@@ -1688,7 +1739,7 @@ static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
             g_snprintf(buf, sizeof(buf), "<b>%.0f\u00b0</b>%.0f\u00b0",
                        cw_temp(priv, dh->tmax), cw_temp(priv, dh->tmin));
             cw_text_markup(cr, layout, buf, &priv->hour_color, cx,
-                           y + th + isz + 6, TRUE);
+                           y + th + cw_strip_gap + isz + cw_strip_gap, TRUE);
         }
     }
     (void)h;
@@ -2066,11 +2117,16 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     PangoLayout *layout;
     CwWeather *cw;
     char buf[256];
-    double y, icon_s, x, text_x, wind_y = 0.0;
+    double y, icon_s, x, text_x, wind_y = 0.0, cw_strip_h;
     int i, shown, th, th2;
 
     if (!priv)
         return;
+
+    /* Вся вёрстка — шрифты, значки, отступы — от высоты окна. Иначе
+     * пять колонок значков занимают верхнюю половину, а снизу дыра. */
+    cw_scale = h / CW_REF_H;
+    priv->scale = cw_scale;
 
     surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
     g = cairo_create(surf);
@@ -2118,9 +2174,6 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * позиции были константами (город на CW_MARGIN+20, описание на
      * CW_MARGIN+40), а температура в 26pt занимает ~35 пикселей, и
      * город попадал прямо на неё. */
-    cw_theme_load(priv);
-    cw_draw_bg(g, priv, w, h);
-
     /* --- шапка по образцу родного апплета ---
      *
      * Оригинал: крупная иконка слева (масштаб 0.6 от 120), а справа
@@ -2129,7 +2182,10 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     cw_theme_load(priv);
     cw_draw_bg(g, priv, w, h);
 
-    icon_s = 72.0;
+    /* Значок шапки — от ширины окна. Окно 320x242 повторяет
+     * пропорции оригинала 132x100, и при жёстких 72 px шапка занимала
+     * бы меньше трети высоты, а снизу оставалась дыра. */
+    icon_s = CLAMP(w * 0.225, 60.0, 200.0) * cw_scale;
     cw_icon_px(g, priv, cw->kind, CW_MARGIN, CW_MARGIN, icon_s);
 
     /* Раскладка шапки как в оригинале:
@@ -2234,8 +2290,11 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         cairo_restore(g);
     }
     /* Полоса начинается под разделителем: 2 px отступа, чтобы подписи
-     * не липли к линии. Смещение подобрано по замерам пикселей. */
+     * не липли к линии. */
     y -= 11;
+
+    /* Остаток высоты достаётся полосе прогноза */
+    cw_strip_h = MAX(h - y - 4.0, 40.0);
 
 
     /* --- почасовой прогноз ---
@@ -2266,7 +2325,7 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             y += 14;
         }
     } else if (priv->view == CW_VIEW_DAYS) {
-        cw_draw_days(g, priv, cw, layout, w, h, y);
+        cw_draw_days(g, priv, cw, layout, w, cw_strip_h, y);
     } else if (cw->hours->len > 0) {
         int n = (int)MIN(cw->hours->len, MAX(priv->hours_shown, 1));
         double col = (w - 2 * CW_MARGIN) / n;
