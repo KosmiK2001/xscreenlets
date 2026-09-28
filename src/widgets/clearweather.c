@@ -2219,11 +2219,49 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         fd = cw_font(priv->city_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
-        /* в оригинале город выровнен вправо по рамке шириной 132,
-         * начинающейся с x=-5, то есть правый край текста на 127 */
+        /* Город ставится относительно температуры: от её фактической
+         * высоты плюс постоянный зазор, а не от фиксированной точки
+         * холста. При фиксированной координате стоило поменять кегль
+         * температуры — и город либо налезал на неё, либо отваливался
+         * слишком далеко. Зазор масштабируется вместе с окном.
+         *
+         * В оригинале координаты фиксированы (25 и 50), но там кегли
+         * не меняются, и расстояние между ними постоянно; у нас
+         * температура крупнее, и абсолютная точка разъезжалась. */
         th2 = cw_text_right(g, layout, cw->place ? cw->place : priv->city,
                             &priv->city_color, 127.0 * cw_scale,
-                            50.0 * cw_scale);
+                            25.0 * cw_scale + th + 2.0 * cw_scale);
+    }
+
+    /* Три значения — максимум, минимум и влажность — колонкой в
+     * просвете между крупной иконкой и температурой. В оригинале на
+     * этом месте ничего нет, но записать их в строку нельзя: при
+     * температуре в правом верхнем углу места под три строки не
+     * остаётся, и текст налезал. Колонка стоит в зазоре, который в
+     * оригинале занимает x=70..90, то есть ничего не перекрывает.
+     * Высота строки берётся у pango, иначе строки наезжали. */
+    if (cw->days->len > 0 || cw->humidity > 0.0) {
+        PangoFontDescription *fd = cw_font(priv->hour_font);
+        double colx = 71.0 * cw_scale;
+        double coly = 8.0 * cw_scale;
+        int lh = 0;
+        char tmp[32];
+
+        pango_layout_set_font_description(layout, fd);
+        pango_font_description_free(fd);
+
+        if (cw->days->len > 0) {
+            CwDay *d0 = &g_array_index(cw->days, CwDay, 0);
+
+            g_snprintf(tmp, sizeof(tmp), "%.0f\u00b0", cw_temp(priv, d0->tmax));
+            lh = cw_text(g, layout, tmp, &priv->hour_color, colx, coly, FALSE);
+            g_snprintf(tmp, sizeof(tmp), "%.0f\u00b0", cw_temp(priv, d0->tmin));
+            cw_text(g, layout, tmp, &priv->hour_color, colx, coly + lh, FALSE);
+        }
+        if (cw->humidity > 0.0) {
+            g_snprintf(tmp, sizeof(tmp), "%.0f%%", cw->humidity);
+            cw_text(g, layout, tmp, &priv->hour_color, colx, coly + 2 * lh, FALSE);
+        }
     }
 
     /* Низ пластины задаёт полоса дней, а не шапка: в оригинале они
@@ -2932,16 +2970,16 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
     priv->height = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_height",
                                                  CW_DEFAULT_H), 120, 600);
 
-    /* Кегли — родовые, из ClearWeatherScreenlet.py: температура 14,
-     * город 6, дни недели 6, макс/мин 4 при холсте 132x100. Домножение
-     * на cw_scale (320/132 = 2.42) даёт 34/15/15/10 — ровно то, что
-     * нужно в окне. Прежние умолчания 26/12/11/10 были подобраны под
-     * старую раскладку и после масштабирования выходили вдвое крупнее
-     * родовых, из-за чего строка макс/мин не влезала и обрезалась. */
+    /* Кегли из ClearWeatherScreenlet.py: город 6, дни недели 6, макс/мин
+     * 4, температура — не 14, а 15.4. Замерено на двух окнах рядом:
+     * высота цифр температуры у оригинала 44 px, у нас было 40, то есть
+     * ровно на 10% меньше. Домножение на cw_scale даёт кегли, нужные в
+     * окне; прежние умолчания 26/12/11/10 были подобраны под старую
+     * раскладку и выходили вдвое крупнее родовых. */
     priv->city_font = xs_host_api()->conf_str(kf, p->name, "city_font",
                                               "Sans Bold 6");
     priv->temp_font = xs_host_api()->conf_str(kf, p->name, "temp_font",
-                                              "Sans Bold 14");
+                                              "Sans Bold 15.4");
     priv->desc_font = xs_host_api()->conf_str(kf, p->name, "desc_font",
                                               "Sans Bold 6");
     priv->hour_font = xs_host_api()->conf_str(kf, p->name, "hour_font",
