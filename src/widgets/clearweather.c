@@ -96,6 +96,9 @@ typedef struct {
     gboolean  alive;
 
     CwWeather *weather;
+    /* Короткая метка источника для угла окна; длинные сообщения о
+     * ходе дела и ошибках живут отдельно в status. */
+    char      *badge;
     char      *status;
 
     int         source;       /* CW_SRC_* */
@@ -374,6 +377,12 @@ static void cw_status(CwPriv *priv, const char *fmt, ...)
     va_end(ap);
     g_free(priv->status);
     priv->status = text;
+    /* Пока идёт работа или есть ошибка, показывать имя ответившего
+     * агрегатора неправильно — снимаем бейдж, его вернёт успех. */
+    if (*priv->status && *priv->badge) {
+        g_free(priv->badge);
+        priv->badge = g_strdup("");
+    }
     if (priv->plugin && priv->plugin->win)
         gtk_widget_queue_draw(priv->plugin->win);
 }
@@ -1074,10 +1083,12 @@ static void cw_apply_result(CwPriv *priv, int source, const char *text)
     priv->weather = w;
     priv->loading = FALSE;
     priv->alt_active = FALSE;
-    cw_status(priv, "%s · %s",
-              priv->cur_transport == CW_TR_PROXY ? "через прокси"
-                                                 : "напрямую",
-              source == CW_SRC_OPENMETEO ? "open-meteo" : "wttr.in");
+    /* В угол окна — только имя источника: полная строка с транспортом
+     * не влезала рядом с ветром и налезала на влажность. */
+    g_free(priv->badge);
+    priv->badge = g_strdup(source == CW_SRC_OPENMETEO ? "open-meteo"
+                                                      : "wttr.in");
+    cw_status(priv, "%s", "");
     if (priv->plugin && priv->plugin->win)
         gtk_widget_queue_draw(priv->plugin->win);
 }
@@ -1197,6 +1208,21 @@ static void cw_icon(cairo_t *cr, int kind, double x, double y, double s,
 /* Выравнивание по правому краю: PANGO_ALIGN_RIGHT внутри layout
  * работает только относительно ширины самого layout, поэтому ширину
  * текста меряем сами и рисуем от правого края окна. */
+/* Ширина строки в пикселях — чтобы решить, влезает ли она в окно. */
+static int cw_text_width(cairo_t *cr, PangoLayout *layout, const char *font,
+                         const char *text, CwColor c)
+{
+    PangoFontDescription *fd = cw_font(font);
+    int tw = 0, th = 0;
+
+    pango_layout_set_font_description(layout, fd);
+    pango_font_description_free(fd);
+    pango_layout_set_text(layout, text ? text : "", -1);
+    pango_layout_get_pixel_size(layout, &tw, &th);
+    cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+    return tw;
+}
+
 static int cw_text_right(cairo_t *cr, PangoLayout *layout, const char *text,
                          CwColor *c, double right_x, double y)
 {
@@ -1234,7 +1260,7 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     PangoLayout *layout;
     CwWeather *cw;
     char buf[256];
-    double y, icon_s, x, text_x;
+    double y, icon_s, x, text_x, wind_y = 0.0;
     int i, shown, th, th2;
 
     if (!priv)
@@ -1286,7 +1312,7 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * позиции были константами (город на CW_MARGIN+20, описание на
      * CW_MARGIN+40), а температура в 26pt занимает ~35 пикселей, и
      * город попадал прямо на неё. */
-    icon_s = 40.0;
+    icon_s = 46.0;
     text_x = CW_MARGIN + icon_s + CW_GAP;
     cw_icon(g, cw->kind, CW_MARGIN, CW_MARGIN, icon_s, &priv->temp_color);
 
@@ -1329,10 +1355,37 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
                priv->units == CW_UNITS_IMPERIAL ? "mph" : "км/ч",
                cw->humidity);
     th = cw_text(g, layout, buf, &priv->desc_color, CW_MARGIN, y, FALSE);
+    wind_y = y;
     y += th + CW_GAP + 4;
 
-    /* --- почасовой прогноз --- */
-    if (cw->hours->len > 0) {
+    /* --- почасовой прогноз ---
+     *
+     * Пока идёт запрос или есть ошибка, вместо прогноза показывается
+     * сообщение: длинные тексты («город не найден», «пробую дальше»)
+     * не влезали в угол и налезали на строку ветра. */
+    if (priv->status && priv->status[0]) {
+        CwColor warn = priv->desc_color;
+        const char *nl;
+
+        warn.a *= 0.9;
+        /* многострочное сообщение рисуем построчно, \n не обрабатывается */
+        nl = priv->status;
+        for (const char *line = nl; line; ) {
+            const char *eol = strchr(line, '\n');
+
+            if (eol) {
+                char *one = g_strndup(line, eol - line);
+
+                cw_text(g, layout, one, &warn, CW_MARGIN, y, FALSE);
+                g_free(one);
+                line = eol + 1;
+            } else {
+                cw_text(g, layout, line, &warn, CW_MARGIN, y, FALSE);
+                line = NULL;
+            }
+            y += 14;
+        }
+    } else if (cw->hours->len > 0) {
         int n = (int)MIN(cw->hours->len, MAX(priv->hours_shown, 1));
         double col = (w - 2 * CW_MARGIN) / n;
 
@@ -1352,30 +1405,30 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             g_strlcpy(buf, hh->label, sizeof(buf));
             th = cw_text(g, layout, buf, &priv->hour_color, x, y, TRUE);
             g_snprintf(buf, sizeof(buf), "%.0f°", cw_temp(priv, hh->temp));
-            th = cw_text(g, layout, buf, &priv->hour_color, x,
-                         y + th + 2, TRUE);
-            cw_icon(g, hh->kind, x - 7, y + th + 6, 14.0, &priv->hour_color);
+            /* Высота часа и высота температуры — разные: если считать
+             * обе от y, значок встаёт НАД нижним краем температуры. */
+            th2 = cw_text(g, layout, buf, &priv->hour_color, x,
+                          y + th + 2, TRUE);
+            cw_icon(g, hh->kind, x - 9, y + th + 2 + th2 + 5, 17.0,
+                     &priv->hour_color);
             shown++;
         }
     }
 
-    if (priv->status && priv->status[0]) {
-        PangoFontDescription *fd = cw_font("Sans 7");
-        int tw = 0, th = 0;
-        char st[160];
+    /* Бейдж источника — у правого края строки ветра, и только если
+     * реально помещается: иначе он налезал бы на «влажность». */
+    if (priv->badge && priv->badge[0] && !cw_text_width(g, layout, "Sans 8",
+                                                        priv->badge,
+                                                        priv->desc_color)
+         + cw_text_width(g, layout, "Sans 11", buf, priv->desc_color)
+         + CW_GAP * 2 < w) {
+        PangoFontDescription *fd = cw_font("Sans 8");
+        CwColor faded = priv->desc_color;
 
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
-        g_strlcpy(st, priv->status, sizeof(st));
-        pango_layout_set_text(layout, st, -1);
-        pango_layout_get_pixel_size(layout, &tw, &th);
-        /* Выравнивание по правому краю: при левом текст начинался с
-         * w-CW_MARGIN и целиком уезжал за границу окна. */
-        pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-        cairo_set_source_rgba(g, priv->desc_color.r, priv->desc_color.g,
-                              priv->desc_color.b, priv->desc_color.a * 0.8);
-        cairo_move_to(g, w - CW_MARGIN, 1);
-        pango_cairo_show_layout(g, layout);
+        faded.a *= 0.75;
+        cw_text_right(g, layout, priv->badge, &faded, w - CW_MARGIN, wind_y);
     }
 
     g_object_unref(layout);
@@ -1832,6 +1885,7 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
 
     priv->city = xs_host_api()->conf_str(kf, p->name, "city",
                                          CW_DEFAULT_CITY);
+    priv->badge = g_strdup("");
     priv->city_alt = xs_host_api()->conf_str(kf, p->name, "city_alt", "");
     priv->proxy_url = xs_host_api()->conf_str(kf, p->name, "proxy_url",
                                               CW_DEFAULT_PROXY);
@@ -1874,13 +1928,13 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
                                                  CW_DEFAULT_H), 120, 600);
 
     priv->city_font = xs_host_api()->conf_str(kf, p->name, "city_font",
-                                              "Sans Bold 10");
+                                              "Sans Bold 12");
     priv->temp_font = xs_host_api()->conf_str(kf, p->name, "temp_font",
                                               "Sans Bold 26");
     priv->desc_font = xs_host_api()->conf_str(kf, p->name, "desc_font",
-                                              "Sans 9");
+                                              "Sans 11");
     priv->hour_font = xs_host_api()->conf_str(kf, p->name, "hour_font",
-                                              "Sans 8");
+                                              "Sans 10");
     cw_color_read(kf, p->name, "city_color", &def_city, &priv->city_color);
     cw_color_read(kf, p->name, "temp_color", &def_temp, &priv->temp_color);
     cw_color_read(kf, p->name, "desc_color", &def_desc, &priv->desc_color);
@@ -1900,6 +1954,7 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
         g_free(priv->city_alt);
         g_free(priv->proxy_url);
         g_free(priv->status);
+        g_free(priv->badge);
         g_free(priv->city_font);
         g_free(priv->temp_font);
         g_free(priv->desc_font);
@@ -1929,6 +1984,7 @@ static void cw_shutdown(XsPlugin *p)
     }
     cw_weather_free(priv->weather);
     g_free(priv->status);
+    g_free(priv->badge);
     g_free(priv->city);
     g_free(priv->city_alt);
     g_free(priv->proxy_url);
