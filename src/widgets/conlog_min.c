@@ -27,6 +27,7 @@
 
 #include <gtk/gtk.h>
 #include <string.h>
+#include <locale.h>
 #include <stdlib.h>
 #include <gio/gio.h>
 #include <unistd.h>
@@ -546,41 +547,96 @@ static void cl_shutdown(XsPlugin *p)
 
 /* ---------------------------------------------------------------- настройки */
 
+/* Разбор цвета БЕЗ sscanf и без strtod.
+ *
+ * sscanf("%d,...") в локали работает, но sscanf("%lf,...") — нет: в
+ * ru_RU десятичный разделитель запятая, и на точке разбор ломается
+ * (возвращал 2 из 4). strtod страдает тем же. А у демона
+ * LC_ALL=ru_RU.UTF-8, так что это не теоретический случай.
+ *
+ * Поэтому разбираем целые числа вручную: компоненты rgba пишутся
+ * всегда целыми байтами 0..255, то есть разбирать нужно только цифры
+ * и запятые — а они от локали не зависят. */
+static gboolean cl_u32_after(const char **p, double *out)
+{
+    const char *s = *p;
+    double v = 0.0;
+    gboolean any = FALSE;
+
+    while (*s == ' ')
+        s++;
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10.0 + (*s - '0');
+        s++;
+        any = TRUE;
+    }
+    if (!any)
+        return FALSE;
+    *out = v;
+    *p = s;
+    return TRUE;
+}
+
 static void cl_rgba(ConlogPriv *priv, const char *key, const double d[4],
                     ConlogColor *out)
 {
     char *v = xs_host_api()->conf_str(priv->kf, priv->plugin->name, key, NULL);
+    const char *p;
 
     out->r = d[0]; out->g = d[1]; out->b = d[2]; out->a = d[3];
     if (!v || !v[0])
         return;
-    /* Два формата в дикой природе:
-     *   rgba(217,217,217,255)  — пишет оригинальный conlog.c и мы;
-     *   rgba(25,25,25,0.480916) — alpha дробный, и sscanf("%d") брал
-     *                            только «0», то есть прозрачность
-     *                            становилась нулевой;
-     *   0,1,0,1                — старый conlog_core, четыре float.
-     * alpha читаем как double — иначе дробное значение обрезается. */
-    {
+
+    p = v;
+    if (strncmp(p, "rgba(", 5) == 0) {
         double r, g, b, a;
 
-        if (sscanf(v, "rgba(%lf,%lf,%lf,%lf)", &r, &g, &b, &a) == 4) {
+        p += 5;
+        /* После каждого числа запятую нужно ПРОПУСТИТЬ: cl_u32_after()
+         * останавливается на первой не-цифре и сам её не ест. Без
+         * p++ следующий вызов видел запятую, возвращал FALSE, и весь
+         * разбор падал на дефолт. */
+        if (cl_u32_after(&p, &r) && *p++ == ',' &&
+            cl_u32_after(&p, &g) && *p++ == ',' &&
+            cl_u32_after(&p, &b) && *p++ == ',' &&
+            cl_u32_after(&p, &a)) {
             out->r = r / 255.0;
             out->g = g / 255.0;
             out->b = b / 255.0;
-            out->a = a;
-        } else if (sscanf(v, "%lf,%lf,%lf,%lf", &r, &g, &b, &a) == 4 &&
-                   r >= 0.0 && r <= 1.0 && g >= 0.0 && g <= 1.0 &&
-                   b >= 0.0 && b <= 1.0 && a >= 0.0 && a <= 1.0) {
+            out->a = a / 255.0;
+        }
+    } else {
+        /* Старый формат conlog_core: четыре float 0..1. Тут нужен
+         * именно strtod, и он в ru_RU ждёт запятую — поэтому сначала
+         * подменяем локаль на C на время разбора. */
+        char *old = g_strdup(setlocale(LC_NUMERIC, NULL));
+        double f[4];
+        int ok = 1;
+
+        setlocale(LC_NUMERIC, "C");
+        for (int i = 0; i < 4 && ok; i++) {
+            char *end = NULL;
+
+            f[i] = strtod(p, &end);
+            if (end == p) {
+                ok = 0;
+                break;
+            }
+            p = end;
+            if (i < 3) {
+                if (*p != ',') { ok = 0; break; }
+                p++;
+            }
+        }
+        setlocale(LC_NUMERIC, old ? old : "C");
+        g_free(old);
+        if (ok && f[0] >= 0.0 && f[0] <= 1.0 && f[1] >= 0.0 && f[1] <= 1.0 &&
+            f[2] >= 0.0 && f[2] <= 1.0 && f[3] >= 0.0 && f[3] <= 1.0) {
             /* Проверка диапазона обязательна: в старых конфигах есть
-             * шестикомпонентный мусор вида
+             * шестикомпонентный мусор
              * 0,870588,0,866667,0,854902,1, где первые четыре — не
-             * компоненты цвета. Без проверки из него получалось
-             * g=870588 и текст становился нечитаемым. */
-            out->r = r;
-            out->g = g;
-            out->b = b;
-            out->a = a;
+             * компоненты цвета. */
+            out->r = f[0]; out->g = f[1]; out->b = f[2]; out->a = f[3];
         }
     }
     g_free(v);
@@ -774,9 +830,16 @@ static void cl_color_set(GtkColorButton *btn, gpointer data)
      * цвет молча терялся при рестарте: applet читал дефолт.
      * Именно в этом формате пишет и оригинальный conlog.c, так что
      * ключи из его конфигов читаются без правок. */
-    s = g_strdup_printf("rgba(%d,%d,%d,%.3f)",
+    /* alpha — ЦЕЛЫМ в байтах, как r/g/b. Это не косметика: у демона
+     * LC_ALL=ru_RU.UTF-8, где десятичный разделитель — запятая, и
+     * printf("%.3f", 1.0) печатает "1,000". Такое значение GKeyFile
+     * сохранял как есть, и при следующем чтении sscanf видел
+     * "rgba(0,255,0,1,000)" — пять компонент вместо четырёх, цвет
+     * не распознавался и applet становился белым.
+     * (Оригинальный conlog.c писал здесь %.3f и был тем же болен.) */
+    s = g_strdup_printf("rgba(%d,%d,%d,%d)",
                        (int) (c.red * 255), (int) (c.green * 255),
-                       (int) (c.blue * 255), c.alpha);
+                       (int) (c.blue * 255), (int) (c.alpha * 255));
     g_key_file_set_string(priv->kf, p->name, key, s);
     g_free(s);
     cl_save(p);
