@@ -1937,7 +1937,19 @@ static void cw_native_bg(cairo_t *cr, CwPriv *priv, double w, double h)
         cairo_arc(cr, rx + rr, ry + rh - rr, rr, M_PI / 2, M_PI);
         cairo_arc(cr, rx + rr, ry + rr, rr, M_PI, 3 * M_PI / 2);
         cairo_close_path(cr);
-        cairo_set_source_rgba(cr, 0.55, 0.55, 0.60, 0.10);
+        /* Заливка плиты. В ClearWeatherScreenlet.py.background_color =
+         * (0,0,0,0.8), и цвет попадает в плиту именно здесь: перед
+         * draw_rounded_rectangle стоит set_source_rgba(*background_color),
+         * а тот заливает текущим источником. Ключевое отличие от нашей
+         * прежней заливки: затемняется только плита (11.5,18.5,120,80),
+         * а не всё окно — поэтому сверху, где висит крупная иконка,
+         * и по полям остаётся видно рабочий стол. Отсюда и стекло.
+         *
+         * Замеры на соседних окнах (фон 16): оригинал даёт медиану 13
+         * и 25-й перцентиль 2, то есть тени настоящие; при нашей
+         * заливке 0.55/0.10 выходило 26 и 11 — тени были вымыты, и
+         * стекло читалось как молочное. */
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.8);
         cairo_fill_preserve(cr);
         cairo_set_source_rgba(cr, 0.80, 0.80, 0.85, 0.22);
         cairo_set_line_width(cr, 1.0);
