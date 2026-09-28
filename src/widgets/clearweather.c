@@ -2135,19 +2135,24 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     cairo_paint(g);
     cairo_set_operator(g, CAIRO_OPERATOR_OVER);
 
-    /* скруглённый фон */
-    cairo_new_sub_path(g);
-    cairo_arc(g, w - 3.5, 3.5, 3.5, -M_PI / 2, 0);
-    cairo_arc(g, w - 3.5, h - 3.5, 3.5, 0, M_PI / 2);
-    cairo_arc(g, 3.5, h - 3.5, 3.5, M_PI / 2, M_PI);
-    cairo_arc(g, 3.5, 3.5, 3.5, M_PI, M_PI * 1.5);
-    cairo_close_path(g);
-    cairo_set_source_rgba(g, priv->bg_color.r, priv->bg_color.g,
-                          priv->bg_color.b, priv->bg_color.a);
-    cairo_fill_preserve(g);
-    cairo_set_source_rgba(g, 0.45, 0.45, 0.45, 0.9);
-    cairo_set_line_width(g, 1.0);
-    cairo_stroke(g);
+    /* Собственная рамка апплета рисуется только когда фоном
+     * владеет сам апплет. При панели темы рамку даёт она сама, и
+     * вместе со своей получались две рамки одна в другой: рамка
+     * апплета по краю окна и рамка панели внутри неё. */
+    if (priv->use_bg != 1) {
+        cairo_new_sub_path(g);
+        cairo_arc(g, w - 3.5, 3.5, 3.5, -M_PI / 2, 0);
+        cairo_arc(g, w - 3.5, h - 3.5, 3.5, 0, M_PI / 2);
+        cairo_arc(g, 3.5, h - 3.5, 3.5, M_PI / 2, M_PI);
+        cairo_arc(g, 3.5, 3.5, 3.5, M_PI, M_PI * 1.5);
+        cairo_close_path(g);
+        cairo_set_source_rgba(g, priv->bg_color.r, priv->bg_color.g,
+                              priv->bg_color.b, priv->bg_color.a);
+        cairo_fill_preserve(g);
+        cairo_set_source_rgba(g, 0.45, 0.45, 0.45, 0.9);
+        cairo_set_line_width(g, 1.0);
+        cairo_stroke(g);
+    }
 
     layout = pango_cairo_create_layout(g);
     cw = priv->weather;
