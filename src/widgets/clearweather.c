@@ -161,7 +161,9 @@ typedef struct {
     /* Что рисовать в нижней полосе: CW_VIEW_* */
     int         view;
     int         show_daytemp;
-    int         use_bg;      /* панель из weather-bg.svg вместо своей */
+    int         use_bg;      /* 0 — дымчатое стекло, 1 — панель темы,
+                                 2 — своя подложка */
+    int         round_corner;/* радиус скругления окна, px */
     /* Каталог с иконками и SVG-фоном. Пусто -> ищем по умолчанию. */
     char       *theme_dir;
 
@@ -1492,29 +1494,81 @@ static double cw_svg_attr(const char *tag, const char *name)
     return v;
 }
 
+/* Возвращает границы корневого элемента <svg ...>. Файл начинается с
+ * <?xml version="1.0"?>, и первый '>' в нём — конец XML-декларации, а
+ * не конец тега: правка по нему вставляла viewBox внутрь <?xml, XML
+ * не разбирался, rsvg_handle_new_from_data возвращал NULL, и фона не
+ * было вовсе. Поэтому ищем именно '<svg' и идём до '>' оттуда, не
+ * считая '>' внутри значений атрибутов. */
+static gboolean cw_svg_root(const char *data, const char **beg,
+                            const char **end)
+{
+    const char *p = data;
+    const char *q;
+    char quote = 0;
+
+    for (;;) {
+        p = strchr(p, '<');
+        if (!p)
+            return FALSE;
+        if (strncmp(p, "<svg", 4) == 0) {
+            *beg = p;
+            break;
+        }
+        /* пропускаем <?xml ?>, <!-- -->, <!DOCTYPE ...> */
+        q = p + 1;
+        if (*q == '?') {
+            p = strstr(p, "?>");
+            if (!p)
+                return FALSE;
+            p += 2;
+        } else if (strncmp(p, "<!--", 4) == 0) {
+            p = strstr(p, "-->");
+            if (!p)
+                return FALSE;
+            p += 3;
+        } else {
+            p = strchr(p, '>');
+            if (!p)
+                return FALSE;
+            p++;
+        }
+    }
+    for (q = *beg; *q; q++) {
+        if (quote) {
+            if (*q == quote)
+                quote = 0;
+            continue;
+        }
+        if (*q == '"' || *q == '"')
+            quote = *q;
+        else if (*q == '>') {
+            *end = q + 1;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 static RsvgHandle *cw_svg_load(const char *path)
 {
     gchar *data = NULL;
     gsize len = 0;
     GString *out;
     RsvgHandle *h;
-    char *tag, *ins, *root;
-    const char *gt;
+    char *tag, *ins;
+    const char *beg, *end;
     double wv, hv;
     gsize at;
 
     if (!g_file_get_contents(path, &data, &len, NULL))
         return NULL;
-    if (!g_utf8_validate(data, len, NULL)) {
+    if (!g_utf8_validate(data, len, NULL) ||
+        !cw_svg_root(data, &beg, &end)) {
         g_free(data);
         return NULL;
     }
-    gt = strchr(data, '>');
-    if (!gt || gt == data) {
-        g_free(data);
-        return NULL;
-    }
-    tag = g_strndup(data, (gsize)(gt - data) + 1);
+    tag = g_strndup(beg, (gsize)(end - beg));
     wv = cw_svg_attr(tag, "width");
     hv = cw_svg_attr(tag, "height");
     if (wv <= 0.0)
@@ -1522,10 +1576,8 @@ static RsvgHandle *cw_svg_load(const char *path)
     if (hv <= 0.0)
         hv = 100.0;
 
-    /* вставляем сразу за именем корневого элемента */
-    root = strchr(data, ' ');
-    at = (root && root < gt) ? (gsize)(root - data) : (gsize)(gt - data);
-
+    /* вставляем прямо после имени корневого элемента */
+    at = (gsize)(beg - data) + 4;
     out = g_string_new(NULL);
     g_string_append_len(out, data, (gssize)at);
     if (strstr(tag, "viewBox") == NULL) {
@@ -1535,7 +1587,7 @@ static RsvgHandle *cw_svg_load(const char *path)
     }
     if (strstr(tag, "preserveAspectRatio") == NULL)
         g_string_append(out, " preserveAspectRatio=\"xMidYMid slice\"");
-    g_string_append(out, gt);
+    g_string_append(out, data + at);
 
     h = rsvg_handle_new_from_data((const guint8 *)out->str, out->len, NULL);
     g_string_free(out, TRUE);
@@ -1743,15 +1795,138 @@ static void cw_icon_px(cairo_t *cr, CwPriv *priv, int kind, double x,
 
 /* Панель из weather-bg.svg. Родной апплет рисует её librsvg через
  * theme.render(); мы делаем то же самоим. */
-static void cw_draw_bg(cairo_t *cr, CwPriv *priv, double w, double h)
+/* «Тёмное дымчатое стекло» родного апплета. Там подложка собирается
+ * композитом: чёрная база с альфой 0.8, weather-bg.svg, поверх
+ * скруглённый прямоугольник-светлец, и снова weather-bg.svg. Сама
+ * панель сделана под холст 132x100 и несёт изометрический поднос
+ * (inkscape:persp3d), поэтому на окне 320x169 она и растягивается
+ * криво, и обрезается не по делу — в неё вписаны ровно те четыре
+ * элемента, что у оригинала. Здесь эффект рисуется кодом и от размера
+ * окна не зависит. */
+static void cw_smoky_glass(cairo_t *cr, double w, double h, double r)
 {
-    double r = 8.0;
+    cairo_pattern_t *g;
+    cairo_matrix_t m;
 
     cairo_save(cr);
-    /* Скруглённый путь строится всегда: по нему клипуется и панель
-     * темы, и своя подложка, а рамка обводится поверх. Раньше при
-     * включённом фоне был ранний return, и окно выходило обычным
-     * прямоугольником без скруглений. */
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, w - r, r, r, -M_PI / 2, 0);
+    cairo_arc(cr, w - r, h - r, r, 0, M_PI / 2);
+    cairo_arc(cr, r, h - r, r, M_PI / 2, M_PI);
+    cairo_arc(cr, r, r, r, M_PI, 3 * M_PI / 2);
+    cairo_close_path(cr);
+    cairo_clip(cr);
+
+    /* корпус: сверху чуть светлее, снизу почти чёрный */
+    g = cairo_pattern_create_linear(0.0, 0.0, 0.0, h);
+    cairo_pattern_add_color_stop_rgba(g, 0.0, 0.13, 0.13, 0.15, 0.93);
+    cairo_pattern_add_color_stop_rgba(g, 0.45, 0.07, 0.07, 0.09, 0.94);
+    cairo_pattern_add_color_stop_rgba(g, 1.0, 0.04, 0.04, 0.05, 0.95);
+    cairo_set_source(cr, g);
+    cairo_paint(cr);
+    cairo_pattern_destroy(g);
+
+    /* блик по верхней кромке — стекло «светится» сверху */
+    g = cairo_pattern_create_linear(0.0, 0.0, 0.0, h * 0.34);
+    cairo_pattern_add_color_stop_rgba(g, 0.0, 1.0, 1.0, 1.0, 0.16);
+    cairo_pattern_add_color_stop_rgba(g, 0.45, 1.0, 1.0, 1.0, 0.05);
+    cairo_pattern_add_color_stop_rgba(g, 1.0, 1.0, 1.0, 1.0, 0.0);
+    cairo_set_source(cr, g);
+    cairo_paint(cr);
+    cairo_pattern_destroy(g);
+
+    /* косой отблеск, как у стекла под углом */
+    cairo_matrix_init_rotate(&m, -0.28);
+    cairo_pattern_set_matrix(g = cairo_pattern_create_linear(0.0, 0.0, w * 0.75, h), &m);
+    cairo_pattern_add_color_stop_rgba(g, 0.00, 1.0, 1.0, 1.0, 0.00);
+    cairo_pattern_add_color_stop_rgba(g, 0.42, 1.0, 1.0, 1.0, 0.045);
+    cairo_pattern_add_color_stop_rgba(g, 0.52, 1.0, 1.0, 1.0, 0.00);
+    cairo_set_source(cr, g);
+    cairo_paint(cr);
+    cairo_pattern_destroy(g);
+
+    /* мягкое затемнение у нижней кромки, чтобы панель «садилась» */
+    g = cairo_pattern_create_linear(0.0, h * 0.72, 0.0, h);
+    cairo_pattern_add_color_stop_rgba(g, 0.0, 0.0, 0.0, 0.0, 0.0);
+    cairo_pattern_add_color_stop_rgba(g, 1.0, 0.0, 0.0, 0.0, 0.30);
+    cairo_set_source(cr, g);
+    cairo_paint(cr);
+    cairo_pattern_destroy(g);
+
+    /* рамка: светлая сверху, тёмная снизу — объём */
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, w - r, r, r, -M_PI / 2, 0);
+    cairo_arc(cr, w - r, h - r, r, 0, M_PI / 2);
+    cairo_arc(cr, r, h - r, r, M_PI / 2, M_PI);
+    cairo_arc(cr, r, r, r, M_PI, 3 * M_PI / 2);
+    cairo_close_path(cr);
+    g = cairo_pattern_create_linear(0.0, 0.0, 0.0, h);
+    cairo_pattern_add_color_stop_rgba(g, 0.0, 1.0, 1.0, 1.0, 0.30);
+    cairo_pattern_add_color_stop_rgba(g, 0.5, 1.0, 1.0, 1.0, 0.10);
+    cairo_pattern_add_color_stop_rgba(g, 1.0, 0.0, 0.0, 0.0, 0.25);
+    cairo_set_source(cr, g);
+    cairo_set_line_width(cr, 1.0);
+    cairo_stroke(cr);
+    cairo_pattern_destroy(g);
+    cairo_restore(cr);
+}
+
+/* Оригинальная подложка ClearWeather, как в ClearWeatherScreenlet.py:
+ *   set_source_rgba(0,0,0,0.8)
+ *   render('weather-bg')
+ *   draw_rounded_rectangle(11.5, 18.5, 8, 120, 80)
+ *   render('weather-bg')
+ * Двойной прогон и есть источник «дымчатости»: полупрозрачные слои
+ * панели складываются вдвое, и на чёрной базе получается глубина. Один
+ * прогон даёт плоскую заливку — ровно то, что выглядело не тем.
+ * Панель сделана под холст 132x100, поэтому её пропорции и положение
+ * прямоугольника пересчитываем в окно. */
+static void cw_native_bg(cairo_t *cr, CwPriv *priv, double w, double h)
+{
+    double sx = w / 132.0, sy = h / 100.0;
+    double rx = 11.5 * sx, ry = 18.5 * sy, rr = 8.0 * sx;
+    double rw = 120.0 * sx, rh = 80.0 * sy;
+    RsvgRectangle vp = {0.0, 0.0, (double)w, (double)h};
+
+    /* База. У оригинала это (0,0,0,0.8) и сквозь неё видно рабочий
+     * стол, но наше окно без альфа-визуала, и при альфе 0.8 поле
+     * панели слева выходит в ноль — читается как дыра. Поэтому база
+     * непрозрачная, но тона кромки панели (~25), а не чёрная. */
+    cairo_set_source_rgba(cr, 0.10, 0.11, 0.13, 1.0);
+    cairo_paint(cr);
+
+    if (priv->bg) {
+        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+
+        /* скруглённый прямоугольник между прогонами */
+        cairo_save(cr);
+        cairo_new_sub_path(cr);
+        cairo_arc(cr, rx + rw - rr, ry + rr, rr, -M_PI / 2, 0);
+        cairo_arc(cr, rx + rw - rr, ry + rh - rr, rr, 0, M_PI / 2);
+        cairo_arc(cr, rx + rr, ry + rh - rr, rr, M_PI / 2, M_PI);
+        cairo_arc(cr, rx + rr, ry + rr, rr, M_PI, 3 * M_PI / 2);
+        cairo_close_path(cr);
+        cairo_set_source_rgba(cr, 0.55, 0.55, 0.60, 0.10);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 0.80, 0.80, 0.85, 0.22);
+        cairo_set_line_width(cr, 1.0);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+
+        /* второй прогон — слои панели ложатся вдвое */
+        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+    }
+}
+
+static void cw_draw_bg(cairo_t *cr, CwPriv *priv, double w, double h)
+{
+    double r = priv->round_corner > 0 ? (double)priv->round_corner : 0.0;
+
+    cairo_save(cr);
+    /* Скруглённый путь строится всегда: по нему клипуется и подложка,
+     * и панель темы, а рамка обводится поверх. Раньше при включённом
+     * фоне был ранний return, и окно выходило обычным прямоугольником
+     * без скруглений. */
     cairo_new_sub_path(cr);
     cairo_arc(cr, w - r, r, r, -M_PI / 2, 0);
     cairo_arc(cr, w - r, h - r, r, 0, M_PI / 2);
@@ -1759,20 +1934,21 @@ static void cw_draw_bg(cairo_t *cr, CwPriv *priv, double w, double h)
     cairo_arc(cr, r, r, r, M_PI, 3 * M_PI / 2);
     cairo_close_path(cr);
 
-    if (priv->use_bg && priv->bg) {
-        /* Панель темы подгоняется под окно: у SVG дописан viewBox, без
-         * него librsvg рисовал её собственным размером 132x100 и не
-         * трогал размер апплета вовсе. */
-        RsvgRectangle vp = {0.0, 0.0, (double)w, (double)h};
-
+    if (priv->use_bg == 1) {
+        /* Оригинальная композиция: база, панель, прямоугольник, панель */
         cairo_clip(cr);
-        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
-    } else {
-        /* Своя подложка: скруглённый прямоугольник, под тот же размер,
-         * что и в конфиге. */
+        cw_native_bg(cr, priv, w, h);
+    } else if (priv->use_bg == 2) {
         cairo_set_source_rgba(cr, 0.10, 0.10, 0.11, 0.92);
         cairo_fill_preserve(cr);
+    } else {
+        /* «Тёмное дымчатое стекло» — как в родном апплете */
+        cairo_restore(cr);
+        cw_smoky_glass(cr, w, h, r);
+        return;
     }
+    if (r <= 0.0)
+        cairo_new_sub_path(cr);
     cairo_set_source_rgba(cr, 0.45, 0.45, 0.50, 0.75);
     cairo_set_line_width(cr, 1.0);
     cairo_stroke(cr);
@@ -2284,18 +2460,37 @@ static void cw_on_view(GtkComboBox *c, gpointer data)
     cw_start(p);
 }
 
-static void cw_on_use_bg(GtkToggleButton *b, gpointer data)
+static void cw_on_round_corner(GtkSpinButton *sp, gpointer data)
 {
     XsPlugin *p = data;
     CwPriv *priv = p ? p->priv : NULL;
 
     if (!priv)
         return;
-    priv->use_bg = gtk_toggle_button_get_active(b) ? 1 : 0;
-    xs_host_api()->conf_set_int(priv->kf, p->name, "use_bg", priv->use_bg);
+    priv->round_corner = gtk_spin_button_get_value_as_int(sp);
+    xs_host_api()->conf_set_int(priv->kf, p->name, "round_corner",
+                                priv->round_corner);
     cw_save(priv);
-    if (priv->plugin && priv->plugin->win)
-        gtk_widget_queue_draw(priv->plugin->win);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
+}
+
+static void cw_on_use_bg(GtkComboBox *cb, gpointer data)
+{
+    XsPlugin *p = data;
+    CwPriv *priv = p ? p->priv : NULL;
+    int v;
+
+    if (!priv)
+        return;
+    v = gtk_combo_box_get_active(cb);
+    if (v < 0)
+        return;
+    priv->use_bg = v;
+    xs_host_api()->conf_set_int(priv->kf, p->name, "use_bg", v);
+    cw_save(priv);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
 }
 
 static void cw_on_proxy(GtkEntry *e, gpointer data)
@@ -2537,13 +2732,29 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
     }
 
     {
-        GtkWidget *chk = gtk_check_button_new_with_label(
-            "Фон-панель темы (родной апплет)");
+        static const char *const bgs[] = {
+            "Тёмное дымчатое стекло",
+            "Панель темы (родной апплет)",
+            "Своя подложка",
+        };
+        GtkWidget *cb = gtk_combo_box_text_new();
+        gsize k;
 
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(chk), priv->use_bg);
-        cw_tag(chk, "use_bg");
-        g_signal_connect(chk, "toggled", G_CALLBACK(cw_on_use_bg), p);
-        gtk_grid_attach(GTK_GRID(grid), chk, 1, r++, 1, 1);
+        for (k = 0; k < G_N_ELEMENTS(bgs); k++)
+            gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb), bgs[k]);
+        gtk_combo_box_set_active(GTK_COMBO_BOX(cb), priv->use_bg);
+        cw_tag(cb, "use_bg");
+        g_signal_connect(cb, "changed", G_CALLBACK(cw_on_use_bg), p);
+        cw_row(grid, r++, "Фон:", cb);
+    }
+    {
+        /* Скругление окна: радиус в пикселях, 0 — прямые углы */
+        GtkWidget *sc = gtk_spin_button_new_with_range(0, 40, 1);
+
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(sc), priv->round_corner);
+        cw_tag(sc, "round_corner");
+        g_signal_connect(sc, "value-changed", G_CALLBACK(cw_on_round_corner), p);
+        cw_row(grid, r++, "Скругление углов, px:", sc);
     }
 
     entry = gtk_entry_new();
@@ -2659,6 +2870,21 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
     priv->alive = TRUE;
     priv->prefer_tr = CW_TR_DIRECT;
 
+    /* Полупрозрачное окно. Родной апплет кладёт под панель базу
+     * (0,0,0,0.8), и сквозь поле панели видно рабочий стол — это и
+     * даёт «дымчатое стекло». Без альфа-визуала это поле выходит просто
+     * чёрным, и тема читается как дыра слева. Visual задаём здесь, до
+     * того как окно покажут. */
+    if (p->win) {
+        GdkScreen *scr = gtk_widget_get_screen(p->win);
+        GdkVisual *vis = scr ? gdk_screen_get_rgba_visual(scr) : NULL;
+
+        if (vis) {
+            gtk_widget_set_visual(p->win, vis);
+            gtk_widget_set_app_paintable(p->win, TRUE);
+        }
+    }
+
     priv->city = xs_host_api()->conf_str(kf, p->name, "city",
                                          CW_DEFAULT_CITY);
     priv->badge = g_strdup("");
@@ -2686,7 +2912,9 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
                        CW_VIEW_MIN, CW_VIEW_MAX);
     priv->show_daytemp = xs_host_api()->conf_int(kf, p->name,
                                                  "show_daytemp", 1) ? 1 : 0;
-    priv->use_bg = xs_host_api()->conf_int(kf, p->name, "use_bg", 0) ? 1 : 0;
+    priv->use_bg = xs_host_api()->conf_int(kf, p->name, "use_bg", 0);
+    priv->round_corner = xs_host_api()->conf_int(kf, p->name,
+                                                 "round_corner", 8);
     priv->theme_dir = xs_host_api()->conf_str(kf, p->name, "theme_dir", "");
     priv->lat  = xs_host_api()->conf_dbl(kf, p->name, "geo_lat", 0.0);
     priv->lon  = xs_host_api()->conf_dbl(kf, p->name, "geo_lon", 0.0);
