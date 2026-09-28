@@ -176,6 +176,8 @@ typedef struct {
     int    width, height;
     char  *city_font, *temp_font, *desc_font, *hour_font;
     CwColor city_color, temp_color, desc_color, hour_color, bg_color;
+    /* Кнопка цвета подложки: гасится для панели темы (use_bg==1) */
+    GtkWidget *bg_color_btn;
 } CwPriv;
 
 static void cw_properties(XsPlugin *p, GtkNotebook *nb);
@@ -1671,15 +1673,7 @@ static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
                          PangoLayout *layout, double w, double h, double y)
 {
     int n = (int)MIN(cw->days->len, (guint)CW_DAYS_MAX);
-    double col = (w - 2 * CW_MARGIN) / (double)(n > 0 ? n : 1);
-    /* Как и в часовой полосе: видимая часть картинки — ~89% от
-     * запрошенного размера, поля прозрачные. Потолок теперь по высоте
-     * полосы, а не константа: при окне 320x242 под пять дней остаётся
-     * ��иже, чем при 320x169, и значки должны занять её целиком. */
-    /* Потолок по колонке, а не по высоте окна: пять колонок по 62 px
-     * не растянутся вместе с окном, иначе значки заходят друг на
-     * друга. Лишняя высота уходит в шапку и отступы. */
-    double isz = CLAMP(MIN(col * 0.95, h * 0.55), 12.0, 90.0);
+    double sc = w / 132.0;
     int i, th;
     CwColor faded = priv->hour_color;
 
@@ -1687,59 +1681,39 @@ static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
         return;
     faded.a *= 0.85;
 
-    /* Пять значков в колонках по 62 px не растут вместе с окном, и при
-     * высоком окне снизу остаётся пустота. Поэтому остаток высоты
-     * растягиваем на промежутки между подписью, значком и температурой:
-     * значки остаются читаемого размера, а полоса занимает своё место. */
-    {
+    /* Полоса дней по координатам оригинала (ClearWeatherScreenlet.py,
+     * холст 132x100, шаг 24 по x):
+     *   полоса под дни   translate(14, 60), day-bg 116x9
+     *   дни недели       та же точка, кегль 6
+     *   иконки дней      translate(14, 68), размер 22x22
+     *   макс/мин         translate(16, 90), кегль 4
+     * Ничего не растягиваем и не выравниваем по краям окна: оригинал
+     * держит шаг 24 и начинает с x=14, и в этом его вид. */
+    for (i = 0; i < n; i++) {
+        CwDay *dh = &g_array_index(cw->days, CwDay, i);
+        double x = 14.0 * sc + 24.0 * sc * i;
+        char buf[32];
         PangoFontDescription *fd;
-        int lab = 0, tmp = 0, slack;
-        double gap;
 
-        /* Высоты текста меряем тем же pango, что и при отрисовке:
-         * оценка на глаз оставляла снизу лишние пиксели. */
         fd = cw_font(priv->desc_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
-        pango_layout_set_text(layout, "Пн", -1);
-        pango_layout_get_pixel_size(layout, NULL, &lab);
-
-        fd = cw_font(priv->hour_font);
-        pango_font_description_set_family(fd, "DejaVu Sans Mono");
-        pango_layout_set_font_description(layout, fd);
-        pango_font_description_free(fd);
-        pango_layout_set_text(layout, "18\u00b0", -1);
-        pango_layout_get_pixel_size(layout, NULL, &tmp);
-
-        /* Промежутка ровно два: подпись→значок и значок→температура,
-         * поэтому остаток делим на два, иначе снизу остаётся треть. */
-        slack = (int)h - lab - tmp - (int)isz;
-        gap = slack > 0 ? slack / 2.0 : 2.0;
-        if (gap > 60.0)
-            gap = 60.0;
-        cw_strip_gap = gap;
-    }
-
-    for (i = 0; i < n; i++) {
-        CwDay *dh = &g_array_index(cw->days, CwDay, i);
-        double cx = CW_MARGIN + col * i + col / 2.0;
-        char buf[32];
-
         g_snprintf(buf, sizeof(buf), "%s", dh->label ? dh->label : "--");
-        th = cw_text(cr, layout, buf, &faded, cx, y, TRUE);
+        th = cw_text(cr, layout, buf, &faded, x, y, FALSE);
 
         /* у первого дня родной апплет рисует ночную иконку, дальше
          * дневные — так и делаем */
-        cw_icon_px(cr, priv, dh->kind, cx - isz / 2.0,
-                   y + th + cw_strip_gap, isz);
+        cw_icon_px(cr, priv, dh->kind, x, y + (8.0 * sc), 22.0 * sc);
 
         if (priv->show_daytemp) {
-            /* Без разделителя: в оригинале '<b>high</b>low' слитно,
-             * жирный максимум читается как белый, обычный — как серый. */
+            /* В оригинале '<b>high</b>low' слитно, без разделителя */
             g_snprintf(buf, sizeof(buf), "<b>%.0f\u00b0</b>%.0f\u00b0",
                        cw_temp(priv, dh->tmax), cw_temp(priv, dh->tmin));
-            cw_text_markup(cr, layout, buf, &priv->hour_color, cx,
-                           y + th + cw_strip_gap + isz + cw_strip_gap, TRUE);
+            fd = cw_font(priv->hour_font);
+            pango_layout_set_font_description(layout, fd);
+            pango_font_description_free(fd);
+            cw_text_markup(cr, layout, buf, &priv->hour_color,
+                           x + 2.0 * sc, y + (30.0 * sc), FALSE);
         }
     }
     (void)h;
@@ -1939,11 +1913,17 @@ static void cw_native_bg(cairo_t *cr, CwPriv *priv, double w, double h)
     double rw = 120.0 * sx, rh = 80.0 * sy;
     RsvgRectangle vp = {0.0, 0.0, (double)w, (double)h};
 
-    /* База. У оригинала это (0,0,0,0.8) и сквозь неё видно рабочий
-     * стол, но наше окно без альфа-визуала, и при альфе 0.8 поле
-     * панели слева выходит в ноль — читается как дыра. Поэтому база
-     * непрозрачная, но тона кромки панели (~25), а не чёрная. */
-    cairo_set_source_rgba(cr, 0.10, 0.11, 0.13, 1.0);
+    /* База (0,0,0,0.8) — как в оригинале: сквозь неё видно рабочий
+     * стол, и в этом «дымчатое стекло». Окно у нас и правда создано с
+     * RGBA-visual, ядро чистит его через OPERATOR_CLEAR и альфу не
+     * затирает, так что прозрачность терялась только здесь.
+     *
+     * Заливка под панелью ломала стекло: окно становилось непрозрачным
+     * и чёрным. Теперь базы нет, прозрачность даёт сама панель. */
+    /* База нулевая: прозрачность обеспечивает сама панель, своими
+     * градиентами со stop-opacity. Заливка под ней превращала окно в
+     * непрозрачный чёрный прямоугольник. */
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
 
     if (priv->bg) {
@@ -1986,11 +1966,17 @@ static void cw_draw_bg(cairo_t *cr, CwPriv *priv, double w, double h)
     cairo_close_path(cr);
 
     if (priv->use_bg == 1) {
-        /* Оригинальная композиция: база, панель, прямоугольник, панель */
+        /* Панель темы. Фон и прозрачность здесь жёстко нулевые: панель
+         * рисует всё сама, и любая подложка под ней только забивает
+         * альфу. Раньше под панель клалась база (0,0,0,0.20), из-за
+         * чего окно читалось непрозрачным. Теперь сквозь панель видно
+         * рабочий стол, и настраивать тут нечего. */
         cairo_clip(cr);
         cw_native_bg(cr, priv, w, h);
     } else if (priv->use_bg == 2) {
-        cairo_set_source_rgba(cr, 0.10, 0.10, 0.11, 0.92);
+        /* Своя подложка — настраиваемый ARGB */
+        cairo_set_source_rgba(cr, priv->bg_color.r, priv->bg_color.g,
+                              priv->bg_color.b, priv->bg_color.a);
         cairo_fill_preserve(cr);
     } else {
         /* «Тёмное дымчатое стекло» — как в родном апплете */
@@ -2123,9 +2109,13 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     if (!priv)
         return;
 
-    /* Вся вёрстка — шрифты, значки, отступы — от высоты окна. Иначе
-     * пять колонок значков занимают верхнюю половину, а снизу дыра. */
-    cw_scale = h / CW_REF_H;
+    /* Вся вёрстка масштабируется одним множителем от ширины, ровно
+     * как в оригинале: там холст 132x100 и ctx.scale на всё. Координаты
+     * ниже взяты из кода ClearWeatherScreenlet.py как есть и умножаются
+     * на этот множитель. Считать от высоты 169 было ошибкой: кегли
+     * выходили в 1.7 раза мельче родовых, и крупная иконка переставала
+     * быть доминантой. */
+    cw_scale = w / 132.0;
     priv->scale = cw_scale;
 
     surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
@@ -2190,117 +2180,45 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     /* Значок шапки — от ширины окна. Окно 320x242 повторяет
      * пропорции оригинала 132x100, и при жёстких 72 px шапка занимала
      * бы меньше трети высоты, а снизу оставалась дыра. */
-    icon_s = CLAMP(w * 0.225, 60.0, 200.0) * cw_scale;
-    cw_icon_px(g, priv, cw->kind, CW_MARGIN, CW_MARGIN, icon_s);
+    /* Шапка по координатам оригинала, умноженным на cw_scale.
+     *
+     * Из ClearWeatherScreenlet.py, логические координаты холста 132x100:
+     *   иконка       translate(-2, 0); scale(.6, .6) из 120x120 -> 72px
+     *   температура  draw_text(temp, x=90, y=25, кегль 14)
+     *   город        draw_text(where, x=-5, y=50, кегль 6, вправо)
+     *
+     * Отступов тут нет намеренно: в оригинале иконка нависает выше
+     * пластины, а пластину потом перекрывает полоса дней. Раньше я
+     * «прижимал» элементы к углам и разводил их логикой — отсюда
+     * рваный ритм, который и читался как чужеродно. */
+    icon_s = 72.0 * cw_scale;
+    cw_icon_px(g, priv, cw->kind, -2.0 * cw_scale, 0.0, icon_s);
 
-    /* Раскладка шапки как в оригинале:
-     *   - крупная иконка слева;
-     *   - основная температура в правом верхнем углу, город под ней,
-     *     оба прижаты к правому краю;
-     *   - вплотную к иконке столбик макс/мин и влажности. */
     {
         PangoFontDescription *fd;
-        double xr = w - CW_MARGIN;
-        double xc = CW_MARGIN + icon_s + 6;
-        double yc;
 
-        /* --- правый верхний угол: температура и город --- */
         fd = cw_font(priv->temp_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
         g_snprintf(buf, sizeof(buf), "%.0f\u00b0", cw_temp(priv, cw->temp));
-        th = cw_text_right(g, layout, buf, &priv->temp_color, xr,
-                           CW_MARGIN - 4);
+        th = cw_text(g, layout, buf, &priv->temp_color,
+                     90.0 * cw_scale, 25.0 * cw_scale, FALSE);
 
         fd = cw_font(priv->city_font);
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
+        /* в оригинале город выровнен вправо по рамке шириной 132,
+         * начинающейся с x=-5, то есть правый край текста на 127 */
         th2 = cw_text_right(g, layout, cw->place ? cw->place : priv->city,
-                            &priv->city_color, xr, CW_MARGIN - 4 + th + 1);
-        y = CW_MARGIN - 4 + th + 1 + th2;
-
-        /* --- столбик вплотную к иконке --- */
-        fd = cw_font(priv->hour_font);
-        pango_layout_set_font_description(layout, fd);
-        pango_font_description_free(fd);
-
-        /* Максимум и минимум — СТОЛБИКОМ, каждый на своей строке.
-         * Склеивать их в '<b>high</b>low' нельзя: в одну строку они
-         * читаются как одно длинное число. */
-        /* Минимум серый, максимум остаётся основным цветом. Серый
-         * берём как среднее по каналам цвета текста, чтобы он
-         * остался производным от выбранной пользователем гаммы. */
-        {
-            double v = (priv->hour_color.r + priv->hour_color.g
-                        + priv->hour_color.b) / 3.0;
-            CwColor grey = priv->hour_color;
-
-            grey.r = grey.g = grey.b = v;
-            grey.a *= 0.80;
-
-            yc = CW_MARGIN - 4;
-            if (cw->days->len > 0) {
-                CwDay *d0 = &g_array_index(cw->days, CwDay, 0);
-
-                g_snprintf(buf, sizeof(buf), "<b>%.0f\u00b0</b>",
-                           cw_temp(priv, d0->tmax));
-                th = cw_text_markup(g, layout, buf, &priv->hour_color, xc,
-                                    yc, FALSE);
-                yc += th;
-                g_snprintf(buf, sizeof(buf), "%.0f\u00b0",
-                           cw_temp(priv, d0->tmin));
-                th = cw_text(g, layout, buf, &grey, xc, yc, FALSE);
-                yc += th;
-            }
-
-            /* Влажность — моноширинным шрифтом. С DejaVu Sans
-             * Condensed разница на этом кегле составляла 2 пикселя и
-             * не читалась; моноширинный отличается сразу. */
-            fd = cw_font(priv->hour_font);
-            pango_font_description_set_family(fd, "DejaVu Sans Mono");
-            pango_layout_set_font_description(layout, fd);
-            pango_font_description_free(fd);
-
-            g_snprintf(buf, sizeof(buf), "%.0f%%", cw->humidity);
-            th2 = cw_text(g, layout, buf, &priv->hour_color, xc, yc + 2,
-                          FALSE);
-            y = MAX(y, yc + 2 + th2);
-        }
+                            &priv->city_color, 127.0 * cw_scale,
+                            50.0 * cw_scale);
     }
 
-    /* низ шапки — что выше: значок или столбец рядом с ним. Значок
-     * берём по видимой части, иначе пустые поля картинки съедают
-     * высоту и под полосой остаётся дыра. */
-    {
-        int idx = cw_icon_for(cw_kind_to_ww(cw->kind), priv->night);
-
-        y = MAX(CW_MARGIN + cw_icon_visible_bottom(priv, idx, icon_s), y)
-            + CW_GAP;
-    }
-
-    /* Разделитель шапки и прогноза. Раньше шапка и полоса дней шли
-     * слитно, и верх апплета не читался как отдельная часть. Полоса
-     * серая и низкого контраста, штриховая — как разделитель, а не
-     * как элемент, который спорит со значками. */
-    {
-        static const double dash[] = {3.0, 3.0};
-
-        cairo_save(g);
-        cairo_set_source_rgba(g, 0.76, 0.76, 0.80, 0.26);
-        cairo_set_line_width(g, 2.0);
-        cairo_set_dash(g, dash, G_N_ELEMENTS(dash), 0.0);
-        cairo_move_to(g, CW_MARGIN, y - 12.0);
-        cairo_line_to(g, w - CW_MARGIN, y - 12.0);
-        cairo_stroke(g);
-        cairo_restore(g);
-    }
-    /* Полоса начинается под разделителем: 2 px отступа, чтобы подписи
-     * не липли к линии. */
-    y -= 11;
-
-    /* Остаток высоты достаётся полосе прогноза */
-    cw_strip_h = MAX(h - y - 4.0, 40.0);
-
+    /* Низ пластины задаёт полоса дней, а не шапка: в оригинале они
+     * перекрываются. Ничего не добавляем, только считаем, где начнётся
+     * полоса. */
+    y = 60.0 * cw_scale;
+    cw_strip_h = h - y;
 
     /* --- почасовой прогноз ---
      *
@@ -2552,6 +2470,11 @@ static void cw_on_use_bg(GtkComboBox *cb, gpointer data)
         return;
     priv->use_bg = v;
     xs_host_api()->conf_set_int(priv->kf, p->name, "use_bg", v);
+    /* У панели темы фон и прозрачность жёстко нулевые — она всё рисует
+     * сама, и настраивать тут нечего. Для остальных режимов цвет фона
+     * настраивается, вместе с альфой. */
+    if (priv->bg_color_btn)
+        gtk_widget_set_sensitive(priv->bg_color_btn, v != 1);
     cw_save(priv);
     if (p->win)
         gtk_widget_queue_draw(p->win);
@@ -2812,6 +2735,16 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
         cw_row(grid, r++, "Фон:", cb);
     }
     {
+        /* Цвет подложки с альфой — ARGB. У режима «панель темы» он не
+         * применяется, и тогда строка гасится, чтобы не вводить в
+         * заблуждение, что настройка что-то меняет. */
+        GtkWidget *b = cw_color_button(&priv->bg_color, "background_color");
+
+        priv->bg_color_btn = b;
+        gtk_widget_set_sensitive(b, priv->use_bg != 1);
+        cw_row(grid, r++, "Цвет подложки (ARGB):", b);
+    }
+    {
         /* Скругление окна: радиус в пикселях, 0 — прямые углы */
         GtkWidget *sc = gtk_spin_button_new_with_range(0, 40, 1);
 
@@ -2934,21 +2867,6 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
     priv->alive = TRUE;
     priv->prefer_tr = CW_TR_DIRECT;
 
-    /* Полупрозрачное окно. Родной апплет кладёт под панель базу
-     * (0,0,0,0.8), и сквозь поле панели видно рабочий стол — это и
-     * даёт «дымчатое стекло». Без альфа-визуала это поле выходит просто
-     * чёрным, и тема читается как дыра слева. Visual задаём здесь, до
-     * того как окно покажут. */
-    if (p->win) {
-        GdkScreen *scr = gtk_widget_get_screen(p->win);
-        GdkVisual *vis = scr ? gdk_screen_get_rgba_visual(scr) : NULL;
-
-        if (vis) {
-            gtk_widget_set_visual(p->win, vis);
-            gtk_widget_set_app_paintable(p->win, TRUE);
-        }
-    }
-
     priv->city = xs_host_api()->conf_str(kf, p->name, "city",
                                          CW_DEFAULT_CITY);
     priv->badge = g_strdup("");
@@ -3002,14 +2920,20 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
     priv->height = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_height",
                                                  CW_DEFAULT_H), 120, 600);
 
+    /* Кегли — родовые, из ClearWeatherScreenlet.py: температура 14,
+     * город 6, дни недели 6, макс/мин 4 при холсте 132x100. Домножение
+     * на cw_scale (320/132 = 2.42) даёт 34/15/15/10 — ровно то, что
+     * нужно в окне. Прежние умолчания 26/12/11/10 были подобраны под
+     * старую раскладку и после масштабирования выходили вдвое крупнее
+     * родовых, из-за чего строка макс/мин не влезала и обрезалась. */
     priv->city_font = xs_host_api()->conf_str(kf, p->name, "city_font",
-                                              "Sans Bold 12");
+                                              "Sans Bold 6");
     priv->temp_font = xs_host_api()->conf_str(kf, p->name, "temp_font",
-                                              "Sans Bold 26");
+                                              "Sans Bold 14");
     priv->desc_font = xs_host_api()->conf_str(kf, p->name, "desc_font",
-                                              "Sans 11");
+                                              "Sans Bold 6");
     priv->hour_font = xs_host_api()->conf_str(kf, p->name, "hour_font",
-                                              "Sans 10");
+                                              "Sans Bold 4");
     cw_color_read(kf, p->name, "city_color", &def_city, &priv->city_color);
     cw_color_read(kf, p->name, "temp_color", &def_temp, &priv->temp_color);
     cw_color_read(kf, p->name, "desc_color", &def_desc, &priv->desc_color);
@@ -3022,6 +2946,24 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
 
     p->priv = priv;
     p->win = xs_host_api()->make_window(p, x, y, priv->width, priv->height);
+
+    /* Прозрачность окна. Ядро создаёт окно с RGBA-visual и зовёт
+     * gtk_widget_set_app_paintable() на самом окне, но не на drawing
+     * area внутри него. Без этого GTK рисует у area собственный
+     * непрозрачный фон темы, и сквозь апплета не видно ничего: окно
+     * формально с альфой, а выглядит чёрным. Ставим прозрачность и
+     * area, не трогая ядро. */
+    if (p->win) {
+        GtkWidget *area = gtk_bin_get_child(GTK_BIN(p->win));
+
+        if (area) {
+            gtk_widget_set_app_paintable(area, TRUE);
+            gtk_widget_set_has_window(area, FALSE);
+            if (gtk_widget_get_has_window(area))
+                gtk_widget_set_visual(area, gtk_widget_get_visual(p->win));
+        }
+    }
+
     if (!p->win) {
         p->host->log("clearweather: не удалось создать окно");
         cw_weather_free(priv->weather);
