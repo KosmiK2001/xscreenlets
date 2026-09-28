@@ -174,7 +174,7 @@ typedef struct {
     char       *theme_dir;
 
     int    width, height;
-    char  *city_font, *temp_font, *desc_font, *hour_font;
+    char  *city_font, *temp_font, *desc_font, *hour_font, *stat_font;
     CwColor city_color, temp_color, desc_color, hour_color, bg_color;
     /* Кнопка цвета подложки: гасится для панели темы (use_bg==1) */
     GtkWidget *bg_color_btn;
@@ -2230,7 +2230,7 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
          * температура крупнее, и абсолютная точка разъезжалась. */
         th2 = cw_text_right(g, layout, cw->place ? cw->place : priv->city,
                             &priv->city_color, 127.0 * cw_scale,
-                            25.0 * cw_scale + th + 2.0 * cw_scale);
+                            25.0 * cw_scale + th + 3.4 * cw_scale);
     }
 
     /* Три значения — максимум, минимум и влажность — колонкой в
@@ -2241,9 +2241,17 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * оригинале занимает x=70..90, то есть ничего не перекрывает.
      * Высота строки берётся у pango, иначе строки наезжали. */
     if (cw->days->len > 0 || cw->humidity > 0.0) {
-        PangoFontDescription *fd = cw_font(priv->hour_font);
+        PangoFontDescription *fd = cw_font(priv->stat_font);
         double colx = 71.0 * cw_scale;
-        double coly = 8.0 * cw_scale;
+        /* Колонка стоит в нижней части плиты, а не у верха окна.
+         * В оригинале в правой колонке строки идут так: 39..50, 61..98,
+         * 110..124 (город), 134..149 — то есть под городом там пусто,
+         * и три значения ложатся именно в это поле. При coly=8*scale
+         * они оказывались наверху, поверх крупной иконки, а при
+         * coly=64*scale (=134) наезжали на значки дней: полоса дней
+         * начинается с 60*scale=126. Три строки должны кончаться выше
+         * неё, отсюда coly=40*scale. */
+        double coly = 40.0 * cw_scale;
         int lh = 0;
         char tmp[32];
 
@@ -2843,6 +2851,8 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
                                                         "desc_font"));
     cw_row(grid, r++, "Шрифт часов:", cw_font_button(priv->hour_font,
                                                      "hour_font"));
+    cw_row(grid, r++, "Шрифт значений у иконки:",
+           cw_font_button(priv->stat_font, "stat_font"));
 }
 
 /* ------------------------------------------------------------------ */
@@ -2971,19 +2981,29 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
                                                  CW_DEFAULT_H), 120, 600);
 
     /* Кегли из ClearWeatherScreenlet.py: город 6, дни недели 6, макс/мин
-     * 4, температура — не 14, а 15.4. Замерено на двух окнах рядом:
-     * высота цифр температуры у оригинала 44 px, у нас было 40, то есть
-     * ровно на 10% меньше. Домножение на cw_scale даёт кегли, нужные в
+     * 4. Температуру и город взяты крупнее родовых: на двух окнах,
+     * снятых рядом, высота цифр температуры у оригинала 27 px против
+     * 22 у нас, а города 15 против 12 — ровно в 1.23 и 1.25 раза.
+     * Промежуточный замер 44 против 40 был сделан по области, куда
+     * попадала ещё и иконка, и потому дал завышенную цифру у обоих. Домножение на cw_scale даёт кегли, нужные в
      * окне; прежние умолчания 26/12/11/10 были подобраны под старую
      * раскладку и выходили вдвое крупнее родовых. */
     priv->city_font = xs_host_api()->conf_str(kf, p->name, "city_font",
-                                              "Sans Bold 6");
+                                              "Sans Bold 8.0");
     priv->temp_font = xs_host_api()->conf_str(kf, p->name, "temp_font",
-                                              "Sans Bold 15.4");
+                                              "Sans Bold 20.4");
     priv->desc_font = xs_host_api()->conf_str(kf, p->name, "desc_font",
                                               "Sans Bold 6");
+    /* Под значками дней. Замерено на двух окнах рядом: у оригинала эти
+     * цифры 7 px высотой, у нас было 6. */
     priv->hour_font = xs_host_api()->conf_str(kf, p->name, "hour_font",
-                                              "Sans Bold 4");
+                                              "Sans Bold 5.5");
+    /* Колонка макс/мин/влажность у иконки. Раньше она брала hour_font с
+     * кеглём 4 — это размер для строки прогноза внизу, и в колонке
+     * выходило около 8 px, то есть читалось только под лупой. Свой
+     * кегль, чтобы крутить независимо от строки прогноза. */
+    priv->stat_font = xs_host_api()->conf_str(kf, p->name, "stat_font",
+                                              "Sans Bold 7");
     cw_color_read(kf, p->name, "city_color", &def_city, &priv->city_color);
     cw_color_read(kf, p->name, "temp_color", &def_temp, &priv->temp_color);
     cw_color_read(kf, p->name, "desc_color", &def_desc, &priv->desc_color);
@@ -3026,6 +3046,7 @@ static int cw_init(XsPlugin *p, GKeyFile *kf)
         g_free(priv->temp_font);
         g_free(priv->desc_font);
         g_free(priv->hour_font);
+        g_free(priv->stat_font);
         g_free(priv);
         p->priv = NULL;
         return -1;
