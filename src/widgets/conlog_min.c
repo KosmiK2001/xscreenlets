@@ -104,24 +104,24 @@ static void cl_request_redraw(ConlogPriv *priv)
     }
 }
 
-/* Таймер отрисовки: держит частоту перерисовок на CONLOG_REDRAW_MS
- * независимо от того, сколько раз пришло данных. */
+/* Таймер отрисовки: ОДИН на всё время жизни applet-а.
+ *
+ * Не «взводится при каждом чтении» — это была утечка таймеров, съедавшая
+ * 32% CPU. cl_redraw_cb возвращала G_SOURCE_CONTINUE, но обнуляла
+ * redraw_id, поэтому источник оставался жив, а следующий cl_on_io видел
+ * redraw_id == 0 и добавлял ЕЩЁ ОДИН. На ~19 строк/с через минуту
+ * накапливались сотни таймеров, и каждый дёргал invalidate с частотой
+ * 10 Гц: суммарно десятки тысяч перерисовок в секунду.
+ *
+ * Теперь источник один и создан при init; он просто проверяет dirty. */
 static gboolean cl_redraw_cb(gpointer data)
 {
     ConlogPriv *priv = data;
 
     if (!priv)
         return G_SOURCE_REMOVE;
-    priv->redraw_id = 0;
     cl_request_redraw(priv);
     return G_SOURCE_CONTINUE;
-}
-
-static void cl_schedule_redraw(ConlogPriv *priv)
-{
-    if (priv->dirty && !priv->redraw_id)
-        priv->redraw_id = g_timeout_add(CONLOG_REDRAW_MS, cl_redraw_cb,
-                                        priv);
 }
 
 /* ---------------------------------------------------------------- чтение */
@@ -218,7 +218,8 @@ static gboolean cl_on_io(GIOChannel *chan, GIOCondition cond, gpointer data)
         return G_SOURCE_REMOVE;
     }
 
-    cl_schedule_redraw(priv);
+    /* Перерисовку делает постоянный таймер cl_redraw_cb: он смотрит
+     * dirty и перерисовывает не чаще CONLOG_REDRAW_MS. */
     return G_SOURCE_CONTINUE;
 }
 
@@ -230,10 +231,9 @@ static void cl_stop(ConlogPriv *priv)
         g_source_remove(priv->watch_id);
         priv->watch_id = 0;
     }
-    if (priv->redraw_id) {
-        g_source_remove(priv->redraw_id);
-        priv->redraw_id = 0;
-    }
+    /* redraw_id здесь НЕ снимаем: cl_stop вызывается и из cl_start при
+     * перезапуске команды, и таймер отрисовки переживает перезапуск —
+     * он принадлежит applet-у, а не процессу. Снимает его cl_shutdown. */
     if (priv->chan) {
         g_io_channel_unref(priv->chan);
         priv->chan = NULL;
@@ -473,6 +473,10 @@ static void cl_shutdown(XsPlugin *p)
     if (!priv)
         return;
     cl_stop(priv);
+    if (priv->redraw_id) {
+        g_source_remove(priv->redraw_id);
+        priv->redraw_id = 0;
+    }
     g_ptr_array_free(priv->lines, TRUE);
     g_string_free(priv->pending, TRUE);
     g_free(priv->command);
@@ -567,6 +571,8 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     }
 
     p->priv = priv;
+    /* Единственный таймер отрисовки на всё время жизни applet-а. */
+    priv->redraw_id = g_timeout_add(CONLOG_REDRAW_MS, cl_redraw_cb, priv);
     cl_start(priv);
 
     /* Окно обязан создать плагин: демон после init проверяет p->win и
@@ -578,6 +584,12 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     if (!p->win) {
         p->host->log("conlog_min: не создано окно");
         cl_stop(priv);
+        /* Таймер снимаем ДО освобождения priv: иначе он через секунду
+         * сработает на освобождённую память. */
+        if (priv->redraw_id) {
+            g_source_remove(priv->redraw_id);
+            priv->redraw_id = 0;
+        }
         g_ptr_array_free(priv->lines, TRUE);
         g_string_free(priv->pending, TRUE);
         g_free(priv->command);
