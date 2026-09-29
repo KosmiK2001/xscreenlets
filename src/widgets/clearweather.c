@@ -239,10 +239,21 @@ static double cw_num(JsonObject *o, const char *key, double def)
 
         return (str && *str) ? g_ascii_strtod(str, NULL) : def;
     }
-    if (t == G_TYPE_INT)
+    /* Целое из JSON приходит как gint64, а не как gint. Проверено
+     * пробником на json-glib: json_node_get_value_type() для "72"
+     * возвращает G_TYPE_INT64, и проверка на G_TYPE_INT не срабатывала
+     * никогда. Ветка молча уходила в def, то есть в 0, и любое целое
+     * поле (humidity, tmax, tmin, ветер) обнулялось. Ловим и знаковые,
+     * и беззнаковые целые; G_TYPE_INT/UINT оставлены на случай, если
+     * значение всё же сложится в int. */
+    if (t == G_TYPE_INT64 || t == G_TYPE_UINT64)
+        return (double)json_node_get_int(n);
+    if (t == G_TYPE_INT || t == G_TYPE_UINT)
         return (double)json_node_get_int(n);
     if (t == G_TYPE_DOUBLE)
         return json_node_get_double(n);
+    if (t == G_TYPE_BOOLEAN)
+        return json_node_get_boolean(n) ? 1.0 : 0.0;
     return def;
 }
 
@@ -302,7 +313,10 @@ static int cw_icon_for(int code, gboolean night)
 
     if (code == 3200)
         return 48;
-    for (i = 0; i < G_N_ELEMENTS(CW_ICON_DAY); i++) {
+    /* Граница берётся от той таблицы, по которой реально идём. Сейчас
+     * длины равны и выхода за массив нет, но код добавят только в одну
+     * таблицу — и цикл уйдёт читать за конец. */
+    for (i = 0; i < G_N_ELEMENTS(tbl); i++) {
         if (tbl[i][0] == code)
             return tbl[i][1];
     }
@@ -345,10 +359,16 @@ static int cw_ww_kind(int c)
     if (c == 116)                      return CW_W_PARTLY;
     if (c == 119)                      return CW_W_CLOUDY;
     if (c >= 143 && c <= 148)          return CW_W_FOG;
-    if ((c >= 176 && c <= 179) ||
-        (c >= 293 && c <= 296) ||
+    /* Раскладка обязана совпадать с CW_ICON_DAY/NIGHT, иначе подпись и
+     * значок противоречат друг другу: код попадает в один вид, а иконка
+     * выбирается по тому же коду и рисует другое. 179 — снежные ливни,
+     * иконка 14/46 снежная, значит вид должен быть снежным. 182..185 —
+     * ледяная крупа и изморозь, иконки 7/10 дождевые, значит вид дождевой. */
+    if (c >= 176 && c <= 178)          return CW_W_DRIZZLE;
+    if (c == 179)                      return CW_W_SNOW;
+    if (c >= 182 && c <= 185)          return CW_W_RAIN;
+    if ((c >= 293 && c <= 296) ||
         (c >= 311 && c <= 312))        return CW_W_DRIZZLE;
-    if (c >= 182 && c <= 185)          return CW_W_SNOW;
     if ((c >= 299 && c <= 307) ||
         (c >= 350 && c <= 357))         return CW_W_RAIN;
     if ((c >= 313 && c <= 317) ||
