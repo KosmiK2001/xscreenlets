@@ -309,14 +309,17 @@ static int cw_kind_to_ww(int kind)
 static int cw_icon_for(int code, gboolean night)
 {
     const guint8 (*tbl)[2] = night ? CW_ICON_NIGHT : CW_ICON_DAY;
-    gsize i;
+    gsize i, len;
 
     if (code == 3200)
         return 48;
-    /* Граница берётся от той таблицы, по которой реально идём. Сейчас
-     * длины равны и выхода за массив нет, но код добавят только в одну
-     * таблицу — и цикл уйдёт читать за конец. */
-    for (i = 0; i < G_N_ELEMENTS(tbl); i++) {
+    /* Длина обязана браться у самой таблицы. tbl — это УКАЗАТЕЛЬ на
+     * массив, и G_N_ELEMENTS(tbl) даёт sizeof(tbl)/sizeof(tbl[0]) =
+     * 8/2 = 4, то есть просматривались бы только первые четыре записи
+     * из сорока девяти, и всё остальное молча уходило бы в return 48.
+     * Проверено на ревью, именно так и вышло. */
+    len = night ? G_N_ELEMENTS(CW_ICON_NIGHT) : G_N_ELEMENTS(CW_ICON_DAY);
+    for (i = 0; i < len; i++) {
         if (tbl[i][0] == code)
             return tbl[i][1];
     }
@@ -374,6 +377,12 @@ static int cw_ww_kind(int c)
     if ((c >= 313 && c <= 317) ||
         (c >= 365 && c <= 366))         return CW_W_SHOWERS;
     if (c >= 359 && c <= 362)          return CW_W_SNOW;
+    /* Грозовые коды WWO. Без них гроза с wttr.in уезжала в CW_W_N и
+     * подписывалась «Нет данных», хотя код есть и значок для него
+     * тоже есть — cw_kind_to_ww(CW_W_THUNDER) даёт 200, а на 200 в
+     * таблице иконок стоит грозовая. */
+    if (c >= 90 && c <= 94)            return CW_W_THUNDER;
+    if (c == 180 || c == 181)          return CW_W_SHOWERS;
     if (c >= 386)                      return CW_W_THUNDER;
     return CW_W_N;
 }
