@@ -7,6 +7,9 @@
  * Вложенность: гость-рамка сам может хостить — циклы проверяет демон. */
 #include <gtk/gtk.h>
 #include <glib.h>
+/* ceil/fabs/floor/sqrt нужны fl_rounded_region(): регион формы окна
+ * строится по колонкам, срез считается по окружности. */
+#include <math.h>
 #include <librsvg/rsvg.h>
 #include <string.h>
 #include "xs_api.h"
@@ -22,6 +25,9 @@ typedef struct {
 	int shadow;              /* зона затенения px (2-4) */
 	gboolean inside_transparent; /* тема без фона (nobg) */
 	int frame_l, frame_r, frame_t, frame_b; /* толщина рамки (тема) */
+	int corner_radius;     /* скругление окна, px; 0 = без скругления */
+	int shape_radius;      /* чему равно применённое скругление */
+	int shape_w, shape_h;  /* размер, под который применена форма */
 	int guest_count;
 	char **guests;           /* имена гостей (guests_1..N) */
 	gboolean started;        /* гости запущены (после map окна) */
@@ -207,6 +213,14 @@ static int fl_init(XsPlugin *p, GKeyFile *kf)
 		priv->shadow = 0;
 	else if (priv->shadow > 16)
 		priv->shadow = 16;
+	/* Скругление углов окна. Дефолт 10 — как у встроенной рамки ниже,
+	 * чтобы переход на скруглённый вид ничего не менял по умолчанию. */
+	priv->corner_radius = xs_host_api()->conf_int(kf, p->name,
+	                                             "corner_radius", 10);
+	if (priv->corner_radius < 0)
+		priv->corner_radius = 0;
+	else if (priv->corner_radius > 40)
+		priv->corner_radius = 40;
 	/* рамка по умолчанию (если тема не переопределила) */
 	if (!priv->frame_l) priv->frame_l = 12;
 	if (!priv->frame_r) priv->frame_r = 12;
@@ -285,6 +299,122 @@ static int fl_init(XsPlugin *p, GKeyFile *kf)
 	return 0;
 }
 
+/* ------------------------------------------------------------ скругление */
+/* Формулы идентичны network_monitor_core.c и sensors_core.c: те же самые
+ * формулы строят регион там. Проверка «глубина среза максимальна в угловой
+ * колонке и исчезает при i=scaled» относится к геометрии окружности, а не
+ * к конкретному плагину, поэтому все три копии обязаны вести себя
+ * одинаково — иначе скруглённые апплеты будут выглядеть по-разному при
+ * одинаковом corner_radius. Третью копию стоит вынести в общее место. */
+
+static double fl_corner_radius_value(int value)
+{
+	return value > 0 ? (double)value : 0.0;
+}
+
+static gboolean fl_corner_radius_is_rounded(double radius)
+{
+	return radius > 0.5;
+}
+
+static void fl_rounded_path(cairo_t *cr, int width, int height, int radius)
+{
+	const double inset = 1.0;
+	double w = width - 2 * inset, h = height - 2 * inset;
+	double r = fl_corner_radius_value(radius);
+
+	if (w <= 0 || h <= 0) {
+		cairo_rectangle(cr, 0, 0, width, height);
+		return;
+	}
+	if (!fl_corner_radius_is_rounded(r)) {
+		cairo_rectangle(cr, inset, inset, w, h);
+		return;
+	}
+	r = MIN(r, MIN(w, h) / 2.0);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+	cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+	cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+	cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+	cairo_close_path(cr);
+}
+
+/* Регион формы окна. Без него углы остаются некликабельными: даже если
+ * фон нарисован скруглённым, прозрачный угол всё равно ловит клик. */
+static cairo_region_t *fl_rounded_region(int width, int height, int radius)
+{
+	const double r = fl_corner_radius_value(radius);
+	cairo_region_t *region;
+	cairo_rectangle_int_t box;
+	double scaled;
+
+	if (width <= 0 || height <= 0)
+		return NULL;
+	if (!fl_corner_radius_is_rounded(r))
+		return NULL;
+
+	scaled = MIN(r, MIN(width, height) / 2.0);
+	region = cairo_region_create();
+	if (!region)
+		return NULL;
+
+	for (int i = 0; i <= (int)ceil(scaled); i++) {
+		double d = fabs(i - scaled);
+		int cut = 0;
+
+		if (d <= scaled)
+			cut = (int)floor(scaled -
+			                 sqrt(scaled * scaled - d * d));
+		box.x = i;
+		box.y = cut;
+		box.width = 1;
+		box.height = height - 2 * cut;
+		if (box.height > 0)
+			cairo_region_union_rectangle(region, &box);
+		box.x = width - 1 - i;
+		if (box.height > 0)
+			cairo_region_union_rectangle(region, &box);
+	}
+	/* Середина. Без неё регион состоит из двух «скобок» у краёв, и всё
+	 * содержимое окна в середине обрезается до рабочего стола: фрейм
+	 * виден только слева и справа, по ширине скругления. */
+	{
+		int mid = (int)ceil(scaled);
+
+		box.x = mid;
+		box.y = 0;
+		box.width = width - 2 * mid;
+		box.height = height;
+		if (box.width > 0)
+			cairo_region_union_rectangle(region, &box);
+	}
+	return region;
+}
+
+static void fl_apply_shape(XsPlugin *p, int w, int h)
+{
+	PrivData *priv = p ? p->priv : NULL;
+	GdkWindow *window;
+	cairo_region_t *region;
+
+	if (!priv || !p->win || w <= 0 || h <= 0)
+		return;
+	if (priv->shape_radius == priv->corner_radius &&
+	    priv->shape_w == w && priv->shape_h == h)
+		return;
+	window = gtk_widget_get_window(p->win);
+	if (!window)
+		return;
+	region = fl_rounded_region(w, h, priv->corner_radius);
+	gdk_window_shape_combine_region(window, region, 0, 0);
+	if (region)
+		cairo_region_destroy(region);
+	priv->shape_radius = priv->corner_radius;
+	priv->shape_w = w;
+	priv->shape_h = h;
+}
+
 /* 9-slice отрисовка рамки из темы: углы — в натуральном размере,
  * стороны — тайлами/растяжкой между углами, центр (backdrop) —
  * растяжкой на content-зону. Элементы темы:
@@ -321,31 +451,51 @@ static void fl_draw_frame_nine_slice(XsPlugin *p, PrivData *priv,
 		cairo_restore(cr);
 		cairo_surface_destroy(tmp);
 	}
-	/* углы */
-	if (xs_core_theme_has(p, "frame-tl"))
-		xs_host_api()->theme_draw_native(p, cr, "frame-tl", 0, 0);
-	if (xs_core_theme_has(p, "frame-tr"))
-		xs_host_api()->theme_draw_native(p, cr, "frame-tr",
-		                                 w - R, 0);
-	if (xs_core_theme_has(p, "frame-bl"))
-		xs_host_api()->theme_draw_native(p, cr, "frame-bl",
-		                                 0, h - B);
-	if (xs_core_theme_has(p, "frame-br"))
-		xs_host_api()->theme_draw_native(p, cr, "frame-br",
-		                                 w - R, h - B);
-	/* стороны: растяжка между углами */
-	if (xs_core_theme_has(p, "frame-top") && w - L - R > 0)
-		xs_host_api()->theme_draw_full(p, cr, "frame-top",
-		                               L, 0, w - L - R, T);
-	if (xs_core_theme_has(p, "frame-bottom") && w - L - R > 0)
-		xs_host_api()->theme_draw_full(p, cr, "frame-bottom",
-		                               L, h - B, w - L - R, B);
-	if (xs_core_theme_has(p, "frame-left") && h - T - B > 0)
-		xs_host_api()->theme_draw_full(p, cr, "frame-left",
-		                               0, T, L, h - T - B);
-	if (xs_core_theme_has(p, "frame-right") && h - T - B > 0)
-		xs_host_api()->theme_draw_full(p, cr, "frame-right",
-		                               w - R, T, R, h - T - B);
+	/* Угол и полоса — разные вещи, и раньше они были склеены.
+	 *
+	 * L/R/T/B из темы — это ТОЛЩИНА полосы и одновременно отступ
+	 * content-зоны (fl_content_rect). А углу, чтобы дотянуться до
+	 * скругления окна, нужен размер не меньше corner_radius. Когда
+	 * тема задаёт и то и другое одной цифрой, либо рамка не
+	 * достаёт до скругления, либо полоса раздувается до отступа
+	 * content-зоны и читается как пустое белое поле.
+	 *
+	 * Поэтому углы рисуются квадратом со стороной C, а стороны и
+	 * отступ фона остаются на толщине полосы. */
+	{
+		double cs = MAX((double)MAX(L, MAX(R, MAX(T, B))),
+		                fl_corner_radius_value(priv->corner_radius));
+
+		cs = MIN(cs, MIN(w, h) / 2.0);
+		/* углы: theme_draw_full, а не native, — размер задаёт апплет,
+		 * иначе правый/нижний углы позиционируются по толщине полосы
+		 * и уезжают внутрь окна на (C - полоса) */
+		if (xs_core_theme_has(p, "frame-tl") && cs > 0.0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-tl",
+			                               0, 0, cs, cs);
+		if (xs_core_theme_has(p, "frame-tr") && cs > 0.0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-tr",
+			                               w - cs, 0, cs, cs);
+		if (xs_core_theme_has(p, "frame-bl") && cs > 0.0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-bl",
+			                               0, h - cs, cs, cs);
+		if (xs_core_theme_has(p, "frame-br") && cs > 0.0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-br",
+			                               w - cs, h - cs, cs, cs);
+		/* стороны: между углами, толщина полосы темы */
+		if (xs_core_theme_has(p, "frame-top") && w - 2 * cs > 0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-top",
+			                               cs, 0, w - 2 * cs, T);
+		if (xs_core_theme_has(p, "frame-bottom") && w - 2 * cs > 0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-bottom",
+			                               cs, h - B, w - 2 * cs, B);
+		if (xs_core_theme_has(p, "frame-left") && h - 2 * cs > 0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-left",
+			                               0, cs, L, h - 2 * cs);
+		if (xs_core_theme_has(p, "frame-right") && h - 2 * cs > 0)
+			xs_host_api()->theme_draw_full(p, cr, "frame-right",
+			                               w - R, cs, R, h - 2 * cs);
+	}
 }
 
 static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
@@ -378,6 +528,7 @@ static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	 * тёмное дымчатое стекло × bg_opacity — КРОМЕ тем с флагом
 	 * inside_transparent (nobg: внутри полностью прозрачно).
 	 * Темы с backdrop.svg добавляют свой слой поверх в 9-slice. */
+	fl_apply_shape(p, w, h);
 	if (priv->bg_opacity > 0.0 && !priv->inside_transparent) {
 		double a = priv->bg_opacity * 1.8; /* заметное затемнение */
 
@@ -385,6 +536,11 @@ static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 			a = 1.0;
 		cairo_save(cr);
 		cairo_set_source_rgba(cr, 0.02, 0.02, 0.03, a);
+		/* Заливка content-зоны — обычным прямоугольником во всю
+		 * content-зону. Скруглять её здесь не нужно: углы и так
+		 * срезаются формой окна (corner_radius), а своя скруглённая
+		 * заливка отступала от края ещё на радиус и оставляла у
+		 * углов заметный недобор фона. */
 		cairo_rectangle(cr, cx, cy, cw, ch);
 		cairo_fill(cr);
 		cairo_restore(cr);
@@ -397,9 +553,14 @@ static void fl_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	if (xs_core_theme_has(p, "frame")) {
 		xs_host_api()->theme_draw_full(p, cr, "frame", 0, 0, w, h);
 	} else {
-		/* встроенная рамка: скруглённый прямоугольник */
-		double radius = 10.0;
+		/* встроенная рамка: скруглённый прямоугольник. Радиус берётся
+		 * из настройки corner_radius, раньше был жёстко 10. */
+		double radius = fl_corner_radius_value(priv->corner_radius);
+		double rr = MIN(radius, MIN(w, h) / 2.0);
 
+		if (rr < 0.5)
+			rr = 0.0;
+		radius = rr;
 		cairo_save(cr);
 		cairo_move_to(cr, radius, 0);
 		cairo_line_to(cr, w - radius, 0);
@@ -461,6 +622,14 @@ static void fl_spin_changed(GtkSpinButton *spin, gpointer data)
 		priv->height = v;
 	else if (strcmp(key, "shadow") == 0)
 		priv->shadow = v;
+	else if (strcmp(key, "corner_radius") == 0) {
+		priv->corner_radius = v;
+		/* форма окна зависит от радиуса и размера — сбрасываем кэш,
+		 * иначе fl_apply_shape решит, что менять нечего */
+		priv->shape_radius = -1;
+		priv->shape_w = 0;
+		priv->shape_h = 0;
+	}
 	xs_host_api()->conf_set_int(priv->kf, p->name, key, v);
 	xs_core_plugin_conf_flush(p->name);
 	/* живое применение размера/затенения */
@@ -1028,6 +1197,8 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 	FL_SPIN("width", "Width", "Внешняя ширина рамки", 60, 4000);
 	FL_SPIN("height", "Height", "Внешняя высота рамки", 60, 4000);
 	FL_SPIN("shadow", "Shadow", "Зона затенения (px), 2-4 типично", 0, 16);
+	FL_SPIN("corner_radius", "Corner",
+	        "Скругление углов окна (px); 0 = без скругления", 0, 40);
 
 #undef FL_SPIN
 

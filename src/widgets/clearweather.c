@@ -54,6 +54,21 @@
 #define CW_VIEW_MIN     0
 #define CW_VIEW_MAX     2
 #define CW_DAYS_MAX     5   /* в родном апплете пять дней */
+
+/* Крупная иконка шапки и иконка дня — связаны жёстко: ряд дней занимает
+ * D + 22 логических единиц (подпись «Вт» 10 px + зазор 1 + иконка D +
+ * зазор 1 + температуры 11 px, всё измерено), а холст 100. Значит
+ * крупная иконка I <= 78 - D - зазор, и при I = 72 дня налезали на неё
+ * на 19 единиц — это было и в оригинальном апплете, там они
+ * перекрываются намеренно.
+ *
+ * Чтобы налезания не было, что-то надо уменьшить. Здесь выбран
+ * баланс: крупная иконка 54 (было 72), иконка дня 20 (было 22),
+ * зазор между ними 1. Обе величины вынесены сюда, чтобы переиграть:
+ *   крупная 56-58  ->  иконку дня 16 (меньше день, крупнее шапка)
+ *   крупная 52      ->  иконку дня 22 (крупнее день, мельче шапка) */
+#define CW_HEAD_ICON 54.0
+#define CW_DAY_ICON 20.0
 #define CW_ICON_COUNT  49
 #define CW_HOURS_DEFAULT    8
 #define CW_OM_STEP          3          /* показывать каждый 3-й час */
@@ -196,7 +211,8 @@ static void cw_icon_px(cairo_t *cr, CwPriv *priv, int kind, double x,
                        double y, double s);
 static double cw_temp(const CwPriv *priv, double celsius);
 static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
-                         PangoLayout *layout, double w, double h, double y);
+                         PangoLayout *layout, double w, double h, double y,
+                         double right);
 
 static void cw_log(XsPlugin *p, const char *fmt, ...)
 {
@@ -1722,29 +1738,97 @@ static void cw_theme_free(CwPriv *priv)
  * максимум и минимум одной строкой. Раскладка по ширине окна: колонки
  * отступом от левого края, как в оригинале, но считаются от w, а не
  * от жёстких 24 пикселей, иначе на 320 не помещается. */
+/* Ширина строки с разметкой. cw_text_width для этой задачи не годится:
+ * он зовёт pango_layout_set_text, и теги <b>/<i> попали бы в ширину как
+ * обычные символы, завышая результат. */
+static double cw_markup_width(cairo_t *cr, PangoLayout *layout,
+                              const char *font, const char *markup)
+{
+    PangoFontDescription *fd = cw_font(font);
+    int tw = 0, th = 0;
+
+    pango_layout_set_font_description(layout, fd);
+    pango_font_description_free(fd);
+    pango_layout_set_attributes(layout, NULL);
+    pango_layout_set_markup(layout, markup, -1);
+    pango_layout_get_pixel_size(layout, &tw, &th);
+    return tw;
+}
+
 static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
-                         PangoLayout *layout, double w, double h, double y)
+                         PangoLayout *layout, double w, double h, double y,
+                         double right)
 {
     int n = (int)MIN(cw->days->len, (guint)CW_DAYS_MAX);
-    double sc = w / 132.0;
-    int i, th;
+    /* Масштаб — ОБЩИЙ cw_scale, как у вёрстки и кеглей. Здесь стояло
+     * w/132.0, и это ломало правый край: когда ограничивающей
+     * оказывалась высота, глобальный cw_scale = min(w/132, h/100)
+     * был меньше, кегли уезжали по нему, а позиции столбцов считались
+     * по w/132 — ряд разъезжался шире, чем текст, и иконка последнего
+     * дня вылезала за правый край апплета. */
+    double sc = cw_scale;
+    double icon_s = CW_DAY_ICON * sc;
+    double gap = 1.0 * sc;
+    double x0 = 14.0 * sc;
+    double x_last, step;
+    double th_label, th_temp, total, ytop, y_icon, y_temp;
+    int i;
     CwColor faded = priv->hour_color;
 
     if (n <= 0)
         return;
     faded.a *= 0.85;
 
-    /* Полоса дней по координатам оригинала (ClearWeatherScreenlet.py,
-     * холст 132x100, шаг 24 по x):
-     *   полоса под дни   translate(14, 60), day-bg 116x9
-     *   дни недели       та же точка, кегль 6
-     *   иконки дней      translate(14, 68), размер 22x22
-     *   макс/мин         translate(16, 90), кегль 4
-     * Ничего не растягиваем и не выравниваем по краям окна: оригинал
-     * держит шаг 24 и начинает с x=14, и в этом его вид. */
+    /* Правый край ряда — это край ПЛИТЫ, а не край холста. Плита
+     * растягивается на всё окно, а холст остаётся 132*cw_scale, и при
+     * окне шире холста (соотношение сторон не 132:100) последняя
+     * иконка уезжала за плиту. */
+    x_last = right - icon_s;
+    if (x_last < x0 + icon_s)
+        x_last = x0 + icon_s;
+    step = (n > 1) ? (x_last - x0) / (double)(n - 1) : 0.0;
+
+    /* Высоты меряем, а не задаём константами. cw_text делает
+     * cairo_move_to(x, y) и рисует layout ВНИЗ от y, то есть y — верх
+     * строки, а не базовая линия. Раньше строки стояли на фиксированных
+     * +8 и +30 от начала полосы, и кегль, умноженный на cw_scale,
+     * оказывался выше этих констант: при 310x228 (cw_scale 2.28) строка
+     * температур уезжала за нижний край холста. */
+    {
+        PangoFontDescription *fd = cw_font(priv->desc_font);
+        int tw = 0;
+        int th_label_i = 0;
+        pango_layout_set_font_description(layout, fd);
+        pango_font_description_free(fd);
+        pango_layout_set_attributes(layout, NULL);
+        pango_layout_set_text(layout, "\320\222\321\202", -1);   /* «Вт» */
+        { int tw = 0; pango_layout_get_pixel_size(layout, &tw, &th_label_i); }
+        th_label = th_label_i;
+    }
+    {
+        PangoFontDescription *fd = cw_font(priv->hour_font);
+        int tw = 0;
+        int th_temp_i = 0;
+        pango_layout_set_font_description(layout, fd);
+        pango_font_description_free(fd);
+        pango_layout_set_attributes(layout, NULL);
+        pango_layout_set_text(layout, "18\302\26012\302\260", -1); /* 18°12° */
+        { int tw = 0; pango_layout_get_pixel_size(layout, &tw, &th_temp_i); }
+        th_temp = th_temp_i;
+    }
+
+    /* Блок дней прижат к низу холста: так он не вылезает за нижний край
+     * ни при каком масштабе, и температуры всегда стоят над ним. */
+    total = th_label + gap + icon_s + gap + th_temp;
+    ytop = 100.0 * sc - 2.0 * sc - total;
+    if (ytop < y)
+        ytop = y;
+    y_icon = ytop + th_label + gap;
+    y_temp = y_icon + icon_s + gap;
+
     for (i = 0; i < n; i++) {
         CwDay *dh = &g_array_index(cw->days, CwDay, i);
-        double x = 14.0 * sc + 24.0 * sc * i;
+        double x = x0 + step * i;
         char buf[32];
         PangoFontDescription *fd;
 
@@ -1752,24 +1836,40 @@ static void cw_draw_days(cairo_t *cr, CwPriv *priv, CwWeather *cw,
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
         g_snprintf(buf, sizeof(buf), "%s", dh->label ? dh->label : "--");
-        th = cw_text(cr, layout, buf, &faded, x, y, FALSE);
+        /* День недели — по центру иконки. Раньше стоял center=FALSE от
+         * левого края иконки, и двухбуквенная подпись вроде «Пн» или
+         * «Вт», уже иконки не занимает, уезжала влево от неё. */
+        cw_text(cr, layout, buf, &faded, x + icon_s / 2.0, ytop, TRUE);
 
         /* у первого дня родной апплет рисует ночную иконку, дальше
          * дневные — так и делаем */
-        cw_icon_px(cr, priv, dh->kind, x, y + (8.0 * sc), 22.0 * sc);
+        cw_icon_px(cr, priv, dh->kind, x, y_icon, icon_s);
 
         if (priv->show_daytemp) {
             /* В оригинале '<b>high</b>low' слитно, без разделителя */
-            g_snprintf(buf, sizeof(buf), "<b>%.0f\u00b0</b>%.0f\u00b0",
+            g_snprintf(buf, sizeof(buf), "<b>%.0f\302\260</b>%.0f\302\260",
                        cw_temp(priv, dh->tmax), cw_temp(priv, dh->tmin));
             fd = cw_font(priv->hour_font);
             pango_layout_set_font_description(layout, fd);
             pango_font_description_free(fd);
-            cw_text_markup(cr, layout, buf, &priv->hour_color,
-                           x + 2.0 * sc, y + (30.0 * sc), FALSE);
+            /* Ширину меряем заранее и прижимаем строку к краю плиты,
+             * если она шире свободного места: температуры приходят из
+             * сети, и «-5°» шире «9°». */
+            {
+                double tw = cw_markup_width(cr, layout, priv->hour_font, buf);
+                double tx = x + icon_s / 2.0 - tw / 2.0;
+
+                if (tx + tw > right)
+                    tx = right - tw;
+                if (tx < x0)
+                    tx = x0;
+                cw_text_markup(cr, layout, buf, &priv->hour_color,
+                               tx, y_temp, FALSE);
+            }
         }
     }
     (void)h;
+    (void)w;
 }
 
 /* Рисует иконку погоды: если тема загрузилась — настоящий PNG из набора
@@ -1959,59 +2059,152 @@ static void cw_smoky_glass(cairo_t *cr, double w, double h, double r)
  * прогон даёт плоскую заливку — ровно то, что выглядело не тем.
  * Панель сделана под холст 132x100, поэтому её пропорции и положение
  * прямоугольника пересчитываем в окно. */
+/* Геометрия плиты темы в логических единицах холста 132x100.
+ * Из ClearWeatherScreenlet.py: draw_rounded_rectangle(11.5, 18.5, 8, 120, 80). */
+#define CW_PLATE_X 11.5
+#define CW_PLATE_Y 18.5
+#define CW_PLATE_W 120.0
+#define CW_PLATE_H 80.0
+#define CW_PLATE_R 8.0
+/* Насколько строка дней опускается ниже начала полосы.
+ *
+ * Крупная иконка шапки кончается на y=72, а строка дней занимает
+ * 36 логических единиц и должна уместиться в холст 100 — то есть
+ * начаться не позже 64. Это и есть максимум: сдвинуть ещё ниже
+ * можно только уронив температуры за нижний край. Чтобы дни перестали
+ * налезать на крупную иконку ПОЛНОСТЬЮ, её придётся уменьшить до 62
+ * (сейчас icon_s = 72) — отдельная правка, её не делал. */
+
+static void cw_plate_path(cairo_t *cr, double x, double y,
+                          double w, double h, double r)
+{
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, 0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0, M_PI / 2);
+    cairo_arc(cr, x + r, y + h - r, r, M_PI / 2, M_PI);
+    cairo_arc(cr, x + r, y + r, r, M_PI, 3 * M_PI / 2);
+    cairo_close_path(cr);
+}
+
+/* Один прогон темы, разрезанный на ТРИ части.
+ *
+ * Плиту нельзя натягивать на окно целиком: SVG вендортился в w x h, и
+ * стоило сдвинуть высоту, как полукруглые торцы превращались в овалы.
+ * Поэтому плита режется по радиусу на левый полукруг, срез и правый
+ * полукруг:
+ *
+ *   - полукруги рисуются с МАСШТАБОМ s, без растяжения, и прижаты к
+ *     своим краям окна (align_top_left / align_top_right) — форма не
+ *     деформируется никогда;
+ *   - срез растягивается только по ширине, высота не трогается.
+ *
+ * Каждая часть рисуется одним и тем же хендлом: клип задаётся в
+ * экранных координатах, а неоднородный перенос делает CTM. Так не
+ * нужно заводить три файла темы, и при смене темы всё едет само.
+ */
+static void cw_bg_pass(cairo_t *cr, CwPriv *priv, double w, double h)
+{
+    double s = cw_scale;
+    double cap = CW_PLATE_R * s;                 /* ширина полукруга */
+    double plate_x0 = CW_PLATE_X * s;
+    double plate_x1 = w - CW_PLATE_X * s;         /* плита тянется на окно */
+    double plate_y = CW_PLATE_Y * s;
+    double plate_h = CW_PLATE_H * s;              /* высоту не трогаем */
+    RsvgRectangle vp = {0.0, 0.0, 132.0, 100.0};
+    /* Стыки — по ЦЕЛЫМ пикселям, и в этом весь смысл.
+     *
+     * Три части стыкуются ровно, но если граница дробная, cairo
+     * сглаживает край каждой части отдельно: два соседних
+     * полупрозрачных края закрывают лишь часть пикселя, и на стыке
+     * появляется тонкая тёмная щель (её было видно справа вверху, где
+     * срез переходит в правый полукруг).
+     *
+     * Накрывать части друг на друга нельзя: тема рисуется ДВАЖДЫ ради
+     * «дымчатости», и в зоне нахлёста она ложилась бы вчетверо — вместо
+     * щели выходила белая полоса.
+     *
+     * Поэтому все четыре границы округляем внутрь до целых. Соседние
+     * клипы получают одну и ту же целую координату, края не
+     * сглаживаются, части просто делят пиксели без зазора и без
+     * перекрытия. */
+    double px0 = floor(plate_x0);
+    double px1 = floor(plate_x1);
+    double seam_a = floor(plate_x0 + cap);
+    double seam_b = floor(plate_x1 - cap);
+    double py0 = floor(plate_y);
+    double ph = floor(plate_y + plate_h) - py0;
+
+    (void)h;
+    if (!priv->bg || seam_b <= seam_a)
+        return;
+
+    /* 1. левый полукруг — прижат к левому краю, масштаб s, без растяжения */
+    cairo_save(cr);
+    cairo_rectangle(cr, px0, py0, seam_a - px0, ph);
+    cairo_clip(cr);
+    cairo_scale(cr, s, s);
+    rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+    cairo_restore(cr);
+
+    /* 2. срез — единственная часть, которая растягивается, и только по X.
+     * Источник: x от 11.5+8 до 11.5+120-8, то есть 104 логических единицы. */
+    cairo_save(cr);
+    cairo_rectangle(cr, seam_a, py0, seam_b - seam_a, ph);
+    cairo_clip(cr);
+    {
+        double mx = (seam_b - seam_a) / (CW_PLATE_W - 2.0 * CW_PLATE_R);
+        cairo_translate(cr, seam_a - (CW_PLATE_X + CW_PLATE_R) * mx, 0.0);
+        cairo_scale(cr, mx, s);
+        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+    }
+    cairo_restore(cr);
+
+    /* 3. правый полукруг — прижат к правому краю плиты */
+    cairo_save(cr);
+    cairo_rectangle(cr, seam_b, py0, px1 - seam_b, ph);
+    cairo_clip(cr);
+    cairo_translate(cr, px1 - (CW_PLATE_X + CW_PLATE_W) * s, 0.0);
+    cairo_scale(cr, s, s);
+    rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+    cairo_restore(cr);
+}
+
+
 static void cw_native_bg(cairo_t *cr, CwPriv *priv, double w, double h)
 {
-    double sx = w / 132.0, sy = h / 100.0;
-    double rx = 11.5 * sx, ry = 18.5 * sy, rr = 8.0 * sx;
-    double rw = 120.0 * sx, rh = 80.0 * sy;
-    RsvgRectangle vp = {0.0, 0.0, (double)w, (double)h};
+    double s = cw_scale;
+    double cap = CW_PLATE_R * s;
+    double plate_x0 = CW_PLATE_X * s;
+    double plate_x1 = w - CW_PLATE_X * s;
+    double plate_y = CW_PLATE_Y * s;
+    double plate_h = CW_PLATE_H * s;
 
-    /* База (0,0,0,0.8) — как в оригинале: сквозь неё видно рабочий
-     * стол, и в этом «дымчатое стекло». Окно у нас и правда создано с
-     * RGBA-visual, ядро чистит его через OPERATOR_CLEAR и альфу не
-     * затирает, так что прозрачность терялась только здесь.
-     *
-     * Заливка под панелью ломала стекло: окно становилось непрозрачным
-     * и чёрным. Теперь базы нет, прозрачность даёт сама панель. */
-    /* База нулевая: прозрачность обеспечивает сама панель, своими
-     * градиентами со stop-opacity. Заливка под ней превращала окно в
-     * непрозрачный чёрный прямоугольник. */
     cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.0);
     cairo_paint(cr);
 
-    if (priv->bg) {
-        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
+    if (!priv->bg)
+        return;
 
-        /* скруглённый прямоугольник между прогонами */
-        cairo_save(cr);
-        cairo_new_sub_path(cr);
-        cairo_arc(cr, rx + rw - rr, ry + rr, rr, -M_PI / 2, 0);
-        cairo_arc(cr, rx + rw - rr, ry + rh - rr, rr, 0, M_PI / 2);
-        cairo_arc(cr, rx + rr, ry + rh - rr, rr, M_PI / 2, M_PI);
-        cairo_arc(cr, rx + rr, ry + rr, rr, M_PI, 3 * M_PI / 2);
-        cairo_close_path(cr);
-        /* Заливка плиты. В ClearWeatherScreenlet.py.background_color =
-         * (0,0,0,0.8), и цвет попадает в плиту именно здесь: перед
-         * draw_rounded_rectangle стоит set_source_rgba(*background_color),
-         * а тот заливает текущим источником. Ключевое отличие от нашей
-         * прежней заливки: затемняется только плита (11.5,18.5,120,80),
-         * а не всё окно — поэтому сверху, где висит крупная иконка,
-         * и по полям остаётся видно рабочий стол. Отсюда и стекло.
-         *
-         * Замеры на соседних окнах (фон 16): оригинал даёт медиану 13
-         * и 25-й перцентиль 2, то есть тени настоящие; при нашей
-         * заливке 0.55/0.10 выходило 26 и 11 — тени были вымыты, и
-         * стекло читалось как молочное. */
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.8);
-        cairo_fill_preserve(cr);
-        cairo_set_source_rgba(cr, 0.80, 0.80, 0.85, 0.22);
-        cairo_set_line_width(cr, 1.0);
-        cairo_stroke(cr);
-        cairo_restore(cr);
+    /* Первый прогон темы, затем заливка плиты и рамка, затем второй
+     * прогон. Двойной прогон и есть источник «дымчатости»: полупрозрачные
+     * слои панели складываются вдвое, и на чёрной базе получается глубина.
+     * Один прогон даёт плоскую заливку — ровно то, что выглядело не тем. */
+    cw_bg_pass(cr, priv, w, h);
 
-        /* второй прогон — слои панели ложатся вдвое */
-        rsvg_handle_render_document(priv->bg, cr, &vp, NULL);
-    }
+    cairo_save(cr);
+    cw_plate_path(cr, plate_x0, plate_y, plate_x1 - plate_x0, plate_h, cap);
+    /* Заливка плиты. В ClearWeatherScreenlet.py.background_color =
+     * (0,0,0,0.8), и цвет попадает в плиту именно здесь: затемняется
+     * только плита, а не всё окно — поэтому сверху, где висит крупная
+     * иконка, и по полям остаётся видно рабочий стол. Отсюда и стекло. */
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.8);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgba(cr, 0.80, 0.80, 0.85, 0.22);
+    cairo_set_line_width(cr, 1.0);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+
+    cw_bg_pass(cr, priv, w, h);
 }
 
 static void cw_draw_bg(cairo_t *cr, CwPriv *priv, double w, double h)
@@ -2203,20 +2396,45 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     PangoLayout *layout;
     CwWeather *cw;
     char buf[256];
-    double y, icon_s, x, text_x, wind_y = 0.0, cw_strip_h;
+    double y, icon_s, x, text_x, wind_y = 0.0, cw_strip_h, right_limit;
     int i, shown, th, th2;
 
     if (!priv)
         return;
 
-    /* Вся вёрстка масштабируется одним множителем от ширины, ровно
-     * как в оригинале: там холст 132x100 и ctx.scale на всё. Координаты
-     * ниже взяты из кода ClearWeatherScreenlet.py как есть и умножаются
-     * на этот множитель. Считать от высоты 169 было ошибкой: кегли
+    /* Вся вёрстка масштабируется ОДНИМ множителем, ровно как в
+     * оригинале: там холст 132x100 и ctx.scale на всё. Координаты ниже
+     * взяты из кода ClearWeatherScreenlet.py как есть и умножаются на
+     * этот множитель. Считать от высоты 169 было ошибкой: кегли
      * выходили в 1.7 раза мельче родовых, и крупная иконка переставала
-     * быть доминантой. */
-    cw_scale = w / 132.0;
+     * быть доминантой.
+     *
+     * Window width и height — это база для 100%, то есть размер окна
+     * и есть холст. Множитель берётся МЕНЬШИМ из двух отношений, иначе
+     * при неверной высоте содержимое обрезалось бы снизу, а шрифты
+     * растягивались бы неравномерно: кегли нельзя масштабировать по
+     * двум осям сразу. Меньшее отношение гарантирует, что весь холст
+     * 132x100 поместится целиком и ничего не срежется ни с какой
+     * стороны; лишнее остаётся пустым полем справа или снизу.
+     *
+     * При пропорциональном размере, как 277x210, оба отношения равны и
+     * вид не меняется. */
+    {
+        double sx = w / 132.0;
+        double sy = h / 100.0;
+
+        cw_scale = (sx < sy) ? sx : sy;
+    }
     priv->scale = cw_scale;
+
+    /* Правая граница содержимого. Плита растягивается на всё окно
+     * (см. cw_bg_pass), а холст вёрстки остаётся 132x100. При окне
+     * шире холста — то есть когда соотношение сторон не 132:100, —
+     * содержимое у правого края оказывалось ЗА плитой: город уходил
+     * на улицу, последняя иконка дня торчала наружу. Поэтому всё, что
+     * привязано к правому краю, берёт границу от плиты. */
+    right_limit = MIN(132.0 * cw_scale,
+                      w - CW_PLATE_X * cw_scale - 2.0 * cw_scale);
 
     surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
     g = cairo_create(surf);
@@ -2291,7 +2509,7 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * пластины, а пластину потом перекрывает полоса дней. Раньше я
      * «прижимал» элементы к углам и разводил их логикой — отсюда
      * рваный ритм, который и читался как чужеродно. */
-    icon_s = 72.0 * cw_scale;
+    icon_s = CW_HEAD_ICON * cw_scale;
     cw_icon_px(g, priv, cw->kind, -2.0 * cw_scale, 0.0, icon_s);
 
     {
@@ -2301,8 +2519,15 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         pango_layout_set_font_description(layout, fd);
         pango_font_description_free(fd);
         g_snprintf(buf, sizeof(buf), "%.0f\u00b0", cw_temp(priv, cw->temp));
+        /* Температура стоит в просвете между иконкой и колонкой. Раньше
+         * её координата 90*cw_scale была задана под иконку шириной 72.
+         * Иконку уменьшили до 54, просвет стал шире, и между иконкой и
+         * текстом осталась пустота — теперь координата считается от
+         * CW_HEAD_ICON и зазор держится одинаковым при любом размере
+         * иконки. */
         th = cw_text(g, layout, buf, &priv->temp_color,
-                     90.0 * cw_scale, 25.0 * cw_scale, FALSE);
+                     (CW_HEAD_ICON + 22.0) * cw_scale, 25.0 * cw_scale,
+                     FALSE);
 
         fd = cw_font(priv->city_font);
         pango_layout_set_font_description(layout, fd);
@@ -2316,8 +2541,12 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
          * В оригинале координаты фиксированы (25 и 50), но там кегли
          * не меняются, и расстояние между ними постоянно; у нас
          * температура крупнее, и абсолютная точка разъезжалась. */
+        /* Город привязан к правому краю ПЛИТЫ, а не холста: при окне
+         * шире холста 127*cw_scale оказывалось за плитой и город
+         * вылезал наружу. */
         th2 = cw_text_right(g, layout, cw->place ? cw->place : priv->city,
-                            &priv->city_color, 127.0 * cw_scale,
+                            &priv->city_color,
+                            MIN(127.0 * cw_scale, right_limit),
                             25.0 * cw_scale + th + 3.4 * cw_scale);
     }
 
@@ -2330,13 +2559,15 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * Высота строки берётся у pango, иначе строки наезжали. */
     if (cw->days->len > 0 || cw->humidity > 0.0) {
         PangoFontDescription *fd = cw_font(priv->stat_font);
-        /* По центру промежутка между иконкой и температурой: иконка
-         * кончается на 70*scale, температура начинается около 90*scale,
-         * то есть между ними 20 логических единиц. Колонка шириной
-         * ~14 единиц встаёт по центру, а не вплотную к иконке — при
-         * colx=71*scale она отстояла от иконки всего на 2 px и
-         * читалась как её обломок. */
-        double colx = 73.0 * cw_scale;
+        /* Зазор до иконки — 2 логические единицы, до температуры — 6.
+         * Раньше колонка вставала по центру просвета, но при фиксированной
+         * координате; теперь обе точки считаются от CW_HEAD_ICON, и
+         * сколько бы иконка ни менялась, промежуток остаётся ровным. */
+        /* Колонка встаёт в 4 единицы правее иконки. Раньше стояла
+         * фиксированной 73*cw_scale, что было серединой просвета при
+         * иконке 72; после уменьшения иконки просвет вырос и колонка
+         * осталась прижата к старому месту, оставив пустоту. */
+        double colx = (CW_HEAD_ICON + 2.0) * cw_scale;
         /* Колонка стоит в нижней части плиты, а не у верха окна.
          * В оригинале в правой колонке строки идут так: 39..50, 61..98,
          * 110..124 (город), 134..149 — то есть под городом там пусто,
@@ -2383,7 +2614,12 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * перекрываются. Ничего не добавляем, только считаем, где начнётся
      * полоса. */
     y = 60.0 * cw_scale;
-    cw_strip_h = h - y;
+    /* Высота полосы — остаток ХОЛСТА, а не остаток окна. Раньше стояло
+     * h - y, то есть сырая высота окна: стоило сделать окно выше
+     * содержимого, и полоса получала лишние пиксели и уезжала вниз,
+     * за пределы подложки. Сейчас холст 100 логических единиц, полоса
+     * начинается на 60-й и занимает ровно оставшиеся 40. */
+    cw_strip_h = 100.0 * cw_scale - y;
 
     /* --- почасовой прогноз ---
      *
@@ -2413,7 +2649,10 @@ static void cw_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             y += 14;
         }
     } else if (priv->view == CW_VIEW_DAYS) {
-        cw_draw_days(g, priv, cw, layout, w, cw_strip_h, y);
+        /* Блок дней сам прижимается к низу холста и не вылезает за
+         * правый край плиты — обе границы он считает сам, измеренными
+         * высотами строк и right_limit. */
+        cw_draw_days(g, priv, cw, layout, w, cw_strip_h, y, right_limit);
     } else if (cw->hours->len > 0) {
         int n = (int)MIN(cw->hours->len, MAX(priv->hours_shown, 1));
         double col = (w - 2 * CW_MARGIN) / n;

@@ -15,8 +15,8 @@
 #include "common.h"
 #include "network_monitor_core.h"
 
-#define NM_DEFAULT_WIDTH 420
-#define NM_DEFAULT_HEIGHT 110
+#define NM_DEFAULT_WIDTH 217
+#define NM_DEFAULT_HEIGHT 106
 #define NM_DEFAULT_FONT "Sans 8"
 #define NM_NETDEV "/proc/net/dev"
 /* График занимает всё окно: подписи и значения рисуются поверх него,
@@ -260,13 +260,51 @@ typedef struct {
     GtkWidget *series_y_spin[NM_SERIES_MAX];
 } PrivData;
 
-static const gdouble nm_graph_bg_default[4] = {0.02, 0.03, 0.05, 1.0};
-static const gdouble nm_border_default[4] = {0.55, 0.58, 0.62, 1.0};
+/* Умолчания взяты из настроенного экземпляра wan0, чтобы новый applet
+ * появлялся уже настроенным, а не «как придумано в коде».
+ *
+ * Раньше заливка была download голубая, upload зелёная — цвета
+ * read/write из disk_monitor, чтобы два applet'а читались одинаково.
+ * Теперь цвет серии задаёт пользователь, и дефолт такой, каким
+ * получился applet после настройки. */
+static const gdouble nm_graph_bg_default[4] = {0.050980, 0.058824,
+                                                0.078431, 0.850980};
+static const gdouble nm_window_bg_default[4] = {0.0, 0.0, 0.0, 0.6};
+static const gdouble nm_border_default[4] = {0.549020, 0.580392,
+                                             0.619608, 1.0};
 static const gdouble nm_text_default[4] = {1, 1, 1, 1};
-/* download — голубой, upload — зелёный: те же цвета, что у read/write в
- * disk_monitor, чтобы два applet'а на экране читались одинаково. */
-static const gdouble nm_rx_default[4] = {0.20, 0.75, 1.0, 1.0};
-static const gdouble nm_tx_default[4] = {0.25, 0.85, 0.35, 1.0};
+static const gdouble nm_rx_default[4] = {0.25, 0.85, 0.35, 1.0};
+static const gdouble nm_tx_default[4] = {0.784314, 0.0, 0.313725, 1.0};
+
+/* Текст серии, её подпись и её число — раньше все трое по умолчанию
+ * наследовали цвет серии, то есть копировали предыдущее поле. Теперь у
+ * каждого своё значение: иначе настройки из настроенного экземпляра
+ * невозможно было бы перенести в умолчания, потому что каскад подставлял
+ * бы своё. */
+static const gdouble nm_series_text_default[NM_SERIES_MAX][4] = {
+    {0.109804, 0.443137, 0.847059, 1.0},   /* 28,113,216 */
+    {1.0, 1.0, 1.0, 1.0}                    /* 255,255,255 */
+};
+static const gdouble nm_series_label_default[NM_SERIES_MAX][4] = {
+    {0.870588, 0.866667, 0.854902, 1.0},   /* 222,221,218 */
+    {0.870588, 0.866667, 0.854902, 1.0}
+};
+static const gdouble nm_series_value_default[NM_SERIES_MAX][4] = {
+    {0.862745, 0.541176, 0.866667, 1.0},   /* 220,138,221 */
+    {0.341176, 0.890196, 0.537255, 1.0}    /* 87,227,137 */
+};
+/* Сводки: подпись, число. Свои цвета у обоих и у каждой серии. */
+static const gdouble nm_total_color_default[NM_SERIES_MAX][4] = {
+    {0.752941, 0.749020, 0.737255, 1.0},   /* 192,191,188 */
+    {0.752941, 0.749020, 0.737255, 1.0}
+};
+static const gdouble nm_total_value_default[NM_SERIES_MAX][4] = {
+    {1.0, 0.0, 0.0, 1.0},
+    {1.0, 0.0, 0.0, 1.0}
+};
+/* IP в шапке — отдельно от общего цвета текста. */
+static const gdouble nm_header_ip_default[4] = {0.960784, 0.760784,
+                                                 0.066667, 1.0};
 
 static void nm_shutdown(XsPlugin *p);
 static void nm_rebuild(PrivData *priv);
@@ -1276,12 +1314,12 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
                                                NM_DEFAULT_HEIGHT),
                          NM_MIN_WINDOW_HEIGHT, 1200);
     priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
-                                                        "corner_radius", 0),
+                                                        "corner_radius", 6),
                                 0, 200);
     /* Скругление окна не меньше скругления графика: иначе рамка окна
      * срезала бы скруглённые углы графика по диагонали. */
     priv->window_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
-                                                        "window_radius", 0),
+                                                        "window_radius", 8),
                                 0, 200);
     priv->window_radius = MAX(priv->window_radius, priv->corner_radius);
     priv->design_width = priv->width;
@@ -1319,7 +1357,7 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
 
         /* У сводок свой выбор inside/outside, раньше его не было. */
         g_snprintf(key, sizeof(key), "total%u_placement", i);
-        placement = xs_host_api()->conf_str(kf, p->name, key, "inside");
+        placement = xs_host_api()->conf_str(kf, p->name, key, "bottom");
         priv->total_placement[i] = nm_placement_from_string(placement);
         g_free(placement);
     }
@@ -1327,7 +1365,7 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         char *placement;
 
         placement = xs_host_api()->conf_str(kf, p->name, "header_placement",
-                                           "inside");
+                                           "top");
         priv->header_placement = nm_placement_from_string(placement);
         g_free(placement);
     }
@@ -1354,7 +1392,7 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
 
     priv->font = xs_host_api()->conf_str(kf, p->name, "font", NM_DEFAULT_FONT);
     priv->label_font = xs_host_api()->conf_str(kf, p->name, "label_font",
-                                               priv->font);
+                                               "Ubuntu Mono Bold 10");
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char key[32];
         /* Подпись серии. Канонический ключ — series<N>_label, его пишет
@@ -1365,13 +1403,13 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
          * вообще — до первого открытия диалога. */
         g_snprintf(key, sizeof(key), "series%u_label", i);
         priv->series_label[i] = xs_host_api()->conf_str(
-            kf, p->name, key, i == 0 ? "Down" : "Up");
+            kf, p->name, key, i == 0 ? "Down:" : "Up:");
         g_snprintf(key, sizeof(key), "series%u_label_font", i);
-        priv->series_label_font[i] = xs_host_api()->conf_str(kf, p->name,
-                                                             key, priv->font);
+        priv->series_label_font[i] = xs_host_api()->conf_str(
+            kf, p->name, key, "Sans 7");
         g_snprintf(key, sizeof(key), "series%u_value_font", i);
-        priv->series_value_font[i] = xs_host_api()->conf_str(kf, p->name,
-                                                             key, priv->font);
+        priv->series_value_font[i] = xs_host_api()->conf_str(
+            kf, p->name, key, "Terminus Bold 8");
         /* Три строки по вертикали, иначе подпись серии в режиме "снаружи"
          * накладывалась на строку интерфейса и обе исчезали:
          *   y=2  — имя интерфейса и IP
@@ -1381,19 +1419,19 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         g_snprintf(key, sizeof(key), "series%u_x", i);
         /* Вторая колонка сдвинута за разделитель: при ширине 420 первая
          * половина идёт от 2 до 212, зазор 8, вторая — от 220. */
-        priv->series_x[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                    8 + (int)i * 212);
+        priv->series_x[i] = xs_host_api()->conf_int(
+            kf, p->name, key, i == 0 ? 38 : 148);
         g_snprintf(key, sizeof(key), "series%u_y", i);
-        priv->series_y[i] = xs_host_api()->conf_int(kf, p->name, key, 21);
+        priv->series_y[i] = xs_host_api()->conf_int(kf, p->name, key, 22);
         g_snprintf(key, sizeof(key), "series%u_label_x", i);
-        priv->series_label_x[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                          8 + (int)i * 212);
+        priv->series_label_x[i] = xs_host_api()->conf_int(
+            kf, p->name, key, i == 0 ? 4 : 112);
         g_snprintf(key, sizeof(key), "series%u_label_y", i);
         priv->series_label_y[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                          12);
+                                                          22);
     }
-    priv->header_x = xs_host_api()->conf_int(kf, p->name, "header_x", 4);
-    priv->header_y = xs_host_api()->conf_int(kf, p->name, "header_y", 2);
+    priv->header_x = xs_host_api()->conf_int(kf, p->name, "header_x", 8);
+    priv->header_y = xs_host_api()->conf_int(kf, p->name, "header_y", 0);
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char key[32];
         /* Подпись и значение разделены. Старые конфиги хранили строку
@@ -1418,17 +1456,16 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         g_snprintf(key, sizeof(key), "total%u_value", i);
         priv->total_value[i] = xs_host_api()->conf_str(kf, p->name, key, "");
         g_snprintf(key, sizeof(key), "total%u_label_font", i);
-        priv->total_label_font[i] = xs_host_api()->conf_str(kf, p->name, key,
-                                                           priv->font);
+        priv->total_label_font[i] = xs_host_api()->conf_str(
+            kf, p->name, key, "Trebuchet MS 7");
         g_snprintf(key, sizeof(key), "total%u_value_font", i);
         priv->total_value_font[i] = xs_host_api()->conf_str(kf, p->name, key,
-                                                           priv->font);
+                                                            "Sans 7");
         g_snprintf(key, sizeof(key), "total%u_x", i);
-        priv->total_x[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                   4);
+        priv->total_x[i] = xs_host_api()->conf_int(
+            kf, p->name, key, i == 0 ? 5 : 113);
         g_snprintf(key, sizeof(key), "total%u_y", i);
-        priv->total_y[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                   priv->height - 12);
+        priv->total_y[i] = xs_host_api()->conf_int(kf, p->name, key, 0);
         /* Позиция и цвета числа — свои, как у подписи. */
         /* Дефолт для числа сводки — сразу ЗА подписью, иначе старый
          * конфиг (где ключа не было, число ехало в подписи по шаблону)
@@ -1448,17 +1485,16 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
          * NM_VALUE_GAP, как при разрешении наезда. */
         g_snprintf(key, sizeof(key), "total%u_value_x", i);
         priv->total_value_x[i] = xs_host_api()->conf_int(
-            kf, p->name, key, 8 + (i == 0 ? 52 : 45) + NM_VALUE_GAP);
+            kf, p->name, key, i == 0 ? 64 : 220);
         g_snprintf(key, sizeof(key), "total%u_value_y", i);
-        priv->total_value_y[i] = xs_host_api()->conf_int(kf, p->name, key,
-                                                         priv->height - 12);
+        priv->total_value_y[i] = xs_host_api()->conf_int(kf, p->name, key, 0);
     }
 
     nm_read_color(priv, "graph_background_color", nm_graph_bg_default,
                   priv->graph_bg);
     /* Фон окна по умолчанию тот же, что у графика: пока внешних подписей
      * нет, разницы не видно, и пользователь ничего не настраивает зря. */
-    nm_read_color(priv, "window_background_color", nm_graph_bg_default,
+    nm_read_color(priv, "window_background_color", nm_window_bg_default,
                   priv->window_bg);
     nm_read_color(priv, "border_color", nm_border_default, priv->border);
     nm_read_color(priv, "text_color", nm_text_default, priv->text_color);
@@ -1519,15 +1555,11 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
      *
      * Ключа не было в UI, и в nm_init он не читался, так что ветка
      * обработчика была мёртвой. Теперь она живая. */
-    memcpy(priv->series_text_color[0], priv->series_color[0],
-           sizeof(gdouble) * 4);
-    memcpy(priv->series_text_color[1], priv->series_color[1],
-           sizeof(gdouble) * 4);
     for (i = 0; i < NM_SERIES_MAX; i++) {
         char text_key[40];
 
         g_snprintf(text_key, sizeof(text_key), "series%u_text_color", i);
-        nm_read_color(priv, text_key, priv->series_color[i],
+        nm_read_color(priv, text_key, nm_series_text_default[i],
                       priv->series_text_color[i]);
     }
 
@@ -1538,10 +1570,10 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         char key[40];
 
         g_snprintf(key, sizeof(key), "series%u_label_color", i);
-        nm_read_color(priv, key, priv->series_text_color[i],
+        nm_read_color(priv, key, nm_series_label_default[i],
                       priv->series_label_color[i]);
         g_snprintf(key, sizeof(key), "series%u_value_color", i);
-        nm_read_color(priv, key, priv->series_text_color[i],
+        nm_read_color(priv, key, nm_series_value_default[i],
                       priv->series_value_color[i]);
     }
 
@@ -1551,20 +1583,20 @@ static int nm_init(XsPlugin *p, GKeyFile *kf)
         char key[40];
 
         g_snprintf(key, sizeof(key), "total%u_text_color", i);
-        nm_read_color(priv, key, priv->series_text_color[i],
+        nm_read_color(priv, key, nm_series_text_default[i],
                       priv->total_text_color[i]);
         g_snprintf(key, sizeof(key), "total%u_color", i);
-        nm_read_color(priv, key, priv->total_text_color[i],
+        nm_read_color(priv, key, nm_total_color_default[i],
                       priv->total_color[i]);
         g_snprintf(key, sizeof(key), "total%u_value_color", i);
-        nm_read_color(priv, key, priv->total_text_color[i],
+        nm_read_color(priv, key, nm_total_value_default[i],
                       priv->total_value_color[i]);
     }
 
     /* Имя интерфейса и адрес — два элемента, у каждого свой цвет. */
     nm_read_color(priv, "header_ifname_color", priv->text_color,
                   priv->header_ifname_color);
-    nm_read_color(priv, "header_ip_color", priv->text_color,
+    nm_read_color(priv, "header_ip_color", nm_header_ip_default,
                   priv->header_ip_color);
 
     g_key_file_set_string(kf, p->name, "ifname", priv->ifname);
