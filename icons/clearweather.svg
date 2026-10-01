@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Облако с дождём: аплет ClearWeather -->
+  <g>
+    <!-- тень под облаком -->
+    <ellipse cx="30" cy="47" rx="15" ry="3.5" fill="#191919" opacity="0.16"/>
+    <!-- облако: три перекрывающихся круга + основание -->
+    <g fill="#EAF4FB" stroke="#5382BA" stroke-width="2" stroke-linejoin="round">
+      <circle cx="22" cy="30" r="10"/>
+      <circle cx="33" cy="26" r="12"/>
+      <circle cx="43" cy="32" r="8.5"/>
+      <rect x="14" y="31" width="36" height="11" rx="5.5"/>
+    </g>
+    <!-- блик на облаке -->
+    <ellipse cx="30" cy="20" rx="7" ry="3" fill="#ffffff" opacity="0.75"/>
+    <!-- капли дождя -->
+    <g stroke="#5382BA" stroke-width="2.6" stroke-linecap="round">
+      <line x1="23" y1="47" x2="21" y2="53"/>
+      <line x1="32" y1="47" x2="30" y2="53"/>
+      <line x1="41" y1="47" x2="39" y2="53"/>
+    </g>
+  </g>
+</svg>
