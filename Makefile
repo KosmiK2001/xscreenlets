@@ -202,7 +202,14 @@ install: all
 	$(INSTALL) -m 0755 $(TARGET_DISK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/disk_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_NETWORK_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/network_monitor.so
 	$(INSTALL) -m 0755 $(TARGET_SENSORS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/sensors.so
-	$(INSTALL) -m 0755 $(TARGET_CONLOG_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/conlog.so
+	@# conlog НЕ входит в цель all (исходники есть, но он собирается
+	@# отдельно), поэтому build/conlog.so обычно отсутствует - и install
+	@# на нём падал, не доходя до остального. Ставим только если файл
+	@# реально есть. Минус перед install делает отсутствие не ошибкой.
+	@# ВНИМАНИЕ, ЛОВУШКА (см. CONLOG-FUNCTIONALITY.md): тяжёлый conlog.so
+	@# откатывает урезанный апплет, который иначе ест ~90% CPU.
+	-[ -f $(TARGET_CONLOG_PLUGIN) ] && \
+		$(INSTALL) -m 0755 $(TARGET_CONLOG_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/conlog.so || true
 	$(INSTALL) -m 0755 $(TARGET_PROCESS_PLUGIN) $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins/process_list.so
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons
 	$(INSTALL) -m 0644 icons/clearrss.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/clearrss.svg
@@ -210,10 +217,19 @@ install: all
 	$(INSTALL) -m 0644 icons/memory_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/memory_monitor.svg
 	$(INSTALL) -m 0644 icons/disk_monitor.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/disk_monitor.svg
 	$(INSTALL) -m 0644 icons/process_list.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/icons/process_list.svg
-	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default
-	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple
-	$(INSTALL) -m 0644 themes/clearrss/default/background.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/default/background.svg
-	$(INSTALL) -m 0644 themes/clearrss/Simple/background.svg $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/Simple/background.svg
+	@# Темы ставим ЦИКЛОМ по каталогам, а не списком файлов. Перечисление
+	@# перечислением уже приводило к потере: тени кнопок (shadow.svg,
+	@# shadow_mid.svg, button_bg.svg) и Simple/shadow.svg были закоммичены,
+	@# но в install попадал только background.svg - и на свежей машине
+	@# апплет выходил без теней. Цикл добавляет новые файлы сам.
+	@for t in themes/clearrss/*/; do \
+		name=$$(basename $$t); \
+		$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/$$name; \
+		for f in $$t*.svg; do \
+			[ -f "$$f" ] || continue; \
+			$(INSTALL) -m 0644 "$$f" $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/$$name/; \
+		done; \
+	done
 
 run: all
 	@echo "To run the daemon: ./$(TARGET_DAEMON)"
