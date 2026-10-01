@@ -652,10 +652,24 @@ static void sen_recalc_auto_size(SenPriv *priv)
     if (priv->height_auto) {
         int step = sen_effective_step(pcr, priv->line_step,
                                       priv->label_font, priv->value_font);
-        /* +1 на последнюю строку: базовая линия последней строки стоит
-         * на first_row_y + (n-1)*step, а под ней ещё descender. */
-        int need = priv->first_row_y + (int) priv->rows->len * step
-                 + SEN_MARGIN * 2;
+        int text_h = MAX(sen_row_height(pcr, priv->label_font),
+                         sen_row_height(pcr, priv->value_font));
+        int last_top = priv->first_row_y
+                     + ((int) priv->rows->len - 1) * step;
+        /* Высота содержимого, а не число строк, умноженное на шаг.
+         *
+         * Раньше здесь стояло n*step + SEN_MARGIN*2, то есть под
+         * последней строкой резервировался ЦЕЛЫЙ шаг плюс два поля.
+         * Сверху поля уже нет — там first_row_y, — так что снизу
+         * получалось вдвое больше, чем сверху, и при step больше высоты
+         * текста пустое место ещё и росло вместе с шагом. Видно было
+         * как «после последней строки пустое поле»: при line_step=27 и
+         * двух строках под текстом оставалось 23 px, из которых
+         * пользователю нужно было 6.
+         *
+         * Теперь: последняя строка начинается на last_top, занимает
+         * text_h, снизу одно поле. */
+        int need = last_top + text_h + SEN_MARGIN;
 
         /* Растёт И уменьшается: снял строки — окно должно сжаться, иначе
          * пользователь получит пустое поле внизу, решив, что это норма. */

@@ -316,7 +316,14 @@ SensorList *sensor_list_read(const char *root)
     for (guint i = 0; i < hwmons->len; i++) {
         const char *dirname = g_ptr_array_index(hwmons, i);
         char *dirpath = g_build_filename(root, dirname, NULL);
-        char *chip = read_text(g_build_filename(dirpath, "name", NULL));
+        /* g_build_filename возвращает новую строку, а read_text() читает
+         * файл в СВОЙ буфер и возвращает его — переданный путь он не
+         * использует и не освобождает. Раньше он уходил в никуда, и на
+         * каждом тике сенсоров, для каждого hwmon, утекало ~134 байта:
+         * heaptrack показал это как 5.8 MB за 3 часа, 44% всего роста. */
+        char *name_path = g_build_filename(dirpath, "name", NULL);
+        char *chip = read_text(name_path);
+        g_free(name_path);
         char *dev_path = NULL;
         char *device = read_device_name(dirpath, &dev_path);
         GPtrArray *channels;
