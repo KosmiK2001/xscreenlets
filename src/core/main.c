@@ -5,6 +5,7 @@
 #endif
 
 #include "common.h"
+#include "i18n.h"
 
 
 /* Каталоги, задаваемые при сборке. ebuild передаёт их через EXTRA_CFLAGS
@@ -698,6 +699,10 @@ int main(int argc, char **argv)
 #endif
 
     gtk_init(&argc, &argv);
+    /* Переводы: до создания любых окон и до загрузки плагинов.
+     * Плагины - отдельные .so, но gettext хранит состояние в процессе,
+     * поэтому одного вызова достаточно для всех. */
+    xs_i18n_init();
     xs_core_init(g_conf_path);
     xs_tray_init();
     load_plugin_modules();

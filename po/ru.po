@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 00:00+0300\n"
+"POT-Creation-Date: 2026-10-02 01:16+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -17,140 +17,220 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 "
-"&& (n%100<10 || n%100>=20) ? 1 : 2);\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
+#: src/widgets/acpi_battery.c:459
 msgid "ACPI Battery"
 msgstr "Батарея"
 
+#: src/widgets/calendar.c:849
 msgid "Calendar specific options"
 msgstr "Настройки календаря"
 
+#: src/widgets/calendar.c:928
 msgid "iCalendar"
 msgstr "iCalendar"
 
+#: src/widgets/clearrss.c:2203 src/widgets/clearrss.c:2252
 msgid "Header"
 msgstr "Заголовок"
 
+#: src/widgets/clearrss.c:2301
 msgid "Text"
 msgstr "Текст"
 
+#: src/widgets/clearrss.c:2433
 msgid "Rss"
 msgstr "Лента"
 
+#: src/widgets/clearweather.c:3113
 msgid "Weather"
 msgstr "Погода"
 
+#: src/widgets/clock.c:941
 msgid "Alarm-Time"
 msgstr "Время будильника"
 
-msgid ""
-"Arguments are passed to the process directly, without a shell.\\n"
-msgstr ""
-"Аргументы передаются процессу напрямую, без оболочки.\\n"
+#: src/widgets/conlog.c:1410
+msgid "Arguments are passed to the process directly, without a shell.\n"
+msgstr "Аргументы передаются процессу напрямую, без оболочки.\n"
 
+#: src/widgets/conlog.c:1422
 msgid "Window title (optional)"
 msgstr "Заголовок окна (необязательно)"
 
+#: src/widgets/conlog.c:1466
 msgid "Y offset: a negative value pulls the label up."
 msgstr "Смещение по Y: отрицательное значение подтягивает метку вверх."
 
+#: src/widgets/conlog.c:1553
 msgid "Conlog"
 msgstr "Conlog"
 
+#: src/widgets/cpu_monitor.c:1207
 msgid "CPU Monitor"
 msgstr "Монитор ЦП"
 
+#: src/widgets/disk_monitor.c:1335
 msgid "Disk Monitor"
 msgstr "Монитор диска"
 
+#: src/widgets/disk_monitor_core.c:53
 msgid "X"
 msgstr "X"
 
+#: src/widgets/disk_monitor_core.c:60
 msgid "Y"
 msgstr "Y"
 
+#: src/widgets/disk_monitor_core.c:200
 msgid "Disk"
 msgstr "Диск"
 
+#: src/widgets/frame_launcher.c:827
 msgid "Applet type for the new guest:"
 msgstr "Тип апплета для нового гостя:"
 
+#: src/widgets/frame_launcher.c:917
 msgid "Running applet (main_daemon):"
 msgstr "Запущенный апплет (main_daemon):"
 
+#: src/widgets/frame_launcher.c:1175
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
-msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
+msgstr ""
+"Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 
+#: src/widgets/frame_launcher.c:1182
 msgid "Frame"
 msgstr "Рамка"
 
+#: src/widgets/launcher.c:837
 msgid "Some options related to the Launcher-Screenlet."
 msgstr "Параметры апплета Launcher."
 
+#: src/widgets/launcher.c:843
 msgid "Starter"
 msgstr "Запуск"
 
+#: src/widgets/memory_monitor.c:694
 msgid "Memory Monitor"
 msgstr "Монитор памяти"
 
+#: src/widgets/network_monitor.c:2362 src/widgets/network_monitor.c:2414
+# Разделитель "скачано/всего" в сетевом мониторе. Не переводится:
+# это символ, а не слово.
+msgid "/"
+msgstr "/"
+
+#: src/widgets/network_monitor.c:2749
 msgid "Name"
 msgstr "Имя"
 
+#: src/widgets/network_monitor.c:2756
 msgid "IP"
 msgstr "IP"
 
+#: src/widgets/network_monitor.c:2877
 msgid "Network Monitor"
 msgstr "Сетевой монитор"
 
+#: src/widgets/process_list.c:1206
 msgid "Process List"
 msgstr "Список процессов"
 
+#: src/widgets/sensors.c:1903
 msgid "No sensors found"
 msgstr "Сенсоры не найдены"
 
+#: src/widgets/sensors.c:2190
 msgid "Sensors"
 msgstr "Сенсоры"
 
+#: src/core/applet_manager.c:903
 msgid "Applets"
 msgstr "Апплеты"
 
+#: src/core/applet_manager.c:906
 msgid "Running"
 msgstr "Запущенные"
 
+#: src/core/applet_manager.c:909
 msgid "Configs"
 msgstr "Конфигурации"
 
+#: src/core/common.c:1450 src/core/tray.c:266
 msgid "About"
 msgstr "О программе"
 
+#: src/core/common.c:1468
 msgid "Scale"
 msgstr "Масштаб"
 
+#: src/core/common.c:1495
 msgid "Opacity"
 msgstr "Прозрачность"
 
+#: src/core/common.c:1507
 msgid "X-Position"
 msgstr "Позиция по X"
 
+#: src/core/common.c:1523
 msgid "Y-Position"
 msgstr "Позиция по Y"
 
+#: src/core/common.c:1546
 msgid "User label"
 msgstr "Метка"
 
+#: src/core/common.c:1564 src/core/common.c:1713
 msgid "Window"
 msgstr "Окно"
 
+#: src/core/common.c:1570
 msgid "Options"
 msgstr "Параметры"
 
+#: src/core/common.c:1584
 msgid ""
-"Themes allow you to easily switch the appearance of your Screenlets. On "
-"this page you find a list of all available themes for this Screenlet."
+"Themes allow you to easily switch the appearance of your Screenlets. On this "
+"page you find a list of all available themes for this Screenlet."
 msgstr ""
 "Темы позволяют легко менять внешний вид апплетов. На этой странице "
 "перечислены все доступные темы для данного апплета."
 
+#: src/core/common.c:1647
 msgid "Themes"
 msgstr "Темы"
+
+#: src/core/common.c:1694
+msgid "Size"
+msgstr "Размер"
+
+#: src/core/common.c:1738
+msgid "Properties..."
+msgstr "Свойства..."
+
+#: src/core/common.c:1741
+msgid "Info..."
+msgstr "Сведения..."
+
+#: src/core/common.c:1764 src/core/tray.c:267
+msgid "Quit"
+msgstr "Выход"
+
+#: src/core/tray.c:184
+msgid "Running Instances"
+msgstr "Запущенные апплеты"
+
+#: src/core/tray.c:255
+msgid "Applet management"
+msgstr "Управление апплетами"
+
+#: src/core/tray.c:263
+msgid "Restart Applets"
+msgstr "Перезапустить апплеты"
+
+#: src/core/tray.c:264
+msgid "Stop all Applets"
+msgstr "Остановить все апплеты"

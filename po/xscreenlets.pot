@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 00:50+0300\n"
+"POT-Creation-Date: 2026-10-02 01:16+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -153,7 +153,7 @@ msgstr ""
 msgid "Configs"
 msgstr ""
 
-#: src/core/common.c:1450
+#: src/core/common.c:1450 src/core/tray.c:266
 msgid "About"
 msgstr ""
 
@@ -177,7 +177,7 @@ msgstr ""
 msgid "User label"
 msgstr ""
 
-#: src/core/common.c:1564
+#: src/core/common.c:1564 src/core/common.c:1713
 msgid "Window"
 msgstr ""
 
@@ -193,4 +193,36 @@ msgstr ""
 
 #: src/core/common.c:1647
 msgid "Themes"
+msgstr ""
+
+#: src/core/common.c:1694
+msgid "Size"
+msgstr ""
+
+#: src/core/common.c:1738
+msgid "Properties..."
+msgstr ""
+
+#: src/core/common.c:1741
+msgid "Info..."
+msgstr ""
+
+#: src/core/common.c:1764 src/core/tray.c:267
+msgid "Quit"
+msgstr ""
+
+#: src/core/tray.c:184
+msgid "Running Instances"
+msgstr ""
+
+#: src/core/tray.c:255
+msgid "Applet management"
+msgstr ""
+
+#: src/core/tray.c:263
+msgid "Restart Applets"
+msgstr ""
+
+#: src/core/tray.c:264
+msgid "Stop all Applets"
 msgstr ""

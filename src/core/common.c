@@ -1691,7 +1691,7 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
         p->ops->menu(p, GTK_MENU(menu));
 
     /* Size — оригинальный список 16 значений */
-    item = gtk_menu_item_new_with_label("Size");
+    item = gtk_menu_item_new_with_label(_("Size"));
     sub = gtk_menu_new();
     {
         static const double sizes[] = {0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
@@ -1710,7 +1710,7 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
     /* Window — как в оригинале: Lock/Sticky/Widget/Keep above/Keep below */
-    item = gtk_menu_item_new_with_label("Window");
+    item = gtk_menu_item_new_with_label(_("Window"));
     sub = gtk_menu_new();
     {
         static const struct { const char *label; const char *what; } wins[] = {
@@ -1735,10 +1735,10 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
     xs_core_add_separator(menu);
-    mi = gtk_menu_item_new_with_label("Properties...");
+    mi = gtk_menu_item_new_with_label(_("Properties..."));
     xs_core_menu_connect_cmd(mi, p, "properties");
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
-    mi = gtk_menu_item_new_with_label("Info...");
+    mi = gtk_menu_item_new_with_label(_("Info..."));
     xs_core_menu_connect_cmd(mi, p, "about");
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
 
@@ -1761,7 +1761,7 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
     }
 
     xs_core_add_separator(menu);
-    mi = gtk_menu_item_new_with_label("Quit");
+    mi = gtk_menu_item_new_with_label(_("Quit"));
     xs_core_menu_connect_cmd(mi, p, "quit");
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
 

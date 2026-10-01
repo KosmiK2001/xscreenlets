@@ -10,6 +10,7 @@
 #include <gtk/gtk.h>
 #include <glib.h>
 
+#include "i18n.h"
 static GtkStatusIcon *g_tray = NULL;
 static GtkMenu *g_menu = NULL;
 
@@ -180,7 +181,7 @@ void xs_tray_add_plugin(XsPlugin *p)
         g_list_free(children);
     }
     if (!run_mi) {
-        run_mi = gtk_menu_item_new_with_label("Running Instances");
+        run_mi = gtk_menu_item_new_with_label(_("Running Instances"));
         sub = gtk_menu_new();
         gtk_menu_item_set_submenu(GTK_MENU_ITEM(run_mi), sub);
         gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), run_mi);
@@ -251,8 +252,7 @@ void xs_tray_rebuild(void)
 
     /* --- Applet management: окно с тремя вкладками --- */
     {
-        GtkWidget *am = gtk_menu_item_new_with_label(
-            "Applet management");
+        GtkWidget *am = gtk_menu_item_new_with_label(_("Applet management"));
 
         g_signal_connect(am, "activate",
                          G_CALLBACK(on_applet_mgmt_activate), NULL);
@@ -260,11 +260,11 @@ void xs_tray_rebuild(void)
     }
 
     GtkWidget *sep = gtk_separator_menu_item_new();
-    GtkWidget *restart = gtk_menu_item_new_with_label("Restart Applets");
-    GtkWidget *stopall = gtk_menu_item_new_with_label("Stop all Applets");
+    GtkWidget *restart = gtk_menu_item_new_with_label(_("Restart Applets"));
+    GtkWidget *stopall = gtk_menu_item_new_with_label(_("Stop all Applets"));
     GtkWidget *sep2 = gtk_separator_menu_item_new();
-    GtkWidget *about = gtk_menu_item_new_with_label("About");
-    GtkWidget *quit = gtk_menu_item_new_with_label("Quit");
+    GtkWidget *about = gtk_menu_item_new_with_label(_("About"));
+    GtkWidget *quit = gtk_menu_item_new_with_label(_("Quit"));
 
     g_signal_connect(restart, "activate", G_CALLBACK(on_restart_activate),
                      NULL);

@@ -263,6 +263,16 @@ $(BUILD_DIR)/test_i18n_window: tests/test_i18n_window.c src/core/i18n.c \
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_i18n_window.c \
 		src/core/i18n.c $(LDFLAGS_PLUGIN)
 
+# Проверка пунктов меню: трей (tray.c) и контекстное меню апплета
+# (common.c). Отдельный тест, потому что это два разных файла, и жалобы
+# на них приходили отдельно: свойства перевелись, а меню осталось
+# английским.
+$(BUILD_DIR)/test_i18n_menu: tests/test_i18n_menu.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_i18n_menu.c
+
+test-i18n-menu: $(BUILD_DIR)/test_i18n_menu locale
+	@$(BUILD_DIR)/test_i18n_menu $(BUILD_DIR)/locale
+
 test-i18n-window: $(BUILD_DIR)/test_i18n_window locale
 	@echo "Открылось окно с переводами. Закройте его, когда посмотрите."
 	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_i18n_window
