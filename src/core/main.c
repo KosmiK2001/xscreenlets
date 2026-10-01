@@ -11,6 +11,9 @@
 #include <gtk/gtk.h>
 #include <glib.h>
 #include <gmodule.h>
+#ifdef XS_MEM_DEBUG
+#include <malloc.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -147,6 +150,153 @@ static gboolean on_sighup(gpointer data)
     xs_core_reload();
     return G_SOURCE_CONTINUE;
 }
+
+#ifdef XS_MEM_DEBUG
+/* Отладочный крючок для диагностики памяти. Собирается ТОЛЬКО с
+ * -DXS_MEM_DEBUG и в обычную сборку не попадает: обработчик не
+ * вешается и malloc_trim никто не зовёт.
+ *
+ * Зачем: malloc_trim(0) отдаёт ОС свободные страницы кучи, которые
+ * glibc иначе держит. Если после него RSS падает почти к стартовому —
+ * память не утекает, а лежит во внутренних кэшах и фрагментации. Если
+ * остаётся высоким — это настоящая утечка, объекты живые, и дальше
+ * нужна атрибуция по апплетам. Один сигнал отвечает на вопрос, на
+ * который иначе нужен суточный замер. */
+static guint g_sigusr1_source_id = 0;
+
+static gsize xs_mem_rss_bytes(void)
+{
+	char buf[256];
+	gsize total = 0, resident = 0;
+	int fd;
+	ssize_t n;
+
+	fd = open("/proc/self/statm", O_RDONLY);
+	if (fd < 0)
+		return 0;
+	n = read(fd, buf, sizeof(buf) - 1);
+	close(fd);
+	if (n <= 0)
+		return 0;
+	buf[n] = '\0';
+	if (sscanf(buf, "%" G_GSIZE_FORMAT " %" G_GSIZE_FORMAT,
+	           &total, &resident) != 2)
+		return 0;
+	return resident * (gsize)sysconf(_SC_PAGESIZE);
+}
+
+static gboolean on_sigusr1(gpointer data)
+{
+	gsize before, after;
+
+	(void)data;
+	before = xs_mem_rss_bytes();
+	malloc_trim(0);
+	after = xs_mem_rss_bytes();
+	xs_log_impl("SIGUSR1: malloc_trim(0) — RSS %.1f -> %.1f MB, ОС вернулось %.1f MB",
+	            before / 1048576.0, after / 1048576.0,
+	            (before > after ? before - after : 0) / 1048576.0);
+	return G_SOURCE_CONTINUE;
+}
+
+static guint g_mem_poll_source_id = 0;
+
+/* Периодический замер RSS.
+ *
+ * Зачем он нужен рядом с SIGUSR1: сигнал снимает память по команде, а за
+ * ночь никто не пошлёт SIGUSR1 - демон работает без присмотра часами, и
+ * кривая просто не появится. Таймер же сам пишет замеры в лог, и утром
+ * получается готовый график роста без чьего-либо участия.
+ *
+ * Сравниваются два числа: RSS "как есть" и RSS после malloc_trim(0).
+ * Разница между ними и есть мусор в куче, который glib держит у себя.
+ * Если trim стабильно возвращает десятки мегабайт - память не течёт, она
+ * лежит во внутренних кэшах. Если после trim RSS продолжает расти -
+ * это настоящая утечка, объекты живые.
+ */
+/* Интервал замера памяти, секунды. XSCREENLETS_MEM_POLL задаёт его извне. */
+static guint g_mem_poll_interval(void)
+{
+	const char *e = g_getenv("XSCREENLETS_MEM_POLL");
+	gint64 v = e ? g_ascii_strtoll(e, NULL, 10) : 300;
+
+	if (v < 5 || v > 86400)
+		return 300;
+	return (guint)v;
+}
+
+static gboolean on_mem_poll(gpointer data)
+{
+	gsize before, after;
+	struct mallinfo2 mi;
+
+	(void)data;
+	before = xs_mem_rss_bytes();
+	/* Снимок ДО trim: что реально занято (uordblks) против того, что
+	 * malloc считает свободным внутри арен (fordblks). */
+	mi = mallinfo2();
+	malloc_trim(0);
+	after = xs_mem_rss_bytes();
+	/* uordblks - байты, ВЫДЕЛЕННЫЕ живьём и не освобождённые. Если он
+	 * растёт так же, как RSS, то растущая память удерживается объектами.
+	 * Если он стоит, а растёт только RSS - это арены и фрагментация, то
+	 * есть ничего не удерживает, память просто не возвращается ОС.
+	 * Разница malloc_trim (before - after) этого не различает - она
+	 * показывает только свободный хвост кучи. */
+	xs_log_impl("MEM: RSS %.1f MB, после trim %.1f MB, в куче %.1f MB | "
+	            "uordblks %.1f MB (занято), fordblks %.1f MB (свободно), "
+	            "arena %.1f MB, mmap %.1f MB",
+	            before / 1048576.0, after / 1048576.0,
+	            (before > after ? before - after : 0) / 1048576.0,
+	            (double)mi.uordblks / 1048576.0,
+	            (double)mi.fordblks / 1048576.0,
+	            (double)mi.arena / 1048576.0,
+	            (double)mi.hblkhd / 1048576.0);
+	return G_SOURCE_CONTINUE;
+}
+
+static void setup_sigusr1_handler(void)
+{
+	if (g_sigusr1_source_id) {
+		g_source_remove(g_sigusr1_source_id);
+		g_sigusr1_source_id = 0;
+	}
+	g_sigusr1_source_id = g_unix_signal_add(SIGUSR1, on_sigusr1, NULL);
+	if (!g_sigusr1_source_id)
+		xs_log_impl("cannot install SIGUSR1 handler");
+
+	/* Замер каждые 5 минут. Чаще - лог распухнет и за ночь съест диск;
+	 * реже - по кривой нельзя отличить утечку от разового рабочего набора.
+	 * malloc_trim здесь дорогой (обходит кучу), поэтому интервал
+	 * сознательно не меньше нескольких минут. */
+	if (g_mem_poll_source_id) {
+		g_source_remove(g_mem_poll_source_id);
+		g_mem_poll_source_id = 0;
+	}
+	/* Интервал задаётся переменной: для короткого A/B-замера в 1 час
+	 * нужно разрезать замеры (5 минут дали бы всего 12 точек - регрессия
+	 * по ним ненадёжна), а для многочасового прогона 300 с как раз
+	 * правильный порядок. */
+	g_mem_poll_source_id = g_timeout_add_seconds(
+	    g_mem_poll_interval(), on_mem_poll, NULL);
+	if (!g_mem_poll_source_id)
+		xs_log_impl("cannot start memory poll timer");
+	else
+		xs_log_impl("memory poll: every %us", g_mem_poll_interval());
+}
+
+static void uninstall_sigusr1_handler(void)
+{
+	if (g_sigusr1_source_id) {
+		g_source_remove(g_sigusr1_source_id);
+		g_sigusr1_source_id = 0;
+	}
+	if (g_mem_poll_source_id) {
+		g_source_remove(g_mem_poll_source_id);
+		g_mem_poll_source_id = 0;
+	}
+}
+#endif /* XS_MEM_DEBUG */
 
 static void setup_sighup_handler(void)
 {
@@ -513,6 +663,9 @@ int main(int argc, char **argv)
 
     /* SIGHUP reload setup */
     setup_sighup_handler();
+#ifdef XS_MEM_DEBUG
+    setup_sigusr1_handler();
+#endif
 
     gtk_init(&argc, &argv);
     xs_core_init(g_conf_path);
@@ -526,6 +679,9 @@ int main(int argc, char **argv)
     xs_core_shutdown_all();
     xs_tray_shutdown();
     uninstall_sighup_handler();
+#ifdef XS_MEM_DEBUG
+    uninstall_sigusr1_handler();
+#endif
     free_loaded_modules();
     g_free(g_conf_path);
     g_free(g_plugdir);

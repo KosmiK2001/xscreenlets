@@ -5,6 +5,14 @@ CC = gcc
 # аварийный сигнал пишет стек в файл и завершает процесс — в обычной
 # сборке пользователю это не нужно. Включать при расследовании падений.
 CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0 json-glib-1.0 gio-2.0)
+
+# Дополнительные флаги сборки задаются снаружи:
+#   make EXTRA_CFLAGS="-DXS_MEM_DEBUG -O0 -g3" all
+# Дописываются В КОНЕЦ, поэтому перекрывают базовые -O2/-g3.
+# Зачем нужно: CFLAGS переопределён через =, и передать флаги в командной
+# строке (make CFLAGS=...) нельзя - пришлось бы заново перечислять все
+# -I и pkg-config, что легко рассинхронизировать с остальным Makefile.
+EXTRA_CFLAGS =
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
 LDFLAGS_RSS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 libxml-2.0) -lm
@@ -61,108 +69,108 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(TARGET_DAEMON): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON)
 
 $(TARGET_PLUGIN): $(BUILD_DIR) $(OBJS_CLOCK)
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_CLOCK) $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ $(OBJS_CLOCK) $(LDFLAGS_PLUGIN)
 
 $(TARGET_CAL_PLUGIN): $(BUILD_DIR) $(OBJS_CALENDAR)
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_CALENDAR) $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ $(OBJS_CALENDAR) $(LDFLAGS_PLUGIN)
 
 $(TARGET_LAU_PLUGIN): $(BUILD_DIR) $(OBJS_LAUNCHER)
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_LAUNCHER) $(LDFLAGS_PLUGIN) $(shell pkg-config --libs gdk-pixbuf-2.0)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ $(OBJS_LAUNCHER) $(LDFLAGS_PLUGIN) $(shell pkg-config --libs gdk-pixbuf-2.0)
 
 $(TARGET_FL_PLUGIN): $(BUILD_DIR) $(OBJS_FL)
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_FL) $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ $(OBJS_FL) $(LDFLAGS_PLUGIN)
 
 $(TARGET_RSS_PLUGIN): $(BUILD_DIR) $(OBJS_RSS)
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $(OBJS_RSS) $(LDFLAGS_RSS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ $(OBJS_RSS) $(LDFLAGS_RSS_PLUGIN)
 
 $(TARGET_CPU_PLUGIN): $(BUILD_DIR) build/cpu_monitor.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/cpu_monitor.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/cpu_monitor.o $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/memory_monitor_core.o: src/widgets/memory_monitor_core.c src/widgets/memory_monitor_core.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD_DIR)/memory_monitor.o: src/widgets/memory_monitor.c src/widgets/memory_monitor_core.h include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(TARGET_MEMORY_PLUGIN): $(BUILD_DIR) build/memory_monitor.o build/memory_monitor_core.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/memory_monitor.o build/memory_monitor_core.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/memory_monitor.o build/memory_monitor_core.o $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/disk_monitor_core.o: src/widgets/disk_monitor_core.c src/widgets/disk_monitor_core.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD_DIR)/disk_monitor.o: src/widgets/disk_monitor.c src/widgets/disk_monitor_core.h include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(TARGET_DISK_PLUGIN): $(BUILD_DIR) build/disk_monitor.o build/disk_monitor_core.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/disk_monitor.o build/disk_monitor_core.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/disk_monitor.o build/disk_monitor_core.o $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/network_monitor_core.o: src/widgets/network_monitor_core.c src/widgets/network_monitor_core.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD_DIR)/network_monitor.o: src/widgets/network_monitor.c src/widgets/network_monitor_core.h include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(TARGET_NETWORK_PLUGIN): $(BUILD_DIR) build/network_monitor.o build/network_monitor_core.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/network_monitor.o build/network_monitor_core.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/network_monitor.o build/network_monitor_core.o $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/sensors_core.o: src/widgets/sensors_core.c src/widgets/sensors_core.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 $(BUILD_DIR)/sensors_nvml.o: src/widgets/sensors_nvml.c src/widgets/sensors_nvml.h src/widgets/sensors_core.h
 $(BUILD_DIR)/sensors.o: src/widgets/sensors.c src/widgets/sensors_core.h src/widgets/sensors_nvml.h include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 $(TARGET_SENSORS_PLUGIN): $(BUILD_DIR) build/sensors.o build/sensors_core.o build/sensors_nvml.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/sensors.o build/sensors_core.o build/sensors_nvml.o $(LDFLAGS_PLUGIN) -ldl
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/sensors.o build/sensors_core.o build/sensors_nvml.o $(LDFLAGS_PLUGIN) -ldl
 
 $(BUILD_DIR)/conlog_core.o: src/widgets/conlog_core.c src/widgets/conlog_core.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 $(BUILD_DIR)/conlog.o: src/widgets/conlog.c src/widgets/conlog_core.h include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 $(TARGET_CONLOG_PLUGIN): $(BUILD_DIR) build/conlog.o build/conlog_core.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/conlog.o build/conlog_core.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/conlog.o build/conlog_core.o $(LDFLAGS_PLUGIN)
 
 # Урезанная версия conlog: только вывод строк, без conlog_core.
 # Что убрано и как возвращать — src/widgets/CONLOG-FUNCTIONALITY.md.
 # conlog.c и conlog_core.c остаются на месте нетронутыми.
 $(BUILD_DIR)/clearweather.o: src/widgets/clearweather.c include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 $(TARGET_WEATHER_PLUGIN): $(BUILD_DIR) build/clearweather.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/clearweather.o $(LDFLAGS_WEATHER_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/clearweather.o $(LDFLAGS_WEATHER_PLUGIN)
 
 $(BUILD_DIR)/conlog_min.o: src/widgets/conlog_min.c include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 $(BUILD_DIR)/conlog_min.so: $(BUILD_DIR) build/conlog_min.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/conlog_min.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/conlog_min.o $(LDFLAGS_PLUGIN)
 
 $(TARGET_PROCESS_PLUGIN): $(BUILD_DIR) build/process_list.o build/process_list_core.o
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ build/process_list.o build/process_list_core.o $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -shared -fPIC -o $@ build/process_list.o build/process_list_core.o $(LDFLAGS_PLUGIN)
 $(TARGET_STANDALONE): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
 
 # Pattern rules for object files (пересборка при изменении заголовков)
 $(BUILD_DIR)/%.o: src/core/%.c include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: src/widgets/%.c include/xs_api.h src/core/common.h
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD_DIR)/test_memory_monitor: tests/test_memory_monitor.c src/widgets/memory_monitor_core.c src/widgets/memory_monitor_core.h
-	$(CC) $(CFLAGS) -o $@ tests/test_memory_monitor.c src/widgets/memory_monitor_core.c $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_memory_monitor.c src/widgets/memory_monitor_core.c $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/test_disk_monitor: tests/test_disk_monitor.c src/widgets/disk_monitor_core.c src/widgets/disk_monitor_core.h
-	$(CC) $(CFLAGS) -o $@ tests/test_disk_monitor.c src/widgets/disk_monitor_core.c $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_disk_monitor.c src/widgets/disk_monitor_core.c $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/test_network_monitor: tests/test_network_monitor.c src/widgets/network_monitor_core.c src/widgets/network_monitor_core.h
-	$(CC) $(CFLAGS) -o $@ tests/test_network_monitor.c src/widgets/network_monitor_core.c $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_network_monitor.c src/widgets/network_monitor_core.c $(LDFLAGS_PLUGIN)
 $(BUILD_DIR)/test_sensors: tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_core.h src/widgets/sensors_nvml.c src/widgets/sensors_nvml.h
-	$(CC) $(CFLAGS) -o $@ tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_nvml.c $(LDFLAGS_PLUGIN) -ldl
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_sensors.c src/widgets/sensors_core.c src/widgets/sensors_nvml.c $(LDFLAGS_PLUGIN) -ldl
 $(BUILD_DIR)/test_conlog: tests/test_conlog.c src/widgets/conlog_core.c src/widgets/conlog_core.h
-	$(CC) $(CFLAGS) -o $@ tests/test_conlog.c src/widgets/conlog_core.c $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_conlog.c src/widgets/conlog_core.c $(LDFLAGS_PLUGIN)
 
 $(BUILD_DIR)/test_process_list: tests/test_process_list.c src/widgets/process_list_core.c src/widgets/process_list_core.h
-	$(CC) $(CFLAGS) -o $@ tests/test_process_list.c src/widgets/process_list_core.c $(LDFLAGS_PLUGIN)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_process_list.c src/widgets/process_list_core.c $(LDFLAGS_PLUGIN)
 
 test: $(BUILD_DIR)/test_memory_monitor $(BUILD_DIR)/test_disk_monitor $(BUILD_DIR)/test_network_monitor $(BUILD_DIR)/test_sensors $(BUILD_DIR)/test_conlog $(BUILD_DIR)/test_process_list
 	$(BUILD_DIR)/test_memory_monitor
@@ -218,25 +226,25 @@ debug: CFLAGS += -O0 -DDEBUG -fno-omit-frame-pointer
 debug: all $(BIN_DBG) $(XCLK_DBG)
 
 $(BIN_DBG): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON)
 
 $(XCLK_DBG): $(BUILD_DIR) $(OBJS_COMMON_DBG) $(OBJS_CLOCK_DBG) $(OBJS_STANDALONE_DBG) $(OBJS_TRAY_DBG)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON_DBG) $(OBJS_CLOCK_DBG) $(OBJS_STANDALONE_DBG) $(OBJS_TRAY_DBG) $(LDFLAGS_STANDALONE)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(OBJS_COMMON_DBG) $(OBJS_CLOCK_DBG) $(OBJS_STANDALONE_DBG) $(OBJS_TRAY_DBG) $(LDFLAGS_STANDALONE)
 
 $(BUILD_DIR)/common_dbg.o: src/core/common.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
 $(BUILD_DIR)/clock_dbg.o: src/widgets/clock.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
 $(BUILD_DIR)/standalone_dbg.o: src/widgets/standalone_clock.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
 $(BUILD_DIR)/tray_dbg.o: src/core/tray.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
 
 # sanitize — с AddressSanitizer/UBSan (те же флаги у отладочной цели)
 BIN_SAN = $(BUILD_DIR)/xscreenletsd-san
 sanitize: CFLAGS += -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
 sanitize: all $(BIN_SAN)
 $(BIN_SAN): $(BUILD_DIR) $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON) -fsanitize=address,undefined
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_TRAY) $(OBJS_MAIN) $(LDFLAGS_DAEMON) -fsanitize=address,undefined
 
 .PHONY: all clean test run install debug sanitize
