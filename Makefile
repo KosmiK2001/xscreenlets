@@ -150,8 +150,12 @@ $(TARGET_STANDALONE): $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OB
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ $(OBJS_COMMON) $(OBJS_CLOCK) $(OBJS_STANDALONE_CLOCK) $(OBJS_TRAY) $(LDFLAGS_STANDALONE)
 
 # Pattern rules for object files (пересборка при изменении заголовков)
+# -fPIC обязателен: этим правилом собираются common.o и applet_manager.o,
+# которые идут и в .so, и в исполняемые файлы. Без флага сборка
+# опиралась на то, что x86-64 gcc по умолчанию генерирует PIC-код - на
+# другой архитектуре или при -fno-pic линковка .so падала бы.
 $(BUILD_DIR)/%.o: src/core/%.c include/xs_api.h src/core/common.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
 
 $(BUILD_DIR)/%.o: src/widgets/%.c include/xs_api.h src/core/common.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -fPIC -c $< -o $@
