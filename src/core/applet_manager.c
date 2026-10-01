@@ -137,14 +137,35 @@ static GdkPixbuf *am_type_icon(const char *type, int size)
         g_free(icons_dir);
     }
     {
-        static const char *dirs[] = {
+        /* Системный каталог иконок пакета: /usr/share/icons/xscreenlets/
+         * (плагины живут в /usr/libexec/xscreenlets, поэтому относительный
+         * ../icons из plugdir в системной установке не попадает в цель).
+         * Затем legacy-каталог python-версии. */
+        static const char *sys_dirs[] = {
+            "/usr/share/icons/xscreenlets", NULL
+        };
+        static const char *legacy_dirs[] = {
             "/usr/share/screenlets", NULL
         };
         int i;
 
-        for (i = 0; dirs[i] && !pb; i++) {
+        for (i = 0; sys_dirs[i] && !pb; i++) {
             for (j = 0; exts[j] && !pb; j++) {
-                char *path = g_build_filename(dirs[i], type,
+                char *fname = g_strdup_printf("%s.%s", type, exts[j]);
+                char *path = g_build_filename(sys_dirs[i], fname, NULL);
+                GError *err = NULL;
+
+                g_free(fname);
+                pb = gdk_pixbuf_new_from_file_at_scale(
+                    path, size, size, TRUE, &err);
+                if (err)
+                    g_error_free(err);
+                g_free(path);
+            }
+        }
+        for (i = 0; legacy_dirs[i] && !pb; i++) {
+            for (j = 0; exts[j] && !pb; j++) {
+                char *path = g_build_filename(legacy_dirs[i], type,
                                               "icon.", exts[j], NULL);
                 GError *err = NULL;
 
