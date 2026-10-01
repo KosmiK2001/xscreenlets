@@ -1,0 +1,126 @@
+xscreenlets
+Copyright (C) 2025-2026 KosmiK2001
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation; either version 2 of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, see <https://www.gnu.org/licenses/>.
+
+
+ИЗВЕЩЕНИЕ О ПРОИСХОЖДЕНИИ ЧАСТЕЙ ПРОЕКТА
+========================================
+
+Настоящий проект — переписывание на C/GTK3 апплетов и демона xscreenlets.
+Код ядра, плагинов и демона написан заново и принадлежит KosmiK2001, но
+проект восходит к оригинальному xscreenlets, распространявшемуся под GNU
+General Public License. Поэтому проект в целом лицензирован как
+GPL-2.0-or-later.
+
+Выбрана GPL-2.0-or-later, а не GPL-3: оригинальные апплеты распространялись
+до появления GPL-3, и «или позже» даёт потребителям свободу выбрать любую
+из двух версий, а не ограничивает GPL-2.
+
+Ниже перечислены апплеты, восходящие к оригиналу, с указанием авторов,
+прочитанных из поля __author__ исходных файлов. Если в исходнике указано
+«based on», приведён и автор исходной идеи.
+
+
+Апплет батареи (acpi_battery)
+------------------------------
+
+    Файл-источник:  ACPIBatteryScreenlet.py
+    Автор:          JMDK
+    Провенанс:      /usr/share/screenlets/ACPIBattery/
+
+    Что взято:  названия элементов оформления (acpibattery-bg, -glass,
+                -using, -battery, -charging, -alarm), геометрия окна
+                100x50 и координаты текста, формат времени «%02i:%02i»,
+                файлы тем acpibattery-*.svg и иконка апплета
+                icons/acpi_battery.svg.
+
+    Иконка апплета не содержит сторонних товарных знаков: это
+    условная AA-батарейка с надписью BATTERY.
+
+    Что новое:  реализация на C/GTK3, чтение данных из
+                /sys/class/power_supply, обработка состояний,
+                quirk-правила по аналогии с UPower.
+
+
+ClearRSS
+--------
+
+    Файл-источник:  ClearRssScreenlet.py
+    Автор:          Helder Fraga aka Whise, на основе апплета Rss
+                   Хендрика Каджу (Hendrik Kaju)
+    Провенанс:      /usr/share/screenlets/ClearRss/
+
+    Что взято:  идея апплета, названия элементов оформления.
+    Что новое:  реализация на C/GTK3, круглое окно, тени кнопок.
+
+
+ClearWeather
+------------
+
+    Файл-источник:  ClearWeatherScreenlet.py
+    Автор:          Helder Fraga aka Whise
+    Провенанс:      /usr/share/screenlets/ClearWeather/
+
+    Что взято:  идея апплета и 49 карточек погоды с цифрами (0.png…48.png).
+                Проверено побайтовым сравнением: все 49 идентичны
+                оригиналу /usr/share/screenlets/ClearWeather/themes/default/.
+    Что новое:  реализация на C/GTK3, масштабирование, загрузка данных.
+
+
+Network Monitor
+---------------
+
+    Файл-источник:  NetmonitorScreenlet.py
+    Автор:          Helder Fraga aka Whise
+    Провенанс:      /usr/share/screenlets/Netmonitor/
+
+    Иконка applet (icons/network_monitor.svg) нарисована заново и НЕ
+    содержит логотипа Internet Explorer, который был в оригинальной иконке.
+
+
+ClearWeather — иконка applet
+---------------------------
+
+    Иконка applet (icons/clearweather.svg) нарисована заново и НЕ
+    содержит логотипа The Weather Channel, который был в оригинальной
+    иконке.
+
+
+Остальные апплеты
+-----------------
+
+    Clock                ClockScreenlet.py          RYX (aka Rico Pfaus)
+    Calendar             CalendarScreenlet.py       Whise aka Helder Fraga,
+                                                   оригинальная версия RYX
+    Launcher             LauncherScreenlet.py       RYX (aka Rico Pfaus)
+    Disk Monitor         DiskusageScreenlet.py      Helder Fraga
+    Memory / CPU         SysmonitorScreenlet.py     Whise
+    Process List         SysmonitorScreenlet.py      Whise
+    Sensors              RingSensorsScreenlet.py    Helder Fraga aka Whise,
+                                                   на основе ClockRing
+                                                   Пола Аштона (Paul Ashton)
+    Frame Launcher       LauncherScreenlet.py       RYX (aka Rico Pfaus)
+
+
+Сторонние товарные знаки
+-------------------------
+
+В этот проект НЕ переносятся и заменены нарисованными заново:
+
+    The Weather Channel     была в оригинальной иконке ClearWeather
+    Internet Explorer       был в оригинальной иконке Netmonitor
+
+Прочие названия и логотипы, встречающиеся в интерфейсе, принадлежат своим
+владельцам и используются в номинальном смысле.
