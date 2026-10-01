@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include "tray.h"
+#include "i18n.h"
 
 #include <cairo.h>
 #include <glib.h>
@@ -1446,7 +1447,7 @@ static void xs_core_show_properties(XsPlugin *p)
     /* --- About --- */
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
                              xs_core_about_page(p),
-                             gtk_label_new("About"));
+                             gtk_label_new(_("About")));
 
     /* --- Options: внутренний notebook: Window + страницы плагина --- */
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
@@ -1464,7 +1465,7 @@ static void xs_core_show_properties(XsPlugin *p)
         /* Scale рисует core, ЕСЛИ плагин не просил наоборот
          * (лаунчер: свой комбо «метод + поля») */
         if (!(p->type && strcmp(p->type, "launcher") == 0)) {
-        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Scale"),
+        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new(_("Scale")),
                         0, row, 1, 1);
         {
             /* сотые доли масштаба: шаг 0.01, клавиши/кнопки 0.01|0.1.
@@ -1491,7 +1492,7 @@ static void xs_core_show_properties(XsPlugin *p)
         }
         row++;
         }
-        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Opacity"),
+        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new(_("Opacity")),
                         0, row, 1, 1);
         {
             GtkAdjustment *adj = gtk_adjustment_new(state->opacity, 0.1, 1.0,
@@ -1503,7 +1504,7 @@ static void xs_core_show_properties(XsPlugin *p)
                              G_CALLBACK(xs_core_prop_opacity_changed), p);
         }
         row++;
-        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("X-Position"),
+        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new(_("X-Position")),
                         0, row, 1, 1);
         {
             int cur_x = state->x;
@@ -1519,7 +1520,7 @@ static void xs_core_show_properties(XsPlugin *p)
             g_object_add_weak_pointer(G_OBJECT(spin), (gpointer *)&g_props_spin_x);
         }
         row++;
-        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new("Y-Position"),
+        gtk_grid_attach(GTK_GRID(inner_page), gtk_label_new(_("Y-Position")),
                         0, row, 1, 1);
         {
             int cur_y = state->y;
@@ -1542,7 +1543,7 @@ static void xs_core_show_properties(XsPlugin *p)
             gtk_entry_set_text(GTK_ENTRY(entry), lab ? lab : "blank_label");
             g_free(lab);
             gtk_grid_attach(GTK_GRID(inner_page),
-                            gtk_label_new("User label"), 0, row, 1, 1);
+                            gtk_label_new(_("User label")), 0, row, 1, 1);
             gtk_grid_attach(GTK_GRID(inner_page), entry, 1, row, 1, 1);
             g_signal_connect(entry, "changed",
                              G_CALLBACK(xs_core_prop_label_changed), p);
@@ -1560,13 +1561,13 @@ static void xs_core_show_properties(XsPlugin *p)
             row++;
         }
         gtk_notebook_append_page(GTK_NOTEBOOK(inner_nb), inner_page,
-                                 gtk_label_new("Window"));
+                                 gtk_label_new(_("Window")));
         gtk_widget_show_all(inner_nb);
         gtk_box_pack_start(GTK_BOX(page), inner_nb, TRUE, TRUE, 0);
     }
     gtk_widget_show_all(page);
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), page,
-                             gtk_label_new("Options"));
+                             gtk_label_new(_("Options")));
 
     /* Свои страницы-группы плагина (Clock/Alarm/Face у clock) */
     if (p->ops && p->ops->properties)
@@ -1576,9 +1577,13 @@ static void xs_core_show_properties(XsPlugin *p)
     if (p->ops && p->ops->fill_themes) {
         page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
         gtk_container_set_border_width(GTK_CONTAINER(page), 10);
-        w = gtk_label_new("Themes allow you to easily switch the appearance "
-                          "of your Screenlets. On this page you find a list "
-                          "of all available themes for this Screenlet.");
+        /* Строки склеиваются конкатенацией ДО вызова _: переводить
+         * нужно весь текст целиком, иначе xgettext не сможет его
+         * извлечь, а частичная строка вроде "Themes allow you to " в
+         * каталоге переводов бессмысленна. */
+        w = gtk_label_new(_("Themes allow you to easily switch the appearance "
+                            "of your Screenlets. On this page you find a list "
+                            "of all available themes for this Screenlet."));
         gtk_label_set_line_wrap(GTK_LABEL(w), TRUE);
         gtk_widget_set_halign(w, GTK_ALIGN_START);
         gtk_box_pack_start(GTK_BOX(page), w, FALSE, TRUE, 0);
@@ -1639,7 +1644,7 @@ static void xs_core_show_properties(XsPlugin *p)
         gtk_box_pack_start(GTK_BOX(page), sw, TRUE, TRUE, 0);
         gtk_widget_show_all(page);
         gtk_notebook_append_page(GTK_NOTEBOOK(notebook), page,
-                                 gtk_label_new("Themes"));
+                                 gtk_label_new(_("Themes")));
     }
 
     gtk_widget_show_all(notebook);

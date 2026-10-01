@@ -10,6 +10,7 @@
 #include "common.h"
 #include "disk_monitor_core.h"
 
+#include "../core/i18n.h"
 #define DM_DEFAULT_WIDTH 420
 #define DM_DEFAULT_FONT "Sans 8"
 #define DM_BY_ID_DIR "/dev/disk/by-id"
@@ -1331,7 +1332,7 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
                 tab = scroller;
         }
         g_ptr_array_free(disks,TRUE);
-        gtk_notebook_append_page(notebook, tab, gtk_label_new("Disk Monitor"));
+        gtk_notebook_append_page(notebook, tab, gtk_label_new(_("Disk Monitor")));
         gtk_widget_show_all(tab);
     }
 }

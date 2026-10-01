@@ -15,6 +15,7 @@
 #include "common.h"
 #include "network_monitor_core.h"
 
+#include "../core/i18n.h"
 #define NM_DEFAULT_WIDTH 217
 #define NM_DEFAULT_HEIGHT 106
 #define NM_DEFAULT_FONT "Sans 8"
@@ -2358,7 +2359,7 @@ static GtkWidget *nm_add_xy(NmGrid *g, NmDialogContext *ctx,
     g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
     g_object_set_data_full(G_OBJECT(sy), "xs-key", g_strdup(key_y), g_free);
     gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
-    gtk_box_pack_start(GTK_BOX(box), gtk_label_new("/"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), gtk_label_new(_("/")), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), sy, TRUE, TRUE, 0);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, box);
@@ -2410,7 +2411,7 @@ static GtkWidget *nm_add_pos(NmGrid *g, NmDialogContext *ctx,
     g_object_set_data_full(G_OBJECT(sx), "xs-key", g_strdup(key_x), g_free);
     g_object_set_data_full(G_OBJECT(sy), "xs-key", g_strdup(key_y), g_free);
     gtk_box_pack_start(GTK_BOX(box), sx, TRUE, TRUE, 0);
-    gtk_box_pack_start(GTK_BOX(box), gtk_label_new("/"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), gtk_label_new(_("/")), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), sy, TRUE, TRUE, 0);
     nm_grid_add_label(g, label);
     nm_grid_add_widget(g, box);
@@ -2745,14 +2746,14 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
-        gtk_box_pack_start(GTK_BOX(row), gtk_label_new("Имя"), FALSE,
+        gtk_box_pack_start(GTK_BOX(row), gtk_label_new(_("Name")), FALSE,
                            FALSE, 0);
         gtk_box_pack_start(GTK_BOX(row),
                            nm_color_button("header_ifname_color",
                                            priv->header_ifname_color, FALSE,
                                            "Цвет имени интерфейса"),
                            FALSE, FALSE, 0);
-        gtk_box_pack_start(GTK_BOX(row), gtk_label_new("IP"), FALSE,
+        gtk_box_pack_start(GTK_BOX(row), gtk_label_new(_("IP")), FALSE,
                            FALSE, 0);
         gtk_box_pack_start(GTK_BOX(row),
                            nm_color_button("header_ip_color",
@@ -2873,7 +2874,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_object_set_data_full(G_OBJECT(tab), NM_CTX_KEY, ctx,
                                (GDestroyNotify) nm_dialog_context_unref);
         gtk_notebook_append_page(notebook, tab,
-                                 gtk_label_new("Network Monitor"));
+                                 gtk_label_new(_("Network Monitor")));
         gtk_widget_show_all(tab);
         /* show_all показывает ВСЕ виджеты, включая только что спрятанные
          * Y-спины. Поэтому «Placement: снаружи» при первом открытии

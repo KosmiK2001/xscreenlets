@@ -21,6 +21,7 @@
 #include "xs_api.h"
 #include "common.h"
 
+#include "../core/i18n.h"
 #define CM_SYS_CPU_DIR "/sys/devices/system/cpu"
 #define CM_HWMON_DIR "/sys/class/hwmon"
 #define CM_MAX_CPUS 4096
@@ -1203,7 +1204,7 @@ static void cm_properties(XsPlugin *p, GtkNotebook *nb)
     cm_add_color(p, page, "User load", "user_color", &priv->load_colors[1][0]);
     cm_add_color(p, page, "Nice load", "nice_color", &priv->load_colors[2][0]);
     cm_add_color(p, page, "I/O wait", "io_color", &priv->load_colors[3][0]);
-    gtk_notebook_append_page(nb, page, gtk_label_new("CPU Monitor"));
+    gtk_notebook_append_page(nb, page, gtk_label_new(_("CPU Monitor")));
     gtk_widget_show_all(page);
 }
 

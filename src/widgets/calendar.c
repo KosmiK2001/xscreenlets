@@ -16,6 +16,7 @@
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 
+#include "../core/i18n.h"
 #define CAL_W 204   /* 102*2, как в оригинале */
 #define CAL_H 210   /* 105*2 */
 #define XS_PI_C 3.14159265358979323846
@@ -845,7 +846,7 @@ static void cal_properties(XsPlugin *p, GtkNotebook *nb)
 	gtk_container_set_border_width(GTK_CONTAINER(page), 10);
 	page_box = page;
 	{
-		GtkWidget *lbl = gtk_label_new("Calendar specific options");
+		GtkWidget *lbl = gtk_label_new(_("Calendar specific options"));
 		gtk_widget_set_halign(lbl, GTK_ALIGN_START);
 		gtk_box_pack_start(GTK_BOX(page_box), lbl, FALSE, FALSE, 7);
 		gtk_box_pack_start(GTK_BOX(page_box),
@@ -924,7 +925,7 @@ static void cal_properties(XsPlugin *p, GtkNotebook *nb)
 	for (i = 0; i < 7; i++)
 		g_free(choices[i]);
 	gtk_widget_show_all(page);
-	gtk_notebook_append_page(nb, page, gtk_label_new("iCalendar"));
+	gtk_notebook_append_page(nb, page, gtk_label_new(_("iCalendar")));
 }
 
 /* ---------- Themes-страница (4 колонки) ---------- */

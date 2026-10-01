@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../core/i18n.h"
 #define DM_BY_ID_DIR "/dev/disk/by-id"
 #define DM_RETRY_INTERVAL_US (60 * G_TIME_SPAN_SECOND)
 
@@ -49,14 +50,14 @@ GtkWidget *dm_position_pair_widget(const char *label,
                                x_max, y_max, &spec))
         return NULL;
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_box_pack_start(GTK_BOX(row), gtk_label_new("X"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row), gtk_label_new(_("X")), FALSE, FALSE, 0);
     widget = gtk_spin_button_new_with_range(0, x_max, 1);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), x);
     gtk_widget_set_size_request(widget, 76, -1);
     g_object_set_data_full(G_OBJECT(widget), "xs-key", g_strdup(x_key), g_free);
     gtk_box_pack_start(GTK_BOX(row), widget, FALSE, FALSE, 0);
     *x_spin = widget;
-    gtk_box_pack_start(GTK_BOX(row), gtk_label_new("Y"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row), gtk_label_new(_("Y")), FALSE, FALSE, 0);
     widget = gtk_spin_button_new_with_range(0, y_max, 1);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(widget), y);
     gtk_widget_set_size_request(widget, 76, -1);
@@ -196,7 +197,7 @@ GtkWidget *dm_disk_selector_widget(GtkWidget *combo)
 
     g_return_val_if_fail(GTK_IS_COMBO_BOX(combo), NULL);
     selector = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    label = gtk_label_new("Disk");
+    label = gtk_label_new(_("Disk"));
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     /* The combo keeps its own natural width — GTK already sizes it to the
      * longest entry in the list — and never expands or stretches. */

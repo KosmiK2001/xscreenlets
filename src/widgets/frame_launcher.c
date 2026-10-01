@@ -15,6 +15,7 @@
 #include "xs_api.h"
 #include "common.h"
 
+#include "../core/i18n.h"
 typedef struct {
 	GKeyFile *kf;
 	char *theme;             /* имя темы */
@@ -823,7 +824,7 @@ static void fl_add_applet_clicked(GtkButton *btn, gpointer data)
 	                                  GTK_RESPONSE_CANCEL, NULL);
 	box = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
 	gtk_box_pack_start(GTK_BOX(box),
-	                   gtk_label_new("Тип апплета для нового гостя:"),
+	                   gtk_label_new(_("Applet type for the new guest:")),
 	                   FALSE, FALSE, 6);
 	combo = gtk_combo_box_text_new();
 	types = xs_core_list_plugin_types();
@@ -913,7 +914,7 @@ static void fl_add_running_clicked(GtkButton *btn, gpointer data)
 	                                  GTK_RESPONSE_CANCEL, NULL);
 	box = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
 	gtk_box_pack_start(GTK_BOX(box),
-	                   gtk_label_new("Запущенный апплет (main_daemon):"),
+	                   gtk_label_new(_("Running applet (main_daemon):")),
 	                   FALSE, FALSE, 6);
 	combo = gtk_combo_box_text_new();
 	names = xs_core_list_running_daemon_instances(&n);
@@ -1169,14 +1170,16 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 
 	page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
 	gtk_container_set_border_width(GTK_CONTAINER(page), 10);
-	lbl = gtk_label_new("Frame Launcher: рамка-хост для других апплетов "
-	                    "(в стиле Vista Sidebar).");
+	/* Переводится весь текст целиком: конкатенация строк происходит
+	 * внутри _, иначе xgettext извлечёт только первый фрагмент. */
+	lbl = gtk_label_new(_("Frame Launcher: host frame for other applets "
+	                      "(Vista Sidebar style)."));
 	gtk_widget_set_halign(lbl, GTK_ALIGN_START);
 	gtk_box_pack_start(GTK_BOX(page), lbl, FALSE, FALSE, 7);
 	gtk_box_pack_start(GTK_BOX(page),
 	                   gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
 	                   FALSE, FALSE, 5);
-	gtk_notebook_append_page(nb, page, gtk_label_new("Frame"));
+	gtk_notebook_append_page(nb, page, gtk_label_new(_("Frame")));
 
 #define FL_SPIN(key, label, desc, min, max)                              \
 	do {                                                             \

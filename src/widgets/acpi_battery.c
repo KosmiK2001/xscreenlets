@@ -34,6 +34,7 @@
 #include "common.h"
 #include "acpi_battery_core.h"
 
+#include "../core/i18n.h"
 #define AB_DEFAULT_WIDTH    100
 #define AB_DEFAULT_HEIGHT    50
 /* Порог ниже которого заряд считается низким. 15 — тот же процент,
@@ -455,7 +456,7 @@ static void ab_properties(XsPlugin *p, GtkNotebook *nb)
     ab_bool_prop(GTK_BOX(page), p, "show_time", "Show remaining time",
                  "Display estimated time left", st->show_time);
 
-    gtk_notebook_append_page(nb, page, gtk_label_new("ACPI Battery"));
+    gtk_notebook_append_page(nb, page, gtk_label_new(_("ACPI Battery")));
     gtk_widget_show_all(page);
 }
 

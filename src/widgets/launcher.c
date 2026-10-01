@@ -12,6 +12,7 @@
 #include "xs_api.h"
 #include "common.h"
 
+#include "../core/i18n.h"
 typedef struct {
 	GKeyFile *kf;
 	double scale;
@@ -833,13 +834,13 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 
 	page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
 	gtk_container_set_border_width(GTK_CONTAINER(page), 10);
-	lbl = gtk_label_new("Some options related to the Launcher-Screenlet.");
+	lbl = gtk_label_new(_("Some options related to the Launcher-Screenlet."));
 	gtk_widget_set_halign(lbl, GTK_ALIGN_START);
 	gtk_box_pack_start(GTK_BOX(page), lbl, FALSE, FALSE, 7);
 	gtk_box_pack_start(GTK_BOX(page),
 	                   gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
 	                   FALSE, FALSE, 5);
-	gtk_notebook_append_page(nb, page, gtk_label_new("Starter"));
+	gtk_notebook_append_page(nb, page, gtk_label_new(_("Starter")));
 
 	w = xs_prop_add_string(GTK_BOX(page), "Tooltip/Label",
 	                       "A string that will be displayed as tooltip ...",

@@ -29,6 +29,7 @@
 #include <gio/gio.h>
 #include <gio/gfiledescriptorbased.h>
 
+#include "../core/i18n.h"
 #define CONLOG_DEFAULT_COMMAND  "journalctl -f -n 20"
 #define CONLOG_DEFAULT_WIDTH    380
 #define CONLOG_DEFAULT_HEIGHT   180
@@ -1403,8 +1404,10 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_widget_set_margin_top(box, 8);
     gtk_widget_set_margin_bottom(box, 8);
     {
-        GtkWidget *hint = gtk_label_new(
-            "Аргументы передаются процессу напрямую, без оболочки.\n"
+        /* Примеры команд НЕ переводятся: это буквальный текст, который
+         * пользователь копирует в терминал. Переводить его нельзя.
+         * Переводится только первая фраза-предложение. */
+        GtkWidget *hint = gtk_label_new(_("Arguments are passed to the process directly, without a shell.\n")
             "Примеры:\n"
             "  journalctl -f -n 20\n"
             "  dmesg -w\n"
@@ -1416,7 +1419,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     /* Заголовок окна: метка пользователя сверху. Пустая строка — окно
      * без заголовка, зона не резервируется. */
     {
-        GtkWidget *cap = gtk_label_new("Заголовок окна (необязательно)");
+        GtkWidget *cap = gtk_label_new(_("Window title (optional)"));
 
         gtk_label_set_xalign(GTK_LABEL(cap), 0.0);
         gtk_box_pack_start(GTK_BOX(box), cap, FALSE, FALSE, 0);
@@ -1460,8 +1463,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     cl_row(grid, 3, "Смещение по Y",
            cl_spin(ctx, "title_dy", priv->title_dy, -60, 60));
     {
-        GtkWidget *hint = gtk_label_new(
-            "Смещение по Y: отрицательное значение подтягивает метку вверх.");
+        GtkWidget *hint = gtk_label_new(_("Y offset: a negative value pulls the label up."));
 
         gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
         gtk_grid_attach(GTK_GRID(grid), hint, 0, 4, 2, 1);
@@ -1548,7 +1550,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     cl_connect(page, ctx);
 
     gtk_widget_set_size_request(page, 520, 620);
-    gtk_notebook_append_page(notebook, page, gtk_label_new("Conlog"));
+    gtk_notebook_append_page(notebook, page, gtk_label_new(_("Conlog")));
     /* Контекст живёт до конца окна: контролы переживают properties(). */
     g_object_set_data_full(G_OBJECT(page), "xs-cl-ctx", ctx,
                            (GDestroyNotify) cl_context_free);

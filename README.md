@@ -720,6 +720,75 @@ nm -D build/clock.so | grep xs_plugin_desc
 ldd build/xscreenletsd build/clock.so build/xclock
 ```
 
+## Переводы интерфейса
+
+Английский — исходный язык, русский и другие — переводы в каталоге `po/`.
+Демон определяет язык через `gtk_get_default_language()`, а не через
+`LANG`: на Gentoo `LANG` часто `C`, тогда как `LC_MESSAGES` указывает на
+нужный язык.
+
+Что переводится, а что нет:
+
+- **переводится** то, что видит пользователь: подписи свойств, заголовки
+  вкладок, подсказки, названия апплетов в настройках;
+- **не переводится** то, что попадает в `~/.config/xscreenlets`: ключи
+  конфигов, пути, имена файлов, текст, показываемый на рабочем столе
+  (даты, названия лент RSS). Перевод ключа ломает сохранение настроек;
+- **не переводится** то, что пользователь копирует в терминал: примеры
+  команд, форматы вывода.
+
+Подписи свойств переводятся в одной точке — `xs_prop_row()`. Все
+`xs_prop_add_*(label, desc)` сходятся туда, поэтому ~115 надписей
+настроек переводятся без единой правки в коде апплетов.
+
+### Сборка
+
+```bash
+make locale                      # собрать .mo в build/locale
+make install LOCALEDIR=/usr/share/locale
+```
+
+### Добавить язык
+
+1. Создать `po/<код>.po` из шаблона:
+   ```bash
+   msginit --locale=de --input=po/xscreenlets.pot --output=po/de.po
+   ```
+2. Заполнить `msgstr`, затем:
+   ```bash
+   msgfmt --check --statistics -o build/locale/de/LC_MESSAGES/xscreenlets.mo po/de.po
+   ```
+   Либо проще: `make locale` соберёт все языки из `po/*.po` автоматически.
+3. Проверить: `LANGUAGE=de XSCREENLETS_LOCALEDIR=build/locale ./build/xscreenletsd`
+
+### После правки строк в исходниках
+
+```bash
+make po-update                              # перегенерировать .pot
+msgmerge --update po/ru.po po/xscreenlets.pot  # подтянуть изменения
+```
+
+Новые строки в `ru.po` появятся с пометкой `fuzzy` — это не ошибка, а
+приглашение перевести их и убрать пометку.
+
+### Проверка
+
+```bash
+make all && LANGUAGE=ru XSCREENLETS_LOCALEDIR=build/locale ./build/test_i18n_window
+```
+
+Окно показывает те же надписи, что и Properties. Перевод виден на экране;
+`lsof` не годится — gettext читает `.mo` лениво, при первом вызове `_()`.
+
+### Известная особенность
+
+`LANGUAGE` должна содержать ровно один код языка. Список вроде
+`LANGUAGE="ru,xscreenlets"` ломает перевод полностью: glibc перебирает
+элементы по очереди, не находит каталог для второго и сдаётся, не
+возвращаясь к первому. Проверено на Gentoo.
+
+---
+
 ## Лицензия
 
 GPL-2.0-or-later. Полный текст — в [LICENSE](LICENSE).

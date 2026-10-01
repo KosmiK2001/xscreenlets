@@ -11,6 +11,7 @@
 #include "common.h"
 #include <gtk/gtk.h>
 
+#include "i18n.h"
 static GtkWidget *am_window = NULL;
 static GtkNotebook *am_notebook = NULL;
 
@@ -899,13 +900,13 @@ void xs_applet_manager_show(void)
     am_notebook = GTK_NOTEBOOK(nb);
     gtk_notebook_append_page(GTK_NOTEBOOK(nb),
                              am_build_types_page(),
-                             gtk_label_new("Applets"));
+                             gtk_label_new(_("Applets")));
     gtk_notebook_append_page(GTK_NOTEBOOK(nb),
                              am_build_running_page(),
-                             gtk_label_new("Running"));
+                             gtk_label_new(_("Running")));
     gtk_notebook_append_page(GTK_NOTEBOOK(nb),
                              am_build_configs_page(),
-                             gtk_label_new("Configs"));
+                             gtk_label_new(_("Configs")));
     gtk_container_add(GTK_CONTAINER(am_window), nb);
     gtk_widget_show_all(am_window);
 }

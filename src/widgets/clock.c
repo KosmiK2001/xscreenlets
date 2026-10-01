@@ -15,6 +15,7 @@
 #include <cairo.h>
 #include <librsvg/rsvg.h>
 
+#include "../core/i18n.h"
 typedef struct {
 	gdouble scale;
 	gdouble opacity;
@@ -937,7 +938,7 @@ static void clock_properties(XsPlugin *p, GtkNotebook *nb)
         g_signal_connect(w, "toggled", G_CALLBACK(clock_bool_toggled), p);
 
         /* Alarm-Time: 3 SpinButton в одной строке (TimeOption) */
-        w = gtk_label_new("Alarm-Time");
+        w = gtk_label_new(_("Alarm-Time"));
         gtk_widget_set_halign(w, GTK_ALIGN_START);
         gtk_widget_set_size_request(w, 180, 28);
         gtk_box_pack_start(GTK_BOX(hbox), w, FALSE, TRUE, 0);

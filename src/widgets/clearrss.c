@@ -19,6 +19,7 @@
 #include "xs_api.h"
 #include "common.h"
 
+#include "../core/i18n.h"
 #define RSS_W 200
 #define RSS_H 200
 #define RSS_MAX_ENTRIES 100
@@ -2199,7 +2200,7 @@ static GtkWidget *rss_header_align_buttons(XsPlugin *p, PrivData *priv)
 static GtkWidget *rss_header_font_color_row(XsPlugin *p, PrivData *priv)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *label = gtk_label_new("Header");
+    GtkWidget *label = gtk_label_new(_("Header"));
     GtkWidget *font;
     GtkWidget *spacer;
     GtkWidget *color;
@@ -2248,7 +2249,7 @@ static GtkWidget *rss_header_font_color_row(XsPlugin *p, PrivData *priv)
 static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *label = gtk_label_new("Header");
+    GtkWidget *label = gtk_label_new(_("Header"));
     GtkWidget *font;
     GtkWidget *spacer;
     GtkWidget *color;
@@ -2297,7 +2298,7 @@ static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
 static GtkWidget *rss_text_settings_row(XsPlugin *p, PrivData *priv)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *label = gtk_label_new("Text");
+    GtkWidget *label = gtk_label_new(_("Text"));
     GtkWidget *font;
     GtkWidget *spacer;
     GtkWidget *color;
@@ -2429,7 +2430,7 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_box_pack_start(GTK_BOX(page), text_frame, FALSE, FALSE, 0);
     }
     gtk_widget_show_all(page);
-    gtk_notebook_append_page(nb, page, gtk_label_new("Rss"));
+    gtk_notebook_append_page(nb, page, gtk_label_new(_("Rss")));
 }
 
 static void rss_add_theme_dirs(const char *dir, GPtrArray *names)

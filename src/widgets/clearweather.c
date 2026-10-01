@@ -28,6 +28,7 @@
 #include <string.h>
 #include <math.h>
 
+#include "../core/i18n.h"
 /* ------------------------------------------------------------------ */
 /* константы                                                           */
 /* ------------------------------------------------------------------ */
@@ -3109,7 +3110,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
             gtk_box_pack_start(GTK_BOX(page), lb, FALSE, FALSE, 0);
         }
     }
-    gtk_notebook_append_page(nb, page, gtk_label_new("Погода"));
+    gtk_notebook_append_page(nb, page, gtk_label_new(_("Weather")));
 
     entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(entry), priv->city ? priv->city : "");

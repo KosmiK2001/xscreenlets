@@ -26,6 +26,7 @@
 /* PL_NAME_MAX и PlProcess живут в process_list_core.h: разбор /proc и
  * структура процесса вынесены туда ради тестов без X. */
 #include "process_list_core.h"
+#include "../core/i18n.h"
 #define PL_PADDING             4.0
 #define PL_TEXT_PADDING        2.0
 #define PL_COL_GAP             4.0
@@ -1202,7 +1203,7 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
     pl_add_color(plugin, page, "Title", "title_color", priv->title);
     pl_add_color(plugin, page, "Column headers", "header_color", priv->header);
     pl_add_color(plugin, page, "Text", "text_color", priv->text);
-    gtk_notebook_append_page(notebook, page, gtk_label_new("Process List"));
+    gtk_notebook_append_page(notebook, page, gtk_label_new(_("Process List")));
     gtk_widget_show_all(page);
 }
 

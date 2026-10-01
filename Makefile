@@ -13,6 +13,27 @@ CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu
 # строке (make CFLAGS=...) нельзя - пришлось бы заново перечислять все
 # -I и pkg-config, что легко рассинхронизировать с остальным Makefile.
 EXTRA_CFLAGS =
+
+# Системные каталоги. ebuild передаёт их через EXTRA_CFLAGS
+# (-DXS_PLUGIN_DIR=... -DXS_THEME_DIR=...); здесь объявлены значения по
+# умолчанию, чтобы make all работал без внешних флагов, и как точка
+# подстановки для LOCALEDIR/TEXTDOMAIN ниже.
+PLUGIN_DIR ?=
+THEME_DIR ?=
+
+# Переводы. Каталог задаётся снаружи тем же способом, что и XS_PLUGIN_DIR
+# в ebuild: пустое значение = искать в $HOME (запуск из build/ без
+# установки), непустое = системный каталог из пакета.
+LOCALEDIR ?=
+TEXTDOMAIN ?= xscreenlets
+EXTRA_CFLAGS += -DXS_LOCALEDIR='"$(LOCALEDIR)"' -DXS_TEXTDOMAIN='"$(TEXTDOMAIN)"'
+
+# gettext() есть в glibc, поэтому -lintl не нужен; HAVE_GETTEXT включает
+# макрос _() в i18n.h. Без него интерфейс остаётся английским, и проект
+# продолжает собираться.
+EXTRA_CFLAGS += -DHAVE_GETTEXT
+EXTRA_CFLAGS += -DXS_PLUGIN_DIR='"$(PLUGIN_DIR)"' -DXS_THEME_DIR='"$(THEME_DIR)"' 
+
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
 LDFLAGS_RSS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 libxml-2.0) -lm
@@ -50,7 +71,7 @@ SRC_LAUNCHER = src/widgets/launcher.c
 SRC_FL = src/widgets/frame_launcher.c
 SRC_RSS = src/widgets/clearrss.c
 
-OBJS_COMMON = $(BUILD_DIR)/common.o $(BUILD_DIR)/applet_manager.o
+OBJS_COMMON = $(BUILD_DIR)/common.o $(BUILD_DIR)/applet_manager.o $(BUILD_DIR)/i18n.o
 OBJS_TRAY = $(BUILD_DIR)/tray.o
 OBJS_MAIN = $(BUILD_DIR)/main.o
 OBJS_CLOCK = $(BUILD_DIR)/clock.o
@@ -202,7 +223,52 @@ clean:
 # большом потоке). Урезанный вариант ставится вручную:
 #   cp build/conlog_min.so ~/lib/xscreenlets/plugins/conlog.so
 # Подробности — src/widgets/CONLOG-FUNCTIONALITY.md
-install: all
+
+# ==== Переводы интерфейса ====
+# Каталог .mo-файлов собирается из po/*.po. Список языков берётся из
+# po/LINGUAS, чтобы добавление языка не требовало правки Makefile.
+LINGUAS = $(patsubst po/%.po,%,$(wildcard po/*.po))
+
+POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
+
+# Шаблон: msgid из исходников. Перегенерировать после правки строк:
+#   make po-update
+$(BUILD_DIR)/po/xscreenlets.pot: $(POTFILES)
+	xgettext --from-code=UTF-8 --language=C --keyword=_ \
+		--add-comments=Translators --package-name=xscreenlets \
+		--copyright-holder=KosmiK2001 --output=$@ $(POTFILES)
+
+po-update: $(BUILD_DIR)/po/xscreenlets.pot
+	cp $< po/xscreenlets.pot
+	@echo "обновлён po/xscreenlets.pot; проверьте po/*.po через msgmerge"
+
+# .mo собираются в build/locale/<lang>/LC_MESSAGES/<domain>.mo -
+# такую раскладку ожидает gettext.
+LOCALES_OUT = $(foreach l,$(LINGUAS),\
+	$(BUILD_DIR)/locale/$(l)/LC_MESSAGES/xscreenlets.mo)
+
+$(BUILD_DIR)/locale/%/LC_MESSAGES/xscreenlets.mo: po/%.po
+	@mkdir -p $(dir $@)
+	msgfmt --check --output-file=$@ $<
+
+locale: $(LOCALES_OUT)
+
+# Тест переводов: открывает окно с надписями Properties, чтобы перевод
+# был виден глазами. Проверять через lsof бессмысленно - gettext читает
+# .mo лениво, при первом вызове _(), то есть только после создания
+# окна. Сама проверка: LANGUAGE=ru XSCREENLETS_LOCALEDIR=build/locale
+# make test-i18n-window
+$(BUILD_DIR)/test_i18n_window: tests/test_i18n_window.c src/core/i18n.c \
+		include/xs_api.h src/core/common.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_i18n_window.c \
+		src/core/i18n.c $(LDFLAGS_PLUGIN)
+
+test-i18n-window: $(BUILD_DIR)/test_i18n_window locale
+	@echo "Открылось окно с переводами. Закройте его, когда посмотрите."
+	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_i18n_window
+
+
+install: all locale
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin
 	$(INSTALL) -m 0755 $(TARGET_DAEMON) $(DESTDIR)$(PREFIX)/bin/xscreenletsd
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/plugins
@@ -243,6 +309,16 @@ install: all
 			[ -f "$$f" ] || continue; \
 			$(INSTALL) -m 0644 "$$f" $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/$$name/; \
 		done; \
+	done
+	@# Переводы: циклом по LINGUAS, как темы выше. Каталог повторяет
+	@# путь, который ищет gettext: <localedir>/<lang>/LC_MESSAGES/<domain>.mo
+	@# Плоская раскладка (lang.mo рядом) не работает и молча даёт
+	@# английский интерфейс - это самая частая ошибка при установке.
+	@for mo in $(LOCALES_OUT); do \
+		lang=$$(basename $$(dirname $$(dirname $$mo))); \
+		d=$(DESTDIR)$(PREFIX)/share/locale/$$lang/LC_MESSAGES; \
+		$(INSTALL) -d $$d; \
+		$(INSTALL) -m 0644 $$mo $$d/xscreenlets.mo; \
 	done
 
 run: all

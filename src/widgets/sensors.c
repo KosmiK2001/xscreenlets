@@ -25,6 +25,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "../core/i18n.h"
 static char *sen_source_key(const char *chip, const char *device,
                             const char *label)
 {
@@ -1899,7 +1900,7 @@ static GtkWidget *sen_sensor_list(SenDialogContext *ctx)
 
     found = sensor_list_read("/sys/class/hwmon");
     if (!found) {
-        GtkWidget *empty = gtk_label_new("Сенсоры не найдены");
+        GtkWidget *empty = gtk_label_new(_("No sensors found"));
 
         gtk_container_add(GTK_CONTAINER(box), empty);
         ctx->building = FALSE;
@@ -2186,7 +2187,7 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
      * содержимое прокручивается внутри. Запрос 700 растягивал окно на
      * две трети экрана ради контента, который прокручивается. */
     gtk_widget_set_size_request(page, 520, 620);
-    gtk_notebook_append_page(notebook, page, gtk_label_new("Sensors"));
+    gtk_notebook_append_page(notebook, page, gtk_label_new(_("Sensors")));
     /* Контекст живёт до конца окна: контролы переживают properties(). */
     g_object_set_data_full(G_OBJECT(page), "xs-sen-ctx", ctx,
                            (GDestroyNotify) sen_context_free);

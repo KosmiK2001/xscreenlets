@@ -1,0 +1,156 @@
+# Russian translation of xscreenlets.
+# Copyright (C) 2025-2026 KosmiK2001
+# This file is distributed under the same license as the xscreenlets package.
+#
+# Английский - исходный язык проекта, русский - перевод. Строки в C пишутся
+# по-английски; русский вариант живёт здесь. Чтобы добавить перевод строки,
+# откройте нужное свойство в настройках апплета и найдите его в этом файле.
+msgid ""
+msgstr ""
+"Project-Id-Version: xscreenlets\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-02 00:00+0300\n"
+"PO-Revision-Date: 2026-10-02 00:00+0300\n"
+"Last-Translator: KosmiK2001\n"
+"Language-Team: Russian\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 "
+"&& (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "ACPI Battery"
+msgstr "Батарея"
+
+msgid "Calendar specific options"
+msgstr "Настройки календаря"
+
+msgid "iCalendar"
+msgstr "iCalendar"
+
+msgid "Header"
+msgstr "Заголовок"
+
+msgid "Text"
+msgstr "Текст"
+
+msgid "Rss"
+msgstr "Лента"
+
+msgid "Weather"
+msgstr "Погода"
+
+msgid "Alarm-Time"
+msgstr "Время будильника"
+
+msgid ""
+"Arguments are passed to the process directly, without a shell.\\n"
+msgstr ""
+"Аргументы передаются процессу напрямую, без оболочки.\\n"
+
+msgid "Window title (optional)"
+msgstr "Заголовок окна (необязательно)"
+
+msgid "Y offset: a negative value pulls the label up."
+msgstr "Смещение по Y: отрицательное значение подтягивает метку вверх."
+
+msgid "Conlog"
+msgstr "Conlog"
+
+msgid "CPU Monitor"
+msgstr "Монитор ЦП"
+
+msgid "Disk Monitor"
+msgstr "Монитор диска"
+
+msgid "X"
+msgstr "X"
+
+msgid "Y"
+msgstr "Y"
+
+msgid "Disk"
+msgstr "Диск"
+
+msgid "Applet type for the new guest:"
+msgstr "Тип апплета для нового гостя:"
+
+msgid "Running applet (main_daemon):"
+msgstr "Запущенный апплет (main_daemon):"
+
+msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
+msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
+
+msgid "Frame"
+msgstr "Рамка"
+
+msgid "Some options related to the Launcher-Screenlet."
+msgstr "Параметры апплета Launcher."
+
+msgid "Starter"
+msgstr "Запуск"
+
+msgid "Memory Monitor"
+msgstr "Монитор памяти"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "IP"
+msgstr "IP"
+
+msgid "Network Monitor"
+msgstr "Сетевой монитор"
+
+msgid "Process List"
+msgstr "Список процессов"
+
+msgid "No sensors found"
+msgstr "Сенсоры не найдены"
+
+msgid "Sensors"
+msgstr "Сенсоры"
+
+msgid "Applets"
+msgstr "Апплеты"
+
+msgid "Running"
+msgstr "Запущенные"
+
+msgid "Configs"
+msgstr "Конфигурации"
+
+msgid "About"
+msgstr "О программе"
+
+msgid "Scale"
+msgstr "Масштаб"
+
+msgid "Opacity"
+msgstr "Прозрачность"
+
+msgid "X-Position"
+msgstr "Позиция по X"
+
+msgid "Y-Position"
+msgstr "Позиция по Y"
+
+msgid "User label"
+msgstr "Метка"
+
+msgid "Window"
+msgstr "Окно"
+
+msgid "Options"
+msgstr "Параметры"
+
+msgid ""
+"Themes allow you to easily switch the appearance of your Screenlets. On "
+"this page you find a list of all available themes for this Screenlet."
+msgstr ""
+"Темы позволяют легко менять внешний вид апплетов. На этой странице "
+"перечислены все доступные темы для данного апплета."
+
+msgid "Themes"
+msgstr "Темы"

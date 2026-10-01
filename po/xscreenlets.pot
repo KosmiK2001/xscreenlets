@@ -1,0 +1,196 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR KosmiK2001
+# This file is distributed under the same license as the xscreenlets package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: xscreenlets\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-02 00:50+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/widgets/acpi_battery.c:459
+msgid "ACPI Battery"
+msgstr ""
+
+#: src/widgets/calendar.c:849
+msgid "Calendar specific options"
+msgstr ""
+
+#: src/widgets/calendar.c:928
+msgid "iCalendar"
+msgstr ""
+
+#: src/widgets/clearrss.c:2203 src/widgets/clearrss.c:2252
+msgid "Header"
+msgstr ""
+
+#: src/widgets/clearrss.c:2301
+msgid "Text"
+msgstr ""
+
+#: src/widgets/clearrss.c:2433
+msgid "Rss"
+msgstr ""
+
+#: src/widgets/clearweather.c:3113
+msgid "Weather"
+msgstr ""
+
+#: src/widgets/clock.c:941
+msgid "Alarm-Time"
+msgstr ""
+
+#: src/widgets/conlog.c:1410
+msgid "Arguments are passed to the process directly, without a shell.\n"
+msgstr ""
+
+#: src/widgets/conlog.c:1422
+msgid "Window title (optional)"
+msgstr ""
+
+#: src/widgets/conlog.c:1466
+msgid "Y offset: a negative value pulls the label up."
+msgstr ""
+
+#: src/widgets/conlog.c:1553
+msgid "Conlog"
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1207
+msgid "CPU Monitor"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1335
+msgid "Disk Monitor"
+msgstr ""
+
+#: src/widgets/disk_monitor_core.c:53
+msgid "X"
+msgstr ""
+
+#: src/widgets/disk_monitor_core.c:60
+msgid "Y"
+msgstr ""
+
+#: src/widgets/disk_monitor_core.c:200
+msgid "Disk"
+msgstr ""
+
+#: src/widgets/frame_launcher.c:827
+msgid "Applet type for the new guest:"
+msgstr ""
+
+#: src/widgets/frame_launcher.c:917
+msgid "Running applet (main_daemon):"
+msgstr ""
+
+#: src/widgets/frame_launcher.c:1175
+msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
+msgstr ""
+
+#: src/widgets/frame_launcher.c:1182
+msgid "Frame"
+msgstr ""
+
+#: src/widgets/launcher.c:837
+msgid "Some options related to the Launcher-Screenlet."
+msgstr ""
+
+#: src/widgets/launcher.c:843
+msgid "Starter"
+msgstr ""
+
+#: src/widgets/memory_monitor.c:694
+msgid "Memory Monitor"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2362 src/widgets/network_monitor.c:2414
+msgid "/"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2749
+msgid "Name"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2756
+msgid "IP"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2877
+msgid "Network Monitor"
+msgstr ""
+
+#: src/widgets/process_list.c:1206
+msgid "Process List"
+msgstr ""
+
+#: src/widgets/sensors.c:1903
+msgid "No sensors found"
+msgstr ""
+
+#: src/widgets/sensors.c:2190
+msgid "Sensors"
+msgstr ""
+
+#: src/core/applet_manager.c:903
+msgid "Applets"
+msgstr ""
+
+#: src/core/applet_manager.c:906
+msgid "Running"
+msgstr ""
+
+#: src/core/applet_manager.c:909
+msgid "Configs"
+msgstr ""
+
+#: src/core/common.c:1450
+msgid "About"
+msgstr ""
+
+#: src/core/common.c:1468
+msgid "Scale"
+msgstr ""
+
+#: src/core/common.c:1495
+msgid "Opacity"
+msgstr ""
+
+#: src/core/common.c:1507
+msgid "X-Position"
+msgstr ""
+
+#: src/core/common.c:1523
+msgid "Y-Position"
+msgstr ""
+
+#: src/core/common.c:1546
+msgid "User label"
+msgstr ""
+
+#: src/core/common.c:1564
+msgid "Window"
+msgstr ""
+
+#: src/core/common.c:1570
+msgid "Options"
+msgstr ""
+
+#: src/core/common.c:1584
+msgid ""
+"Themes allow you to easily switch the appearance of your Screenlets. On this "
+"page you find a list of all available themes for this Screenlet."
+msgstr ""
+
+#: src/core/common.c:1647
+msgid "Themes"
+msgstr ""

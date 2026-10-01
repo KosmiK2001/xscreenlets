@@ -11,6 +11,7 @@
 #include "common.h"
 #include "memory_monitor_core.h"
 
+#include "../core/i18n.h"
 #define MM_DEFAULT_WINDOW_WIDTH 320
 #define MM_DEFAULT_WINDOW_HEIGHT 344
 #define MM_HISTORY_MAX 4096
@@ -690,7 +691,7 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
     mm_add_color(page, p, "buffers_color", "RAM buffers", priv->buffers_color);
     mm_add_color(page, p, "cache_color", "RAM cache", priv->cache_color);
     mm_add_color(page, p, "swap_color", "Swap history", priv->swap_color);
-    gtk_notebook_append_page(notebook, page, gtk_label_new("Memory Monitor"));
+    gtk_notebook_append_page(notebook, page, gtk_label_new(_("Memory Monitor")));
     gtk_widget_show_all(page);
 }
 
