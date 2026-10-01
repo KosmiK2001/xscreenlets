@@ -627,16 +627,20 @@ int main(int argc, char **argv)
     g_free(g_conf_path);
     g_conf_path = g_build_filename(g_get_user_config_dir(),
                                    "xscreenlets", "xscreenletsd.conf", NULL);
-    /* Плагины по умолчанию — наш install-каталог (/usr/libexec/... доступен
-     * через --plugdir при системной установке).
+    /* Каталог плагинов. Приоритет у системного, зашитого при сборке
+     * (-DXS_PLUGIN_DIR, его задаёт ebuild): установленный пакет должен
+     * быть источником истины. Если он не задан - каталог пользователя.
      *
-     * XS_PLUGIN_DIR задаётся при сборке (-D) и имеет приоритет: он указывает
-     * на реально установленный пакет. Каталог пользователя тоже
-     * проверяется - иначе, установив пакет в /usr, нельзя было бы
-     * положить рядом свою версию плагина. Порядок: сначала системный,
-     * чтобы установленный пакет был источником истины, затем ~/. */
-    g_plugdir = g_build_filename(g_get_home_dir(), "lib", "xscreenlets",
-                                 "plugins", NULL);
+     * Раньше здесь всегда брался $HOME, а XS_PLUGIN_DIR был объявлен, но
+     * не использовался, из-за чего после emerge -9999 демон искал
+     * плагины только в ~/lib/xscreenlets/plugins и не видел установленный
+     * пакет.
+     */
+    if (XS_PLUGIN_DIR[0])
+        g_plugdir = g_strdup(XS_PLUGIN_DIR);
+    else
+        g_plugdir = g_build_filename(g_get_home_dir(), "lib", "xscreenlets",
+                                     "plugins", NULL);
     xs_core_set_themedir(XS_THEME_DIR);
 
     int want_debug = 0;
