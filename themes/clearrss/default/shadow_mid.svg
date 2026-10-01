@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1"
+     width="600" height="600" viewBox="0 0 600 600">
+<!-- Симметричная тень для СРЕДНЕЙ кнопки clearrss (сброс прокрутки).
+     У неё нет направления, поэтому и тени не должно быть: полумесяц,
+     которым залита обычная shadow.svg, читался как острие, повёрнутое
+     влево, и средняя кнопка выглядела копией левой. Здесь радиальный
+     градиент - ореол одинаков со всех сторон.
+     width/height обязательно в px: theme_draw_full в core/common.c
+     принимает только RSVG_UNIT_PX, при "in" nw/nh = 0 и элемент молча
+     не рисуется. viewBox 600x600 -> рисуется в любой квадрат. -->
+<defs>
+  <radialGradient id="midShadow" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0"    style="stop-color:#000000;stop-opacity:0.39158576" />
+    <stop offset="0.72" style="stop-color:#000000;stop-opacity:0.34" />
+    <stop offset="1"    style="stop-color:#000000;stop-opacity:0" />
+  </radialGradient>
+</defs>
+<circle cx="300" cy="300" r="300" fill="url(#midShadow)" />
+</svg>

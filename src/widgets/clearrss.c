@@ -66,6 +66,17 @@ typedef struct {
     gboolean auto_news_count;
     gboolean show_published_time;
     int button_pressed;
+    /* Геометрия подсказки "...(more)" в координатах виджета: заполняется
+     * при отрисовке, читается при попадании мыши. */
+    int more_x, more_y, more_w, more_h;
+    gboolean more_shown;
+    /* Форма окна: применённый радиус и размер, для которых она уже
+     * посчитана. Скругление у нас было ТОЛЬКО рисунком (cairo_clip внутри
+     * отрисовки), а само окно оставалось прямоугольным, и в его углы был
+     * виден рабочий стол. В frame_launcher это уже решено через
+     * gdk_window_shape_combine_region, здесь повторяем. */
+    int shape_radius;
+    int shape_w, shape_h;
     gboolean loading;
     gboolean show_feed_name;
     int header_align;
@@ -114,7 +125,11 @@ static void rss_open_current(XsPlugin *p)
     PrivData *priv = p ? p->priv : NULL;
     const RssEntry *entry;
     const char *url;
-    char *argv[2];
+    /* argv ОБЯЗАН быть NULL-терминирован: g_spawn_* читает массив до
+     * первого NULL. Размер 2 означает только два полезных элемента, но
+     * без argv[2] = NULL GLib уходит в мусор за пределы массива и
+     * возвращает FALSE - процесс не запускается, ошибки не видно. */
+    char *argv[3];
 
     if (!priv)
         return;
@@ -123,12 +138,29 @@ static void rss_open_current(XsPlugin *p)
                                     (int)priv->entries->len - 1)) : NULL;
     url = entry && entry->link && entry->link[0] ? entry->link :
           (priv->site_url && priv->site_url[0] ? priv->site_url : NULL);
-    if (!url)
+    xs_host_api()->log("clearrss: open_current feed_number=%d entries=%u "
+                       "has_entry=%d link=%s site_url=%s scroll_px=%d",
+                       priv->feed_number,
+                       priv->entries ? priv->entries->len : 0,
+                       entry ? 1 : 0,
+                       (entry && entry->link) ? entry->link : "(null)",
+                       (priv->site_url && priv->site_url[0]) ? priv->site_url
+                                                            : "(null)",
+                       priv->scroll_px);
+    if (!url) {
+        xs_host_api()->log("clearrss: open_current - no url, nothing opened");
         return;
+    }
     argv[0] = (char *)"xdg-open";
     argv[1] = (char *)url;
-    g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH,
-                  NULL, NULL, NULL, NULL);
+    argv[2] = NULL;
+    if (!g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH,
+                       NULL, NULL, NULL, NULL))
+        xs_host_api()->log("clearrss: open_current - spawn FAILED for %s",
+                           url);
+    else
+        xs_host_api()->log("clearrss: open_current - spawned xdg-open %s",
+                           url);
 }
 
 static void rss_job_free(FetchJob *job);
@@ -143,6 +175,7 @@ static void rss_add_theme_dirs(const char *dir, GPtrArray *names);
 static void rss_open_current(XsPlugin *p);
 
 /* ---------- theme ---------- */
+
 static char *rss_project_root_from_plugdir(void)
 {
     const char *plugdir = xs_core_plugdir();
@@ -1086,20 +1119,118 @@ static int rss_display_count(PrivData *priv, PangoLayout *layout, int height)
     return CLAMP(MAX(1, count), 1, (int)priv->entries->len);
 }
 
+/* Радиус скругления углов окна. Раньше он нигде не был нужен как
+ * отдельная величина: скругление существовало только как путь
+ * rss_draw_rounded внутри отрисовки. Для формы окна значение нужно
+ * числом, поэтому здесь константа - та же, что используется в рисунке. */
+/* Радиус скругления углов окна. ЕДИНСТВЕННОЕ место, где он считается:
+ * и форма окна (rss_apply_shape), и заливка, и clip темы берут значение
+ * отсюда. Раньше здесь стояло константное 17, а в rss_draw радиус
+ * считался отдельно как MIN(MIN(17, w/8), h/8) - при w<137 или h<137
+ * значения расходились, и рисунок вылезал за углы, которые окно уже
+ * срезало. */
+static int rss_corner_radius(int w, int h)
+{
+    return MIN(MIN(17, w / 8), h / 8);
+}
+
+/* Регион формы окна: полосы по 1 px, средняя полоса сплошная.
+ * Без средней полосы регион состоит из двух "скобок" у краёв и всё
+ * содержимое окна в середине обрезается до рабочего стола. */
+static cairo_region_t *rss_rounded_region(int width, int height, int radius)
+{
+    cairo_region_t *region;
+    cairo_rectangle_int_t box;
+    double scaled;
+
+    if (width <= 0 || height <= 0)
+        return NULL;
+    scaled = MIN(radius, MIN(width, height) / 2.0);
+    if (scaled <= 0.0)
+        return NULL;
+    region = cairo_region_create();
+    if (!region)
+        return NULL;
+    for (int i = 0; i <= (int)ceil(scaled); i++) {
+        double d = fabs(i - scaled);
+        int cut = 0;
+        if (d <= scaled)
+            cut = (int)floor(scaled -
+                             sqrt(scaled * scaled - d * d));
+        box.x = i;
+        box.y = cut;
+        box.width = 1;
+        box.height = height - 2 * cut;
+        if (box.height > 0)
+            cairo_region_union_rectangle(region, &box);
+        box.x = width - 1 - i;
+        if (box.height > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+    {
+        int mid = (int)ceil(scaled);
+        box.x = mid;
+        box.y = 0;
+        box.width = width - 2 * mid;
+        box.height = height;
+        if (box.width > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+    return region;
+}
+
+/* Применяет форму окна. Радиус и размер запоминаем, чтобы не пересчитывать
+ * регион на каждой перерисовке. */
+static void rss_apply_shape(XsPlugin *p, int w, int h)
+{
+    PrivData *priv = p ? p->priv : NULL;
+    GdkWindow *window;
+    cairo_region_t *region;
+    int radius;
+
+    if (!priv || !p->win || w <= 0 || h <= 0)
+        return;
+    radius = rss_corner_radius(w, h);
+    if (priv->shape_radius == radius && priv->shape_w == w &&
+        priv->shape_h == h)
+        return;
+    window = gtk_widget_get_window(p->win);
+    if (!window)
+        return;
+    region = rss_rounded_region(w, h, radius);
+    if (region) {
+        gdk_window_shape_combine_region(window, region, 0, 0);
+        cairo_region_destroy(region);
+    }
+    priv->shape_radius = radius;
+    priv->shape_w = w;
+    priv->shape_h = h;
+}
+
 static void rss_draw_rounded(cairo_t *cr, double x, double y, double w,
                              double h, double radius)
 {
-    double d = M_PI * radius / 180.0;
+    /* Радиус углов r берётся как есть. Раньше здесь стояло
+     * d = M_PI * radius / 180.0 — это перевод радиуса ИЗ ГРАДУСОВ в
+     * радианы, то есть radius принимался за угол. При radius=17 выходило:
+     * радиус дуги 0.30 px (вместо 17) и углы 17°/34°/51° вместо
+     * 90°/180°/270°. Плюс центр ВТОРОЙ дуги стоял (x2+d, y2+d) — это
+     * верх-левый угол, хотя путь только что пришёл вниз-лево. Итог:
+     * путь самопересекался, и cairo_fill давал треугольник с
+     * диагональю плюс вытянутые овалы на нижних углах.
+     * Ниже все четыре дуги идут по часовой стрелке, центры — свои у
+     * каждого угла, углы кратны RSS_PI/2. */
+    double r = MIN(radius, MIN(w, h) / 2.0);
     double x1 = x + w, y1 = y + h, x2 = x, y2 = y;
 
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, x1 - d, y1 - d, d, 0, 2 * d);
-    cairo_line_to(cr, x2 + d, y1);
-    cairo_arc(cr, x2 + d, y2 + d, d, 2 * d, d);
-    cairo_line_to(cr, x1, y2 + d);
-    cairo_arc(cr, x1 - d, y2 + d, d, 3 * d, d);
-    cairo_line_to(cr, x2 + d, y2);
-    cairo_arc(cr, x2 + d, y2 + d, d, 0, d);
+    cairo_new_path(cr);
+    cairo_arc(cr, x1 - r, y1 - r, r, 0.0, RSS_PI / 2.0);            /* низ-право */
+    cairo_line_to(cr, x2 + r, y1);
+    cairo_arc(cr, x2 + r, y1 - r, r, RSS_PI / 2.0, RSS_PI);        /* низ-лево */
+    cairo_line_to(cr, x2, y2 + r);
+    cairo_arc(cr, x2 + r, y2 + r, r, RSS_PI, 3.0 * RSS_PI / 2.0);  /* верх-лево */
+    cairo_line_to(cr, x1 - r, y2);
+    cairo_arc(cr, x1 - r, y2 + r, r, 3.0 * RSS_PI / 2.0, 2.0 * RSS_PI); /* верх-право */
     cairo_close_path(cr);
 }
 
@@ -1108,6 +1239,12 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     PrivData *priv = p ? p->priv : NULL;
     PangoLayout *layout;
     PangoFontDescription *font;
+    /* Форма окна применяется ВСЕГДА и ДО всей отрисовки. Это свойство
+     * окна, а не рисунка: скругление держалось только на cairo_clip внутри
+     * отрисовки, само окно оставалось прямоугольным, и в его углы был виден
+     * рабочий стол. Раньше вызов стоял внутри if (theme_has "background"),
+     * то есть не выполнялся для тем без элемента background. */
+    rss_apply_shape(p, w, h);
     PangoRectangle logical;
     int text_h;
     int entry_count;
@@ -1115,6 +1252,7 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     int header_h;
     int content_w;
     int first;
+    double radius;
     const RssEntry *entry;
     int i;
     GString *all;
@@ -1134,6 +1272,10 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     viewport_h = rss_viewport_height(p);
     header_h = rss_header_height(priv);
     content_w = MAX(20, w - 20);
+    /* Тот же радиус, что и у формы окна - из rss_corner_radius(), а не
+     * считаем здесь заново: два независимых расчёта разъезжаются при
+     * изменении размера окна, и фон вылезает за срезанные углы. */
+    radius = rss_corner_radius(w, h);
     cairo_save(cr);
     cairo_scale(cr, 1.0, 1.0);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
@@ -1142,13 +1284,46 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
                               priv->background_color[1],
                               priv->background_color[2],
                               priv->background_color[3]);
-        rss_draw_rounded(cr, 0, 0, w, h, MIN(MIN(17, w / 8), h / 8));
+        rss_draw_rounded(cr, 0, 0, w, h, radius);
         cairo_fill(cr);
+    } else {
+        /* Темы без своего рисунка (Simple) рисуем САМИ: тёмное стекло с
+         * малой прозрачностью + тонкая круглая рамка.
+         *
+         * Без этого окно было полностью прозрачным: залить его было нечем,
+         * рисунка темы нет, и мышью окно не ухватить - перетаскивать
+         * приходилось за пиксель в углу.
+         *
+         * Рамка рисуется кодом, а НЕ элементом темы. Элемент в теме
+         * растягивается по осям раздельно (сверху Y x1.0, снизу Y x3.88 для
+         * окна 322x428), поэтому белый контур в background.svg Simple
+         * выходил 1.5 px сверху и 5.8 px снизу - разная толщина и разные
+         * угловые срезы. Здесь толщина задаётся в пикселях и одинакова со
+         * всех сторон по построению.
+         *
+         * Прозрачность стекла - 10%: рабочий стол должен просвечивать,
+         * иначе окно снова станет неразличимым. */
+        cairo_set_source_rgba(cr, 0.04, 0.04, 0.05, 0.10);
+        rss_draw_rounded(cr, 0, 0, w, h, radius);
+        cairo_fill(cr);
+        /* рамка по краю, отступ 0.5 px, чтобы не срезалась формой окна */
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.32);
+        cairo_set_line_width(cr, 1.0);
+        rss_draw_rounded(cr, 0.5, 0.5, w - 1.0, h - 1.0, radius);
+        cairo_stroke(cr);
     }
     if (xs_core_theme_has(p, "background")) {
         /* Нижняя часть темы берётся только из исходного диапазона
-         * y=100..200, поэтому верхний серый градиент не дублируется. */
+         * y=100..200, поэтому верхний серый градиент не дублируется.
+         * Обрезка — ТОТ ЖЕ скруглённый путь, что и у заливки цветом:
+         * раньше здесь стоял cairo_rectangle, и рисунок темы выходил
+         * за скруглённые углы квадратом — скругление работало для цвета,
+         * но не для рисунка. cairo_clip берёт текущий путь как область и
+         * НЕ съедает его, поэтому следующий cairo_rectangle + cairo_clip
+         * просто пересекает его с полосой. */
         cairo_save(cr);
+        rss_draw_rounded(cr, 0, 0, w, h, radius);
+        cairo_clip(cr);
         cairo_rectangle(cr, 0, rss_header_height(priv), w,
                         h - rss_header_height(priv));
         cairo_clip(cr);
@@ -1157,8 +1332,12 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
             2 * (h - rss_header_height(priv)));
         cairo_restore(cr);
 
-        /* Верхняя полоса рисуется один раз в натуральном масштабе. */
+        /* Верхняя полоса рисуется один раз в натуральном масштабе.
+         * Обрезка та же скруглённая, иначе рисунок в верхних углах
+         * выходил бы за скругление квадратом. */
         cairo_save(cr);
+        rss_draw_rounded(cr, 0, 0, w, h, radius);
+        cairo_clip(cr);
         cairo_rectangle(cr, 0, 0, w, rss_header_height(priv));
         cairo_clip(cr);
         xs_host_api()->theme_draw_full(p, cr, "background", 0, 0, w, RSS_H);
@@ -1285,45 +1464,194 @@ static void rss_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         cairo_set_source_rgba(cr, priv->text_color[0] * .7,
                               priv->text_color[1] * .7,
                               priv->text_color[2] * .7, priv->text_color[3]);
-        cairo_move_to(cr, 8, h - rss_control_height(priv) + 2);
-        pango_cairo_show_layout(cr, hint);
+        {
+            PangoRectangle logical;
+            PangoFontMetrics *fm;
+            int baseline = h - rss_control_height(priv) + 2;
+            int ascent, descent;
+            cairo_move_to(cr, 8, baseline);
+            pango_cairo_show_layout(cr, hint);
+            /* Запоминаем, где нарисован "...(more)", чтобы по клику на него
+             * открыть запись.
+             *
+             * ВАЖНО: pango рисует текст ВВЕРХ от базовой линии, то есть
+             * вверх на ascent и вниз лишь на descent (у "...(more)" это
+             * пара пикселей от скобок). Раньше область клика считалась как
+             * [baseline, baseline + height] - целиком ПОД базовой линией,
+             * то есть по видимому тексту не попадало ни пикселя, кроме
+             * хвоста скобок. Поэтому клик срабатывал только если удачно
+             * целиться в пару пикселей десцендера. Теперь храним верх и
+             * низ настоящего текста: [baseline - ascent, baseline + descent].
+             *
+             * Ширину берём из pango, а не задаём константой: длина строки
+             * зависит от наличия "(more)" и от шрифта. */
+            pango_layout_get_pixel_extents(hint, NULL, &logical);
+            /* pango_layout_get_font_metrics() НЕ СУЩЕСТВУЕТ - такой функции
+             * в Pango нет, компилятор падал. Метрики шрифта берём из
+             * контекста layout: layout создана на том же cr, что и весь
+             * applet, поэтому ascent/descent соответствуют видимому тексту. */
+            fm = pango_context_get_metrics(pango_layout_get_context(hint),
+                                           NULL, NULL);
+            ascent = pango_font_metrics_get_ascent(fm) / PANGO_SCALE;
+            descent = pango_font_metrics_get_descent(fm) / PANGO_SCALE;
+            pango_font_metrics_unref(fm);
+            priv->more_x = 8;
+            priv->more_y = baseline - ascent;
+            priv->more_w = logical.width;
+            priv->more_h = ascent + descent;
+            /* Диагностика: печатаем вычисленный прямоугольник, чтобы
+             * сравнить его с реальным положением букв на снимке экрана. */
+            xs_host_api()->log("clearrss: more_box x=%d y=%d w=%d h=%d "
+                               "baseline=%d ascent=%d descent=%d",
+                               priv->more_x, priv->more_y, priv->more_w,
+                               priv->more_h, baseline, ascent, descent);
+        }
         g_object_unref(hint);
+        /* Сброс при прокрутке: когда всё влезло, подсказки "(more)" нет,
+         * и кликать больше некуда. Ставим флаг здесь, а не в rss_scroll_by,
+         * чтобы состояние всегда совпадало с тем, что реально нарисовано. */
+        priv->more_shown = (priv->scroll_px + viewport_h < text_h);
+        if (!priv->more_shown) {
+            priv->more_x = priv->more_w = 0;
+            priv->more_h = 0;
+        }
+    } else {
+        /* Всё влезло - блок с подсказкой не выполняется вовсе. Без этого
+         * сброса more_shown остался бы от прошлого кадра, и клик попадал
+         * бы в невидимую область. */
+        priv->more_shown = FALSE;
+        priv->more_x = priv->more_y = priv->more_w = priv->more_h = 0;
     }
 controls:
     /* Кнопки как в оригинале: previous page / reset / next page. */
     {
-        int radius = rss_button_radius(priv);
-        int cy = h - 10 - radius;
+        /* Радиус КНОПКИ. Раньше эта переменная называлась radius и затеняла
+         * внешний radius - радиус угла окна. Из-за этого clip формы окна в
+         * rss_draw_rounded() строился радиусом кнопки (12) вместо радиуса
+         * угла (17): в полосе 12..17 px фон и тень рисовались по одной
+         * форме, а gdk_window_shape_combine_region срезала окно по другой.
+         * Теперь имена различаются и clip берёт внешний radius. */
+        int btn_r = rss_button_radius(priv);
+        int cy = h - 10 - btn_r;
         int x1 = w - 90;
         int x2 = w - 58;
         int x3 = w - 26;
-        cairo_set_line_width(cr, 1.2);
-        cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
-        cairo_arc(cr, x1, cy, radius, 0, 2 * RSS_PI);
-        cairo_arc(cr, x2, cy, radius, 0, 2 * RSS_PI);
-        cairo_arc(cr, x3, cy, radius, 0, 2 * RSS_PI);
-        cairo_fill(cr);
-        cairo_set_source_rgba(cr, 1, 1, 1, .9);
-        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
-                               CAIRO_FONT_WEIGHT_BOLD);
-        cairo_set_font_size(cr, 11 + radius);
+        /* Три круга нужно заливать ПО ОДНОМУ. cairo_arc, если есть
+         * текущая точка, сначала проводит ЛИНИЮ от неё к началу дуги, а
+         * cairo_fill заливает весь накопленный путь целиком. Раньше три
+         * дуги шли подряд и заливались одним cairo_fill — между ними
+         * появлялись две соединительные линии (1->2 и 2->3), и вокруг
+         * средней кнопки возникал овал. Раньше же первая дуга получала
+         * линию от (0,0) после pango_cairo_show_layout — отсюда был
+         * треугольник через весь апплет. cairo_fill съедает путь, поэтому
+         * каждая кнопка заливается отдельным вызовом и путь не
+         * накапливается. */
+        /* Тень кнопок рисуется ОТДЕЛЬНЫМИ элементами темы, а не частью
+         * background.svg. В исходной теме она была продублирована три раза
+         * прямо в background.svg (path2270, path3260, path3264) — одинаковые
+         * круги 14x14 единицы под каждой из трёх кнопок. Проблема была не в
+         * самих тенях, а в том, что background.svg масштабируется по осям
+         * раздельно (X x1.61, Y x3.88 для окна 322x428), и круг превращался
+         * в овал 23x62. Здесь тени вынесены в отдельные файлы и рисуются в
+         * квадрате side x side, поэтому масштаб всегда равномерный.
+         *
+         * У правой кнопки свой элемент "button_bg" — отзеркаленная вручную
+         * тень (её правили в GIMP и положили в тему), у левой и средней
+         * общий "shadow". side = 2*btn_r*1.25, а не 2*btn_r: при равном
+         * диаметре тень полностью уходит под кнопку и её не видно.
+         * Коэффициент 1.25 даёт ореол ~3 px при шаге кнопок 32 px. */
         {
-            cairo_text_extents_t ext;
-            const char *glyph = "‹";
-            cairo_text_extents(cr, glyph, &ext);
-            cairo_move_to(cr, x1 - ext.width / 2.0,
-                          cy - ext.height / 2.0 - ext.y_bearing);
-            cairo_show_text(cr, glyph);
-            glyph = "·";
-            cairo_text_extents(cr, glyph, &ext);
-            cairo_move_to(cr, x2 - ext.width / 2.0,
-                          cy - ext.height / 2.0 - ext.y_bearing);
-            cairo_show_text(cr, glyph);
-            glyph = "›";
-            cairo_text_extents(cr, glyph, &ext);
-            cairo_move_to(cr, x3 - ext.width / 2.0,
-                          cy - ext.height / 2.0 - ext.y_bearing);
-            cairo_show_text(cr, glyph);
+            double side = 2.0 * btn_r * 1.25;
+            const int btn_x[3] = { x1, x2, x3 };
+            /* Отзеркаленная вручную тень button_bg рисовалась тем же
+             * side = 2*btn_r*1.25, что и общая, и оказывалась почти целиком
+             * скрыта под кнопкой, и наружу выходил узкий кольцевой ореол.
+             *
+             * ВАЖНО: сам ореол принципиально не может быть ровным. И в
+             * shadow.svg, и в button_bg.png тень залита ЛИНЕЙНЫМ градиентом
+             * (linearGradient3254), а не радиальным, поэтому она густая с
+             * одного края и почти прозрачная с другого. Зеркаливание в GIMP
+             * этого не исправляет - оно переворачивает асимметрию, но не
+             * убирает её. Любой размер и любой сдвиг лишь перемещают несим-
+             * метричное пятно; увеличение до 1.6 делает его заметнее, а не
+             * ровнее. Чинить надо сам файл: заливка должна быть радиальной
+             * и симметричной относительно центра круга. */
+            /* Тени И круги кнопок обрезаются ОДНОЙ и той же формой окна.
+             * Раньше тень рисовалась под обрезкой, а круги — уже после
+             * cairo_restore, без неё. У правой кнопки это давало отрывной
+             * кусок в скруглённом углу: тень уходила в угол и срезалась по
+             * одной форме, а круг по другой, и между ними оставался
+             * фрагмент, не связанный с кнопкой. Правая кнопка стоит в 26 px
+             * от правого края при радиусе скругления 17, поэтому её тень
+             * (радиус 15) всегда заходит в зону угла — это не баг, но
+             * обрезать надо обе части одинаково. */
+            cairo_save(cr);
+            rss_draw_rounded(cr, 0, 0, w, h, radius); /* внешний: радиус угла окна */
+            cairo_clip(cr);
+            for (int i = 0; i < 3; i++) {
+                /* У каждой кнопки своя тень:
+                 *   0 (предыдущая страница) - shadow.svg, исходная тема
+                 *   1 (сброс прокрутки)      - shadow_mid.svg, симметричная
+                 *   2 (следующая страница)  - button_bg.svg, зеркальная
+                 *
+                 * Средняя кнопка ничего не "листает" в сторону, и раньше
+                 * брала ту же shadow.svg, что и левая, поэтому её полумесяц
+                 * указывал влево и кнопка читалась как копия левой. У неё
+                 * собственный элемент с радиальным градиентом. */
+                const char *el = (i == 0)   ? "shadow"
+                                 : (i == 1) ? "shadow_mid"
+                                            : "button_bg";
+                /* Тема может не иметь части элементов: в Simple есть только
+                 * shadow.svg, и там все три кнопки получают одну круглую
+                 * тень. Отсутствующий элемент -> общая "shadow". */
+                if (!xs_core_theme_has(p, el))
+                    el = "shadow";
+                if (xs_core_theme_has(p, el))
+                    xs_host_api()->theme_draw_full(
+                        p, cr, el, btn_x[i] - side / 2.0, cy - side / 2.0,
+                        side, side);
+            }
+            cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
+            for (int i = 0; i < 3; i++) {
+                cairo_new_path(cr);
+                cairo_arc(cr, btn_x[i], cy, btn_r, 0, 2 * RSS_PI);
+                cairo_fill(cr);
+            }
+            cairo_restore(cr);
+        }
+        /* Значки рисуются ПУТЯМИ, а не шрифтовыми глифами.
+         *
+         * Шрифтовой "‹"/"›" зависел от начертания Sans и на 24 px читался
+         * как «медиатор». Позже выяснилось, что «медиатором» на деле
+         * выглядела сама кнопка вместе с тенью при увеличении: контур тени
+         * неровный, и на круглом zoom это читается как заострённый лепесток.
+         * Поэтому значки — снова ломаные из двух отрезков, а работа идёт
+         * над тенью (отдельный элемент темы "shadow"). */
+        {
+            const double lw = radius * 0.30;        /* толщина штриха */
+            const double ax = radius * 0.42;        /* вынос по X */
+            const double ay = radius * 0.62;        /* вынос по Y */
+            const int btn[3] = { x1, x2, x3 };
+
+            cairo_set_line_width(cr, lw);
+            cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+            cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+            /* средняя кнопка — закрашенная точка */
+            cairo_set_source_rgba(cr, 1, 1, 1, .9);
+            cairo_arc(cr, x2, cy, radius * 0.17, 0, 2 * RSS_PI);
+            cairo_fill(cr);
+
+            /* левый шеврон "<" и правый ">" как зеркало друг друга */
+            cairo_set_source_rgba(cr, 1, 1, 1, .9);
+            for (int i = 0; i < 3; i += 2) {
+                double dir = (i == 0) ? -1.0 : 1.0;  /* -1: влево, +1: вправо */
+                cairo_new_path(cr);
+                cairo_move_to(cr, btn[i] - dir * ax, cy - ay);
+                cairo_line_to(cr, btn[i] + dir * ax, cy);
+                cairo_line_to(cr, btn[i] - dir * ax, cy + ay);
+                cairo_stroke(cr);
+            }
         }
     }
     cairo_restore(cr);
@@ -1346,6 +1674,19 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
         int cy = allocation.height - 10 - radius;
 
         priv->button_pressed = 0;
+        /* Клик по "...(more)" открывает запись. Проверяем ДО кнопок внизу:
+         * подсказка лежит в той же нижней полосе, и без этой проверки она
+         * перехватывала бы часть нажатий. */
+        if (priv->more_shown && priv->more_w > 0 && priv->more_h > 0 &&
+            x >= priv->more_x && x <= priv->more_x + priv->more_w &&
+            y >= priv->more_y && y <= priv->more_y + priv->more_h) {
+            priv->button_pressed = 4;
+            xs_host_api()->log("clearrss: more hint press at %.1f,%.1f "
+                               "(box %d,%d %dx%d)", x, y, priv->more_x,
+                               priv->more_y, priv->more_w, priv->more_h);
+            gtk_widget_queue_draw(p->win);
+            return TRUE;
+        }
         if (y >= cy - radius && y <= cy + radius) {
             if (x >= allocation.width - 90 - radius &&
                 x <= allocation.width - 90 + radius)
@@ -1369,7 +1710,14 @@ static gboolean rss_button(XsPlugin *p, GdkEventButton *ev)
         xs_host_api()->log("clearrss: button release at %.1f,%.1f", x, y);
         if (!button)
             return FALSE;
-        if (button == 1)
+        if (button == 4) {
+            /* Открываем запись, на которую указывает прокрутка, и сбрасываем
+             * прокрутку, чтобы следующий клик открывал следующую. */
+            rss_open_current(p);
+            priv->scroll_px = 0;
+            if (p->win)
+                gtk_widget_queue_draw(p->win);
+        } else if (button == 1)
             rss_scroll_by(p, -170, TRUE);
         else if (button == 2) {
             priv->scroll_px = 0;

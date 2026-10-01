@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+     width="17" height="17" viewBox="134 182 17 17">
+<!-- Тень круглой кнопки clearrss. В оригинальной теме была продублирована
+     три раза (path2270, path3260, path3264) под тремя кнопками. Здесь одна
+     копия в компактном viewBox 17x17: рисуется в любой квадрат и не
+     искажается, потому что applet передаёт равные ширину и высоту. -->
+<defs>
+  <linearGradient id="linearGradient3254"> <stop style="stop-color:#666666;stop-opacity:0.34693879;" offset="0" id="stop3256" /> <stop id="stop3274" offset="0.23076923" style="stop-color:#000000;stop-opacity:1;" /> <stop id="stop3258" offset="1" style="stop-color:#616161;stop-opacity:1;" /> </linearGradient>
+  <linearGradient inkscape:collect="always" xlink:href="#linearGradient3254" id="linearGradient3256" gradientUnits="userSpaceOnUse" gradientTransform="matrix(2.4036075,0,0,2.5690079,56.643841,179.49088)" x1="36.675461" y1="1.0260916" x2="36.609497" y2="7.3515792" />
+</defs>
+<path style="fill:url(#linearGradient3256);fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;opacity:0.39158576" d="M 135.34597,190.74828 C 135.34597,187.27331 143.89779,182.14111 146.59597,183.80611 C 149.3694,185.51753 149.76737,194.17799 146.78133,196.02061 C 143.90003,197.79862 135.34597,194.23148 135.34597,190.74828 z " id="path2270" sodipodi:nodetypes="czzz" />
+</svg>
