@@ -34,6 +34,11 @@ typedef enum {
     ACPI_BATTERY_CHARGING,
     ACPI_BATTERY_DISCHARGING,
     ACPI_BATTERY_FULL,
+    /* Сеть подключена, но зарядка не идёт: сработал порог заряда в BIOS,
+     * батарея полна при нулевом токе, зарядка питается не от сети. Это НЕ
+     * «заряжена»: при заряде ниже 90 % батарея ещё разряжается. UPower
+     * для этого состояния тоже отдельный тип — PENDING_CHARGE. */
+    ACPI_BATTERY_PENDING_CHARGE,
     ACPI_BATTERY_NOT_PRESENT
 } AcpiBatteryState;
 
@@ -54,6 +59,17 @@ typedef struct {
     gint           minutes_left;
     gboolean       has_energy;      /* есть energy_now/energy_full/power_now */
     gint64         power_now;       /* микроВатты, -1 */
+    /* Ток заряда/разряда, микроАмперы. Может быть ОТРИЦАТЕЛЬНЫМ — у
+     * ряда драйверов (axp20x и подобные) разряд пишется отрицательным
+     * током при статусе «charging», то есть драйвер врёт. Признак
+     * используется в quirk-правиле: отрицательный ток означает, что
+     * батарея разряжается, даже если status говорит «charging». */
+    gint64         current_now;     /* -1 */
+    /* Уровень из файла capacity_level, когда capacity == 0. Диапазоны
+     * фиксированы ядром: Unknown/Normal/High/Low/Critical. Одно число
+     * брать нельзя: Critical это 1 %, Low 10 %, High 70 % — поэтому
+     * храним текст и разбираем в quirk-правиле. */
+    char          *capacity_level;
     /* Устройство есть в sysfs, но не читается (права, отказ драйвера).
      * НЕ то же, что percent == -1: строка не должна исчезать. */
     gboolean       read_error;

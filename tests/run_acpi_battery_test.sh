@@ -28,9 +28,64 @@ printf 'UPS\n'          > "$F/ac/type"
 printf 'Unknown\n'      > "$F/ac/status"
 printf '50\n'           > "$F/ac/capacity"
 
+# --- quirk-фикстуры ---
+# По одной на каждое правило: qN/BAT0 — единственный источник в своём
+# каталоге, иначе list_read вернул бы несколько элементов.
+
+# q1: Charging при отрицательном токе (axp20x так пишут при разряде)
+mkdir -p "$F/q1/BAT0"
+printf 'Battery\n'      > "$F/q1/BAT0/type"
+printf 'Charging\n'     > "$F/q1/BAT0/status"
+printf '50\n'           > "$F/q1/BAT0/capacity"
+printf -- '-500000\n'    > "$F/q1/BAT0/current_now"
+
+# q2: 95 % но Discharging — батарея полна, статус врёт
+mkdir -p "$F/q2/BAT0"
+printf 'Battery\n'      > "$F/q2/BAT0/type"
+printf 'Discharging\n'  > "$F/q2/BAT0/status"
+printf '95\n'           > "$F/q2/BAT0/capacity"
+
+# q3: capacity=0 + capacity_level=Low
+mkdir -p "$F/q3/BAT0"
+printf 'Battery\n'      > "$F/q3/BAT0/type"
+printf 'Discharging\n'  > "$F/q3/BAT0/status"
+printf '0\n'            > "$F/q3/BAT0/capacity"
+printf 'Low\n'          > "$F/q3/BAT0/capacity_level"
+
+# q4: capacity=0 + capacity_level=Unknown — данных нет
+mkdir -p "$F/q4/BAT0"
+printf 'Battery\n'      > "$F/q4/BAT0/type"
+printf 'Discharging\n'  > "$F/q4/BAT0/status"
+printf '0\n'            > "$F/q4/BAT0/capacity"
+printf 'Unknown\n'      > "$F/q4/BAT0/capacity_level"
+
+# q5: Not charging при 40 % — батарея садится
+mkdir -p "$F/q5/BAT0"
+printf 'Battery\n'      > "$F/q5/BAT0/type"
+printf 'Not charging\n' > "$F/q5/BAT0/status"
+printf '40\n'           > "$F/q5/BAT0/capacity"
+
+# q6: Not charging при 95 % — уже полна
+mkdir -p "$F/q6/BAT0"
+printf 'Battery\n'      > "$F/q6/BAT0/type"
+printf 'Not charging\n' > "$F/q6/BAT0/status"
+printf '95\n'           > "$F/q6/BAT0/capacity"
+
+# q7: батарейка извлечена
+mkdir -p "$F/q7/BAT0"
+printf 'Battery\n'      > "$F/q7/BAT0/type"
+printf 'Unknown\n'      > "$F/q7/BAT0/status"
+printf 'no\n'           > "$F/q7/BAT0/present"
+
+# q8: Unknown при 92 % — по UPower это заряжена
+mkdir -p "$F/q8/BAT0"
+printf 'Battery\n'      > "$F/q8/BAT0/type"
+printf 'Unknown\n'      > "$F/q8/BAT0/status"
+printf '92\n'           > "$F/q8/BAT0/capacity"
+
 gcc -O0 -g3 -Wall -Wextra -I"$B/src/widgets" $(pkg-config --cflags glib-2.0) \
     "$B/tests/test_acpi_battery.c" "$B/src/widgets/acpi_battery_core.c" \
     -o /home/kosmik2001_dir/.hermes/cache/scratch/test_ab \
     $(pkg-config --libs glib-2.0) || exit 1
 
-/home/kosmik2001_dir/.hermes/cache/scratch/test_ab "$F"
+/home/kosmik2001_dir/.hermes/cache/scratch/test_ab "$F" "$F"

@@ -75,18 +75,112 @@ AcpiBatteryState acpi_battery_parse_status(const char *text)
         g_ascii_strcasecmp(text, "Charge complete") == 0)
         return ACPI_BATTERY_FULL;
     if (g_ascii_strcasecmp(text, "Not charging") == 0)
-        return ACPI_BATTERY_FULL;   /* заряжена, но не заряжается */
+        return ACPI_BATTERY_PENDING_CHARGE;
 
     /* "Unknown" и всё прочее — данных нет. */
     return ACPI_BATTERY_UNKNOWN;
 }
 
+/* Порог, выше которого состояние принудительно считается «заряжена».
+ *
+ * Не 100 %, а 90: UPower использует именно 90 (UP_FULLY_CHARGED_THRESHOLD),
+ * и это не щедрость. Реальные батареи подходят к 100 очень долго, а
+ * система давно перестаёт их заряжать — 95 % это уже «заряжена» по любым
+ * ощущениям пользователя. Совпадение с UPower обязательно: иначе applet
+ * покажет аларм на батарее, для которой GNOME и MATE уведомлений не
+ * показывают. */
+#define ACPI_BATTERY_FULLY_CHARGED_PCT 90
+
+/* Аппроксимация capacity_level в проценты. Только для случая capacity==0.
+ * Ядро отдаёт пять уровней; точные проценты в нём не заданы, поэтому
+ * берём середины диапазонов, а не края: Unknown — это середина, а не 0,
+ * иначе applet покажет аларм на батарее, уровень которой драйвер просто
+ * не смог определить. */
+static gint acpi_battery_level_to_percent(const char *level)
+{
+    if (!level)
+        return -1;
+    if (g_ascii_strcasecmp(level, "Full") == 0)
+        return 100;
+    if (g_ascii_strcasecmp(level, "High") == 0)
+        return 70;
+    if (g_ascii_strcasecmp(level, "Normal") == 0)
+        return 55;
+    if (g_ascii_strcasecmp(level, "Low") == 0)
+        return 10;
+    if (g_ascii_strcasecmp(level, "Critical") == 0)
+        return 1;
+    /* "Unknown" и всё прочее — данных нет. Возврат -1 обязателен:
+     * подстановка 0 дала бы «заряд кончился» вместо «не знаю». */
+    return -1;
+}
+
+/* Quirk-правила, скопированные из UPower (up-device-supply.c,
+ * up-device-battery.c). Без них applet расходится с системными иконками
+ * и уведомлениями: пользователь увидит «заряжается» для батареи, которая
+ * разряжается, и аларм на полностью заряженной.
+ *
+ * Порядок правил значим и повторяет порядок UPower.
+ */
+static void apply_battery_quirks(AcpiBattery *bat)
+{
+    gboolean full_charge_claimed;
+
+    if (bat->state == ACPI_BATTERY_NOT_PRESENT)
+        return;
+
+    /* capacity == 0 значит «драйвер не смог посчитать», а не «заряд
+     * кончился»: ядро само пишет 0 при unavailable. Пробуем уровень. */
+    if (bat->percent == 0) {
+        gint from_level = acpi_battery_level_to_percent(bat->capacity_level);
+        if (from_level >= 0)
+            bat->percent = from_level;
+        else
+            bat->percent = -1;
+    }
+
+    /* Ток и статус могут врать друг другу. Отрицательный current_now при
+     * статусе «charging» — известный случай в драйверах axp20x: разряд
+     * отдаётся как отрицательный ток, а status остаётся charging. */
+    if (bat->state == ACPI_BATTERY_CHARGING && bat->current_now < 0)
+        bat->state = ACPI_BATTERY_DISCHARGING;
+
+    /* Not charging при заряде ниже 90 % — это НЕ «заряжена»: сеть
+     * подключена, зарядка не идёт (порог заряда в BIOS, полная батарея
+     * при нулевом токе), а батарея при этом всё равно разряжается. В
+     * applet показываем время до разряда, индикатор — «using».
+     *
+     * Проверка идёт ДО общего порога 90 %, иначе батарея с любым
+     * состоянием при высоком заряде объявлялась бы полной, и до сюда
+     * дело не дошло бы. */
+    if (bat->state == ACPI_BATTERY_PENDING_CHARGE) {
+        /* При >=90 % батарея уже полна, и Not charging тут означает
+         * «зарядка не идёт по причине, а не разряд». Часть устройств
+         * вообще вечно держит PENDING_CHARGE, поэтому UPower и здесь
+         * смотрит на процент. */
+        bat->state = (bat->percent >= ACPI_BATTERY_FULLY_CHARGED_PCT)
+                   ? ACPI_BATTERY_FULL
+                   : ACPI_BATTERY_DISCHARGING;
+        return;
+    }
+
+    /* «Заряжена» определяем по порогу, а не по status: батареи очень часто
+     * пишут discharging даже при полном заряде (зарядка отключилась по
+     * порогу заряда в BIOS), и UPower принудительно показывает Full. */
+    full_charge_claimed = (bat->percent >= ACPI_BATTERY_FULLY_CHARGED_PCT);
+    if (full_charge_claimed)
+        bat->state = ACPI_BATTERY_FULL;
+}
+
+/* --- чтение каталога --- */
+
 static void battery_read(AcpiBattery *bat, const char *dir)
 {
-    gboolean ok_cap, ok_now, ok_full, ok_pow;
-    gint64 cap, now, full, pow;
+    gboolean ok_cap, ok_now, ok_full, ok_pow, ok_cur;
+    gint64 cap, now, full, pow, cur;
+    char *present;
 
-    char *present = read_str_file(dir, "present");
+    present = read_str_file(dir, "present");
     if (present && g_ascii_strcasecmp(present, "no") == 0)
         bat->state = ACPI_BATTERY_NOT_PRESENT;
     g_free(present);
@@ -101,6 +195,9 @@ static void battery_read(AcpiBattery *bat, const char *dir)
     now  = read_int_file(dir, "energy_now", &ok_now);
     full = read_int_file(dir, "energy_full", &ok_full);
     pow  = read_int_file(dir, "power_now", &ok_pow);
+    /* current_now читаем ДО проверки на >=0: отрицательное значение здесь
+     * значимо, это признак разряда при статусе charging. */
+    cur  = read_int_file(dir, "current_now", &ok_cur);
 
     if (ok_cap && cap >= 0) {
         bat->percent = (gint)cap;
@@ -111,32 +208,39 @@ static void battery_read(AcpiBattery *bat, const char *dir)
         bat->percent = -1;
     }
 
-    if (ok_now && now >= 0) {
+    if (ok_now && now >= 0)
         bat->energy_now = now;
-    }
-    if (ok_full && full >= 0) {
+    if (ok_full && full >= 0)
         bat->energy_full = full;
-    }
-    if (ok_pow && pow >= 0) {
+    if (ok_pow && pow > 0)
         bat->power_now = pow;
-    }
+    if (ok_cur)
+        bat->current_now = cur;
 
-    /* Время считаем только когда есть все три величины. power_now у
-     * разряжающейся батареи нормально положителен; у заряжающейся идёт
-     * со знаком минус в некоторых драйверах — берём модуль, иначе время
-     * до полного заряда получится отрицательным. */
+    g_free(bat->capacity_level);
+    bat->capacity_level = read_str_file(dir, "capacity_level");
+
+    apply_battery_quirks(bat);
+
+    /* Время считаем ПОСЛЕ quirk: состояние уже приведено к истинному, и
+     * для «заряжена» время не считается вовсе. */
     bat->has_energy = (bat->energy_now >= 0 && bat->energy_full >= 0);
-    if (bat->has_energy && pow > 0 && bat->energy_full > 0) {
-        gint64 power = pow > 0 ? pow : -pow;
-        if (bat->state == ACPI_BATTERY_CHARGING)
-            bat->minutes_left = (gint)((bat->energy_full - bat->energy_now)
-                                       * 60 / power);
-        else
-            bat->minutes_left = (gint)(bat->energy_now * 60 / power);
-        if (bat->minutes_left < 0)
-            bat->minutes_left = -1;
-    } else {
-        bat->minutes_left = -1;
+    bat->minutes_left = -1;
+    if (bat->state == ACPI_BATTERY_CHARGING ||
+        bat->state == ACPI_BATTERY_DISCHARGING) {
+        if (bat->has_energy && bat->energy_full > 0) {
+            gint64 power = bat->power_now > 0 ? bat->power_now
+                                               : -bat->current_now;
+            if (power > 0) {
+                if (bat->state == ACPI_BATTERY_CHARGING)
+                    bat->minutes_left = (gint)((bat->energy_full
+                                                - bat->energy_now) * 60 / power);
+                else
+                    bat->minutes_left = (gint)(bat->energy_now * 60 / power);
+                if (bat->minutes_left < 0)
+                    bat->minutes_left = -1;
+            }
+        }
     }
 }
 
@@ -176,6 +280,11 @@ AcpiBatteryList *acpi_battery_list_read(const char *root)
         bat->energy_full = -1;
         bat->power_now = -1;
         bat->minutes_left = -1;
+        /* current_now = -1 означает «файла нет», а отрицательное
+         * значение — реальный разряд. Различать обязательно: иначе
+         * quirk «отрицательный ток значит разряд» срабатывал бы на
+         * каждой батарее без файла current_now. */
+        bat->current_now = -1;
 
         {
             char *d = g_build_filename(root, entry, NULL);
@@ -242,6 +351,7 @@ void acpi_battery_free(AcpiBattery *bat)
     g_free(bat->name);
     g_free(bat->type);
     g_free(bat->status);
+    g_free(bat->capacity_level);
     g_free(bat);
 }
 
