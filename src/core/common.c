@@ -955,8 +955,8 @@ static void xs_core_prop_opacity_changed(GtkRange *range, gpointer data)
 
 /* Ручное редактирование X/Y окна в Properties/Window: живьём перемещает
  * окно (gtk_window_move) и сохраняет в конфиг плагина — как configure-event.
- * Если позиция заблокирована (Window > Lock) — только в конфиг, без move,
- * чтобы не спорить с WM. */
+ * Lock по-прежнему запрещает автоматически принимать новые координаты из
+ * configure/drag, но не должен блокировать явно заданные пользователем X/Y. */
 static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
 {
     XsPlugin *p = data;
@@ -978,7 +978,7 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
         state->x = v;
     else
         state->y = v;
-    if (!state->locked) {
+    {
         /* гость рамки: v — координаты ВНУТРИ content-зоны →
          * КЛАМП в зону (не вылезать за рамку) и пересчёт в
          * координаты родителя (cx/cy) */
@@ -2309,6 +2309,16 @@ XsPlugin *xs_core_add_instance_for_host(const char *type,
     kf = xs_core_plugin_conf(name);
     /* xs_type: тип плагина в конфиге (нужен для запуска гостей). */
     g_key_file_set_string(kf, name, "xs_type", type);
+    /* Новый инстанс создаётся незаблокированным: при lock=true ядро в
+     * on_configure_event выходит по первому же return FALSE, окно
+     * двигается (это делает WM), а state->x/y не обновляются и в
+     * Properties, ни в конфиге — перетаскивание перестаёт работать,
+     * причём выглядит как «перетаскивается, но координаты не меняются».
+     *
+     * В коде дефолт и так FALSE, и ключ раньше просто не писался, так
+     * что поведение не меняется. Запись явная: значение видно в
+     * конфиге и не поедет, если дефолт когда-нибудь поменяют. */
+    g_key_file_set_boolean(kf, name, "lock", FALSE);
     /* Новый инстанс через Launch Applet трея — main_daemon (гость,
      * созданный рамкой, проходит через start_guest_new и здесь
      * получает started_by=plugin, чтобы не попасть в трей/автостарт). */
@@ -2910,6 +2920,16 @@ static void theme_draw_full(XsPlugin *p, cairo_t *cr, const char *element,
     double nw = 0.0, nh = 0.0;
 
     if (!p || !cr || !element || width <= 0.0 || height <= 0.0)
+        return;
+    /* A/B-замер для охоты за ростом RSS: XSCREENLETS_NO_SVG=1 полностью
+     * отключает рендер SVG. Если при выключенном рендере RSS всё равно
+     * растёт с той же скоростью, значит рендер НЕ является причиной и
+     * кэшировать поверхности бессмысленно.
+     *
+     * Обратимо и отрисовку не портит: SVG просто не рисуется. Переменная
+     * читается на каждый вызов - getenv дешёвый, зато переключать режим
+     * можно без перезапуска демона, а для A/B это удобно. */
+    if (g_getenv("XSCREENLETS_NO_SVG") != NULL)
         return;
     it = theme_item(p, element);
     if (!it)
