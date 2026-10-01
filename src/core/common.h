@@ -103,6 +103,29 @@ const char *xs_core_onoff_dir(void);
 /* Каталог реальных конфигов (~/.config/xscreenlets/.plugins) */
 const char *xs_core_plugins_dir(void);
 const char *xs_core_plugdir(void);
+
+/* Каталог системных тем: -DXS_THEME_DIR при сборке или --themedir.
+ * NULL, если не задан. Задаётся демоном через xs_core_set_themedir();
+ * переменная живёт в common.c, поскольку common.o линкуется и в xclock,
+ * где main.c нет. */
+void xs_core_set_themedir(const char *dir);
+const char *xs_core_themedir(void);
+
+/* Найти каталог ТЕМЫ апплета с приоритетом пользователь -> система.
+ *
+ * Порядок поиска:
+ *   1. $XDG_CONFIG_HOME/xscreenlets/themes/<plugin>/<theme>   (пользователь)
+ *   2. $HOME/.xscreenlets/themes/<plugin>/<theme>             (legacy, старые
+ *      установки screenlets держали темы здесь)
+ *   3. <XS_THEME_DIR>/<plugin>/<theme>                       (система)
+ *
+ * Пользовательские темы идут первыми намеренно: установленный пакет
+ * не должен перекрывать настройку конкретного пользователя.
+ *
+ * Возвращает новый путь (владелец вызывающего, g_free) либо NULL,
+ * если нигде нет. Каталог существование НЕ проверяет - вызывающий
+ * передаёт результат в theme_load(), который и вернёт ошибку. */
+char *xs_core_find_theme(const char *plugin, const char *theme);
 /* найти живой инстанс по имени (NULL если не запущен) */
 char **xs_core_list_running_daemon_instances(int *count);
 XsPlugin *xs_core_find_instance(const char *name);

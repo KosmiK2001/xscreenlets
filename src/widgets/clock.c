@@ -216,29 +216,17 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 	/* Apply opacity */
 	xs_host_api()->set_opacity(p, priv->opacity);
 
-	/* Load theme */
-	const char *xdg_theme_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", p->type ? p->type : p->name, priv->theme, NULL);
-	gboolean loaded = xs_host_api()->theme_load(p, xdg_theme_dir);
-	if (loaded) {
-		clock_read_theme_conf(xdg_theme_dir);
-	} else {
-		const char *home_theme_dir = g_build_filename(g_get_home_dir(), ".xscreenlets", "themes", p->type ? p->type : p->name, priv->theme, NULL);
-		loaded = xs_host_api()->theme_load(p, home_theme_dir);
-		if (loaded) {
-			clock_read_theme_conf(home_theme_dir);
-		}
-		g_free((void*)home_theme_dir);
-	}
-	g_free((void*)xdg_theme_dir);
-
-	if (!loaded) {
-		const char *system_theme_dir = g_build_filename("/usr/share/screenlets", "Clock", "themes", priv->theme, NULL);
-		loaded = xs_host_api()->theme_load(p, system_theme_dir);
-		if (loaded) {
-			clock_read_theme_conf(system_theme_dir);
-		}
-		g_free((void*)system_theme_dir);
-	}
+	/* Загрузка темы: единый поиск с приоритетом пользователь -> система.
+	 * Раньше здесь стоял собственный обход XDG, ~/.xscreenlets и
+	 * /usr/share/screenlets/Clock - последнего каталога в системе нет,
+	 * и системный каталог пакета не поддерживался вовсе. Теперь
+	 * системный путь задаётся -DXS_THEME_DIR при сборке или --themedir. */
+	char *theme_dir = xs_core_find_theme(p->type ? p->type : p->name,
+	                                     priv->theme);
+	gboolean loaded = theme_dir && xs_host_api()->theme_load(p, theme_dir);
+	if (loaded)
+		clock_read_theme_conf(theme_dir);
+	g_free(theme_dir);
 
 	if (xs_core_is_debug()) {
 		const char *search_dirs[] = {
@@ -598,22 +586,11 @@ static gboolean clock_apply_theme(XsPlugin *p, const char *name)
 
     if (!priv)
         return FALSE;
-    dir = g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes",
-                           "clock", name, NULL);
-    loaded = xs_host_api()->theme_load(p, dir);
+    /* Единый поиск темы вместо трёх жёстко зашитых путей: XDG, legacy
+     * ~/.xscreenlets и несуществующий /usr/share/screenlets/Clock. */
+    dir = xs_core_find_theme("clock", name);
+    loaded = dir && xs_host_api()->theme_load(p, dir);
     g_free(dir);
-    if (!loaded) {
-        dir = g_build_filename(g_get_home_dir(), ".xscreenlets", "themes",
-                               "clock", name, NULL);
-        loaded = xs_host_api()->theme_load(p, dir);
-        g_free(dir);
-    }
-    if (!loaded) {
-        dir = g_build_filename("/usr/share/screenlets", "Clock", "themes",
-                               name, NULL);
-        loaded = xs_host_api()->theme_load(p, dir);
-        g_free(dir);
-    }
     if (!loaded) {
         xs_host_api()->log("clock: cannot load theme %s", name);
         return FALSE;

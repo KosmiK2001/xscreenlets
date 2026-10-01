@@ -580,16 +580,10 @@ static void cal_menu_cmd(XsPlugin *p, const char *cmd)
 		g_key_file_set_string(priv->kf, p->name, "theme", priv->theme);
 		xs_core_plugin_conf_flush(p->name);
 		{
-			char *dir = g_build_filename(
-			    g_get_user_config_dir(), "xscreenlets", "themes",
-			    p->type ? p->type : p->name, priv->theme, NULL);
-			if (!xs_host_api()->theme_load(p, dir)) {
-				g_free(dir);
-				dir = g_build_filename(
-				    "/usr/share/screenlets", "ClearCalendar",
-				    "themes", priv->theme, NULL);
+			char *dir = xs_core_find_theme(
+			    p->type ? p->type : p->name, priv->theme);
+			if (dir)
 				xs_host_api()->theme_load(p, dir);
-			}
 			g_free(dir);
 		}
 		if (p->win)
@@ -1075,20 +1069,16 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 	/* Прозрачность (рендером через ядро — как у clock) */
 	xs_host_api()->set_opacity(p, priv->opacity);
 
-	/* Тема: пользовательский каталог → системный; theme = "none" — без */
+	/* Тема: единый поиск — $XDG_CONFIG_HOME, legacy ~/.xscreenlets,
+	 * системный каталог (-DXS_THEME_DIR/--themedir). Прежде здесь был
+	 * жёстко зашит /usr/share/screenlets/ClearCalendar, которого в
+	 * системе нет, из-за чего системные темы не находились никогда. */
 	{
-		char *dir = g_build_filename(g_get_user_config_dir(),
-		                             "xscreenlets", "themes",
-		                             p->type ? p->type : p->name, priv->theme, NULL);
-		if (!xs_host_api()->theme_load(p, dir)) {
-			g_free(dir);
-			dir = g_build_filename("/usr/share/screenlets",
-			                       "ClearCalendar", "themes",
-			                               priv->theme, NULL);
-			if (!xs_host_api()->theme_load(p, dir))
-				p->host->log("calendar: theme %s: using plain "
-				             "background", priv->theme);
-		}
+		char *dir = xs_core_find_theme(p->type ? p->type : p->name,
+		                               priv->theme);
+		if (!dir || !xs_host_api()->theme_load(p, dir))
+			p->host->log("calendar: theme %s: using plain "
+			             "background", priv->theme);
 		g_free(dir);
 	}
 

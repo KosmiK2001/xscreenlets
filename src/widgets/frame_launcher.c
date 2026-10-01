@@ -64,19 +64,16 @@ static void fl_load_theme(XsPlugin *p, PrivData *priv)
 	const char *type = p->type ? p->type : p->name;
 	char *dir;
 
-	dir = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-	                       "themes", type, priv->theme, NULL);
+	/* Единый поиск темы: $XDG_CONFIG_HOME, затем legacy ~/.xscreenlets,
+	 * затем системный каталог (-DXS_THEME_DIR или --themedir). Прежде
+	 * здесь искали только в XDG, а запасным был /usr/share/screenlets/
+	 * FrameLauncher - каталога с таким именем в системе нет. */
+	dir = xs_core_find_theme(type, priv->theme);
 	if (!xs_host_api()->theme_load(p, dir)) {
+		xs_host_api()->log("frame_launcher: theme '%s' not found, built-in frame",
+		                   priv->theme);
 		g_free(dir);
-		dir = g_build_filename("/usr/share/screenlets",
-		                       "FrameLauncher", "themes",
-		                       priv->theme, NULL);
-		if (!xs_host_api()->theme_load(p, dir)) {
-			xs_host_api()->log("frame_launcher: theme '%s' not found, built-in frame",
-			                   priv->theme);
-			g_free(dir);
-			return;
-		}
+		return;
 	}
 	fl_read_theme_frame(priv, dir);
 	g_free(dir);

@@ -1470,26 +1470,40 @@ static PangoFontDescription *cw_font(const char *spec)
 }
 
 /* Ищем каталог темы: сначала путь из настроек, потом наш каталог рядом
- * с плагином, потом тема родного питоновского апплета — чтобы всё
- * работало даже без установки нашей копии темы. */
+ * с плагином, потом системный каталог пакета, потом тема родного
+ * питоновского апплета — чтобы всё работало даже без установки нашей
+ * копии темы.
+ *
+ * Тема clearweather — это набор PNG (0.png, 1.png, ...), а не SVG, и
+ * проверяется по наличию 0.png. Общая функция xs_core_find_theme()
+ * проверяет каталог на IsDir, что здесь тоже подходит, но проба 0.png
+ * точнее: каталог может существовать и быть пустым. */
 static char *cw_find_theme(const char *configured)
 {
     char *own = NULL;
     char *found = NULL;
     const char *home = g_getenv("HOME");
-    char *c1 = NULL, *c2 = NULL;
+    const char *sysdir = xs_core_themedir();
+    char *c1 = NULL, *c2 = NULL, *c3 = NULL;
     gsize i;
-    const char *cands[3];
+    const char *cands[4];
 
     if (home)
         own = g_build_filename(home, "lib", "xscreenlets", "plugins",
                                "clearweather_theme", NULL);
     c1 = own;
-    c2 = g_strdup("/usr/share/screenlets/ClearWeather/themes/default");
+    /* Системный каталог: -DXS_THEME_DIR при сборке или --themedir.
+     * Раньше вместо него был жёстко зашитый /usr/share/screenlets/
+     * ClearWeather, которого в системе нет. */
+    c2 = (sysdir && sysdir[0])
+             ? g_build_filename(sysdir, "clearweather", "default", NULL)
+             : NULL;
+    c3 = g_strdup("/usr/share/screenlets/ClearWeather/themes/default");
 
     cands[0] = (configured && configured[0]) ? configured : NULL;
     cands[1] = c1;
     cands[2] = c2;
+    cands[3] = c3;
 
     for (i = 0; i < G_N_ELEMENTS(cands); i++) {
         char *probe;
@@ -1505,6 +1519,7 @@ static char *cw_find_theme(const char *configured)
     }
     g_free(c1);
     g_free(c2);
+    g_free(c3);
     return found;
 }
 

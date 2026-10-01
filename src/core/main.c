@@ -5,6 +5,18 @@
 #endif
 
 #include "common.h"
+
+
+/* Каталоги, задаваемые при сборке. ebuild передаёт их через EXTRA_CFLAGS
+ * (-DXS_PLUGIN_DIR=... -DXS_THEME_DIR=...), поэтому исходник не правят
+ * под конкретную систему. Пустые значения = искать только в $HOME,
+ * то есть поведение разработчика без установки пакета. */
+#ifndef XS_PLUGIN_DIR
+#define XS_PLUGIN_DIR ""
+#endif
+#ifndef XS_THEME_DIR
+#define XS_THEME_DIR ""
+#endif
 #include "tray.h"
 
 #include <glib-unix.h>
@@ -615,10 +627,17 @@ int main(int argc, char **argv)
     g_free(g_conf_path);
     g_conf_path = g_build_filename(g_get_user_config_dir(),
                                    "xscreenlets", "xscreenletsd.conf", NULL);
-    /* Плагины по умолчанию — наш install-каталог (/usr/lib64/... доступен
-     * через --plugdir при системной установке). */
+    /* Плагины по умолчанию — наш install-каталог (/usr/libexec/... доступен
+     * через --plugdir при системной установке).
+     *
+     * XS_PLUGIN_DIR задаётся при сборке (-D) и имеет приоритет: он указывает
+     * на реально установленный пакет. Каталог пользователя тоже
+     * проверяется - иначе, установив пакет в /usr, нельзя было бы
+     * положить рядом свою версию плагина. Порядок: сначала системный,
+     * чтобы установленный пакет был источником истины, затем ~/. */
     g_plugdir = g_build_filename(g_get_home_dir(), "lib", "xscreenlets",
                                  "plugins", NULL);
+    xs_core_set_themedir(XS_THEME_DIR);
 
     int want_debug = 0;
 
@@ -629,6 +648,13 @@ int main(int argc, char **argv)
         } else if (g_strcmp0(argv[i], "--plugdir") == 0 && i + 1 < argc) {
             g_free(g_plugdir);
             g_plugdir = g_strdup(argv[++i]);
+        } else if (g_strcmp0(argv[i], "--themedir") == 0 && i + 1 < argc) {
+            /* Каталог системных тем. Нужен, когда пакет установлен в /usr:
+             * пользовательские темы лежат в $XDG_CONFIG_HOME и ищутся
+             * первыми, но сам каталог пакета задаётся здесь или через -D.
+             * Хранится в common.c - функцию поиска тем использует и xclock,
+             * который линкуется без main.c. */
+            xs_core_set_themedir(argv[++i]);
         } else if (g_strcmp0(argv[i], "--debug") == 0) {
             /* Под USE=debug сюда же попадает установка ловца падений:
              * одна опция — «диагностика», без отдельного --soft-debug. */
@@ -685,5 +711,6 @@ int main(int argc, char **argv)
     free_loaded_modules();
     g_free(g_conf_path);
     g_free(g_plugdir);
+    xs_core_set_themedir(NULL);
     return 0;
 }

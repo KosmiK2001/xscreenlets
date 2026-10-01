@@ -2830,6 +2830,149 @@ static void xs_theme_item_free(gpointer v)
 	g_free(it);
 }
 
+/* Каталог системных тем. Хранится здесь, а не в main.c, потому что
+ * common.o линкуется и в xclock, где main.c нет. Задаётся демоном при
+ * старте: из --themedir либо из XS_THEME_DIR, зашитой при сборке. */
+static char *g_themedir = NULL;
+
+void xs_core_set_themedir(const char *dir)
+{
+    g_free(g_themedir);
+    g_themedir = (dir && dir[0]) ? g_strdup(dir) : NULL;
+}
+
+const char *xs_core_themedir(void)
+{
+    return g_themedir;
+}
+
+/* Поиск каталога темы с приоритетом пользователь -> система.
+ *
+ * Раньше каждый апплет искал тему по-своему, и все пять способов
+ * различались: dirname(plugdir)/themes у clearrss, $HOME/lib/.../plugins/
+ * clearweather_theme у clearweather, $XDG_CONFIG_HOME и $HOME/.xscreenlets
+ * у clock и calendar, "FrameLauncher"/themes у frame_launcher. При переносе
+ * плагинов в /usr/libexec/xscreenlets половина этих путей перестала бы
+ * существовать, причём у clearrss dirname дал бы /usr/libexec.
+ *
+ * Теперь порядок один для всех:
+ *   1. $XDG_CONFIG_HOME/xscreenlets/themes/<plugin>/<theme>
+ *   2. $HOME/.xscreenlets/themes/<plugin>/<theme>      (legacy)
+ *   3. <XS_THEME_DIR>/<plugin>/<theme>                (система, -D/--themedir)
+ *
+ * Пользовательские темы первыми намеренно: установленный пакет не должен
+ * перекрывать настройку конкретного пользователя. */
+/* Имена каталогов тем родных апплетов screenlets отличаются от типов
+ * наших плагинов: тип clock, а каталог /usr/share/screenlets/Clock.
+ * Без этого сопоставления темы, установленные вместе с оригинальным
+ * screenlets, перестают находиться после перехода на xs_core_find_theme.
+ * Запись отсутствует, если у апплета нет темы в старой раскладке. */
+static const char *xs_legacy_theme_dir(const char *plugin)
+{
+    static const struct { const char *type, *dir; } map[] = {
+        { "clock",         "Clock"         },
+        { "calendar",      "ClearCalendar" },
+        { "clearrss",      "ClearRss"      },
+        { "clearweather",  "ClearWeather"  },
+    };
+    gsize i;
+
+    if (!plugin)
+        return NULL;
+    for (i = 0; i < G_N_ELEMENTS(map); i++)
+        if (g_strcmp0(map[i].type, plugin) == 0)
+            return map[i].dir;
+    return NULL;
+}
+
+char *xs_core_find_theme(const char *plugin, const char *theme)
+{
+    char *user_xdg, *user_legacy, *system, *out;
+    const char *td = xs_core_themedir();
+
+    if (!plugin || !plugin[0])
+        return NULL;
+    if (!theme || !theme[0])
+        theme = "default";
+
+    /* ВАЖНО: out обязан быть инициализирован сразу. Если системный каталог
+     * не задан (XS_THEME_DIR пуст и --themedir не передан) и пользовательских
+     * тем нет, ни одна из веток ниже не выполнится - а без инициализации
+     * последующая проверка if (!out) прочитала бы мусор, и g_free() на
+     * мусоре роняет демон с "free(): invalid pointer". */
+    out = NULL;
+
+    user_xdg = g_build_filename(g_get_user_config_dir(), "xscreenlets",
+                                "themes", plugin, theme, NULL);
+    user_legacy = g_build_filename(g_get_home_dir(), ".xscreenlets",
+                                   "themes", plugin, theme, NULL);
+    /* Системный каталог может быть не задан (обычная сборка из дерева).
+     * Тогда последний шаг пропускается и остаются пользовательские. */
+    system = (td && td[0])
+                 ? g_build_filename(td, plugin, theme, NULL)
+                 : NULL;
+
+    if (g_file_test(user_xdg, G_FILE_TEST_IS_DIR))
+        out = user_xdg;
+    else if (g_file_test(user_legacy, G_FILE_TEST_IS_DIR))
+        out = user_legacy;
+    else if (system) {
+        /* Системный каталог задан, но конкретной темы в нём может не
+         * оказаться: у пакета не все темы, а у пользователя своя. */
+        out = g_file_test(system, G_FILE_TEST_IS_DIR) ? system : NULL;
+    }
+
+    /* Темы, установленные рядом с плагинами: <каталог плагинов>/../themes/
+     * <плагин>/<тема>. Для ~/lib/xscreenlets/plugins это даёт
+     * ~/lib/xscreenlets/themes/clearrss/default - то самое место, куда
+     * make install кладёт темы. Это пользовательский каталог, поэтому он
+     * проверяется раньше каталогов системы. */
+    if (!out) {
+        const char *pd = xs_core_plugdir();
+        if (pd && pd[0]) {
+            /* g_path_get_dirname() возвращает НОВУЮ строку - её нужно
+             * освободить, иначе утечка на каждый вызов (проверено ASan:
+             * 37 байт на вызов). */
+            char *parent = g_path_get_dirname(pd);
+            char *near = g_build_filename(parent, "themes", plugin, theme, NULL);
+            g_free(parent);
+            if (g_file_test(near, G_FILE_TEST_IS_DIR))
+                out = near;
+            else
+                g_free(near);
+        }
+    }
+
+    /* Последний шанс: тема родного апплета screenlets, если она стоит в
+     * системе. Имена каталогов там с заглавной буквы, поэтому требуется
+     * сопоставление с типом плагина. */
+    if (!out) {
+        const char *lname = xs_legacy_theme_dir(plugin);
+        if (lname) {
+            char *old_sys = g_build_filename("/usr/share/screenlets",
+                                             lname, "themes", theme, NULL);
+            if (g_file_test(old_sys, G_FILE_TEST_IS_DIR))
+                out = old_sys;
+            else
+                g_free(old_sys);
+        }
+    }
+
+    if (!out) {
+        /* Ничего не нашлось: отдаём XDG-путь, чтобы theme_load() внятно
+         * сказал, чего не хватает, вместо молчаливого NULL. */
+        out = user_xdg;
+    }
+
+    g_free(user_legacy);
+    /* освобождаем только те кандидаты, которые не стали ответом */
+    if (out != user_xdg)
+        g_free(user_xdg);
+    if (system && out != system)
+        g_free(system);
+    return out;
+}
+
 static gboolean theme_load(XsPlugin *p, const char *dir)
 {
     XsWinState *state;

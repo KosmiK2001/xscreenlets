@@ -180,9 +180,16 @@ static char *rss_project_root_from_plugdir(void)
 {
     const char *plugdir = xs_core_plugdir();
 
+    char *parent, *out;
+
     if (!plugdir || !plugdir[0])
         return NULL;
-    return g_build_filename(g_path_get_dirname(plugdir), "themes", "clearrss", NULL);
+    /* g_path_get_dirname() возвращает новую строку: освобождаем её,
+     * иначе течёт по 37 байт на каждый вызов. */
+    parent = g_path_get_dirname(plugdir);
+    out = g_build_filename(parent, "themes", "clearrss", NULL);
+    g_free(parent);
+    return out;
 }
 
 static gboolean rss_load_theme(XsPlugin *p, const char *name)
@@ -193,12 +200,26 @@ static gboolean rss_load_theme(XsPlugin *p, const char *name)
 
     if (!p || !name || !name[0])
         return FALSE;
-    user = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-                            "themes", "clearrss", name, NULL);
+    /* Единый поиск: пользовательские темы ($XDG_CONFIG_HOME, legacy
+     * ~/.xscreenlets) имеют приоритет над системными. Прежде здесь стоял
+     * свой обход - XDG, потом dirname(plugdir), потом несуществующий
+     * /usr/share/screenlets/ClearRss. С переносом плагинов в
+     * /usr/libexec/xscreenlets dirname(plugdir) дал бы /usr/libexec, и темы
+     * перестали бы находиться. Системный каталог теперь задаётся
+     * -DXS_THEME_DIR при сборке или --themedir. */
+    user = xs_core_find_theme("clearrss", name);
     ok = xs_host_api()->theme_load(p, user);
+    if (getenv("XSCREENLETS_DEBUG_THEME"))
+        p->host->log("clearrss: theme dir=%s loaded=%d shadow=%d shadow_mid=%d button_bg=%d",
+                     user ? user : "(null)", ok,
+                     xs_core_theme_has(p, "shadow"),
+                     xs_core_theme_has(p, "shadow_mid"),
+                     xs_core_theme_has(p, "button_bg"));
     g_free(user);
     if (ok)
         return TRUE;
+    /* Запасной путь: тема рядом с плагином в дереве исходников - нужен
+     * при разработке, когда демон запускается из build/. */
     dir = rss_project_root_from_plugdir();
     if (dir) {
         char *project = g_build_filename(dir, name, NULL);
@@ -206,12 +227,6 @@ static gboolean rss_load_theme(XsPlugin *p, const char *name)
         g_free(project);
     }
     g_free(dir);
-    if (!ok) {
-        dir = g_build_filename("/usr/share/screenlets", "ClearRss",
-                               "themes", name, NULL);
-        ok = xs_host_api()->theme_load(p, dir);
-        g_free(dir);
-    }
     return ok;
 }
 
@@ -1561,7 +1576,9 @@ controls:
          * диаметре тень полностью уходит под кнопку и её не видно.
          * Коэффициент 1.25 даёт ореол ~3 px при шаге кнопок 32 px. */
         {
-            double side = 2.0 * btn_r * 1.25;
+            /* Ореол шире, чем раньше: при 1.25 тень почти полностью уходила
+             * под кнопку, и на чёрном фоне читалась как ровная заливка. */
+            double side = 2.0 * btn_r * 1.6;
             const int btn_x[3] = { x1, x2, x3 };
             /* Отзеркаленная вручную тень button_bg рисовалась тем же
              * side = 2*btn_r*1.25, что и общая, и оказывалась почти целиком
@@ -1606,10 +1623,18 @@ controls:
                  * тень. Отсутствующий элемент -> общая "shadow". */
                 if (!xs_core_theme_has(p, el))
                     el = "shadow";
-                if (xs_core_theme_has(p, el))
+                if (xs_core_theme_has(p, el)) {
+                    /* Тени в теме полупрозрачные и на почти чёрном фоне
+                     * applet-а практически не читаются. Рисуем во временную
+                     * группу и накладываем с усилением контраста: так тень
+                     * остаётся мягкой, но становится видимой. */
+                    cairo_push_group(cr);
                     xs_host_api()->theme_draw_full(
                         p, cr, el, btn_x[i] - side / 2.0, cy - side / 2.0,
                         side, side);
+                    cairo_pop_group_to_source(cr);
+                    cairo_paint_with_alpha(cr, 2.2);
+                }
             }
             cairo_set_source_rgba(cr, 0.25, 0.25, 0.25, .35);
             for (int i = 0; i < 3; i++) {
@@ -1628,9 +1653,11 @@ controls:
          * Поэтому значки — снова ломаные из двух отрезков, а работа идёт
          * над тенью (отдельный элемент темы "shadow"). */
         {
-            const double lw = radius * 0.30;        /* толщина штриха */
-            const double ax = radius * 0.42;        /* вынос по X */
-            const double ay = radius * 0.62;        /* вынос по Y */
+            /* Уменьшены на 20%: прежний 0.30/0.42/0.62 давал шевроны,
+             * которые читались крупнее самих круглых кнопок. */
+            const double lw = radius * 0.24;        /* толщина штриха */
+            const double ax = radius * 0.336;       /* вынос по X */
+            const double ay = radius * 0.496;       /* вынос по Y */
             const int btn[3] = { x1, x2, x3 };
 
             cairo_set_line_width(cr, lw);
