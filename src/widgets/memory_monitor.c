@@ -716,8 +716,8 @@ static XsPluginDesc mm_desc = {
     "memory_monitor",
     XS_API_VERSION,
     &mm_ops,
-    "System RAM and swap monitor with independent scrolling histories",
-    "xscreenlets",
+    N_("System RAM and swap monitor with independent scrolling histories"),
+    "kosmik2001 <kosmik2001@gmail.com>",
     "1.0"
 };
 

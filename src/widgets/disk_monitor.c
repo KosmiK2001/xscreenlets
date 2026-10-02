@@ -1304,17 +1304,17 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
                         priv->label_x,priv->label_y);
     dm_add_separator(page);
     dm_add_series_block(priv,page,ctx,"Read text","read_font","read_text_color",
-                        "read_x","read_y","read_color","Read history",
+                        "read_x","read_y","read_color",_("Read history"),
                         priv->read_font,priv->read_text_color,priv->read_color,
                         priv->read_x,priv->read_y);
     dm_add_separator(page);
     dm_add_series_block(priv,page,ctx,"Write text","write_font","write_text_color",
-                        "write_x","write_y","write_color","Write history",
+                        "write_x","write_y","write_color",_("Write history"),
                         priv->write_font,priv->write_text_color,priv->write_color,
                         priv->write_x,priv->write_y);
     dm_add_separator(page);
     dm_add_series_block(priv,page,ctx,"Temperature text","temp_font","temp_text_color",
-                        "temp_x","temp_y","temp_color","Temperature history",
+                        "temp_x","temp_y","temp_color",_("Temperature history"),
                         priv->temp_font,priv->temp_text_color,priv->temp_color,
                         priv->temp_x,priv->temp_y);
     /* No "Background" row: since DM_GRAPH_TOP became 0 the graph covers the whole
@@ -1338,5 +1338,5 @@ static void dm_properties(XsPlugin *p, GtkNotebook *notebook)
 }
 
 static const XsPluginOps dm_ops={.init=dm_init,.draw=dm_draw,.tick=dm_tick,.shutdown=dm_shutdown,.properties=dm_properties};
-static XsPluginDesc dm_desc={"disk_monitor",XS_API_VERSION,&dm_ops,"Per-disk I/O and temperature history monitor","xscreenlets","1.0"};
+static XsPluginDesc dm_desc={"disk_monitor",XS_API_VERSION,&dm_ops,N_("Per-disk I/O and temperature history monitor"),"kosmik2001 <kosmik2001@gmail.com>","1.0"};
 XS_PLUGIN_EXPORT(&dm_desc)

@@ -484,8 +484,8 @@ static XsPluginDesc ab_desc = {
     "acpi_battery",
     XS_API_VERSION,
     &ab_ops,
-    "Battery charge, remaining time and state from sysfs power_supply",
-    "xscreenlets",
+    N_("Battery charge, remaining time and state from sysfs power_supply"),
+    "kosmik2001 <kosmik2001@gmail.com>",
     "1.0"
 };
 

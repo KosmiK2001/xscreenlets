@@ -1397,7 +1397,10 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
     /* Метаданные для разметки: desc/author/version — из дескриптора плагина.
      * desc/author — произвольный текст (могут содержать '&', '<' и т.п.),
      * поэтому экранируем для Pango-разметки. */
-    desc = (p && p->desc) ? p->desc : "";
+    /* desc переводится: это описание апплета в About, его читает
+     * пользователь. author не переводится - это имя и адрес,
+     * которые в pot попадать не должны. */
+    desc = (p && p->desc) ? _(p->desc) : "";
     author = (p && p->author) ? p->author : "";
     ver = (p && p->version) ? p->version : "";
     mu = g_string_new("");

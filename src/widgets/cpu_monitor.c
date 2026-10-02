@@ -1229,8 +1229,8 @@ static XsPluginDesc cm_desc = {
     "cpu_monitor",
     XS_API_VERSION,
     &cm_ops,
-    "Topology-aware per-socket CPU load, frequency and temperature monitor",
-    "xscreenlets",
+    N_("Topology-aware per-socket CPU load, frequency and temperature monitor"),
+    "kosmik2001 <kosmik2001@gmail.com>",
     "1.0"
 };
 

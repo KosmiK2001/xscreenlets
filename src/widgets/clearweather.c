@@ -3571,8 +3571,8 @@ static XsPluginDesc cw_desc = {
     "clearweather",
     XS_API_VERSION,
     &cw_ops,
-    "Погода: open-meteo и wttr.in, прямо или через прокси",
-    "kms",
+    N_("Погода: open-meteo и wttr.in, прямо или через прокси"),
+    "kosmik2001 <kosmik2001@gmail.com>",
     "0.1"
 };
 

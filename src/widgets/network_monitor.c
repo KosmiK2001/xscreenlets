@@ -2911,7 +2911,7 @@ static const XsPluginOps nm_ops = {
 };
 static XsPluginDesc nm_desc = {
     "network_monitor", XS_API_VERSION, &nm_ops,
-    "Per-interface up/down speed and history monitor",
-    "xscreenlets", "1.0"
+    N_("Per-interface up/down speed and history monitor"),
+    "kosmik2001 <kosmik2001@gmail.com>", "1.0"
 };
 XS_PLUGIN_EXPORT(&nm_desc)

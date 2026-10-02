@@ -65,6 +65,24 @@ int main(int argc, char **argv)
     check("Window", "Окно");
     check("Running Instances", "Запущенные апплеты");
 
+    /* Подписи блоков серий в настройках монитора диска. Раньше они
+     * доходили до пользователя английским через gtk_frame_new() из
+     * spec->title без перевода. */
+    check("Graph label", "Подпись графика");
+    check("Read text", "Текст чтения");
+    check("Read history", "История чтения");
+    check("Write text", "Текст записи");
+    check("Write history", "История записи");
+    check("Temperature text", "Текст температуры");
+    check("Temperature history", "История температуры");
+
+    /* Описания апплетов в About: берутся из XsPluginDesc, это статические
+     * данные, поэтому помечены N_(), а переводятся в common.c. */
+    check("Per-disk I/O and temperature history monitor",
+          "Монитор диска: ввод-вывод и история температуры по каждому диску");
+    check("Top processes sampled directly from /proc",
+          "Список процессов, снимаемый прямо из /proc");
+
     /* Два вызова подряд обязаны дать одну и ту же строку: tray.c
      * сравнивает подпись пункта меню с _("Running Instances"). */
     if (strcmp(_("Running Instances"), _("Running Instances")) != 0) {

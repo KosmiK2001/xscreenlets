@@ -366,6 +366,7 @@ XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
                   cal_add_color:3 cm_add_color:3 pl_add_color:3 \
                   pl_add_font:3 pl_add_int:3 \
                   ab_int_prop:4 dm_add_color:4 dm_add_int:4 \
+                  dm_add_series_block:4 \
                   mm_add_int:4 mm_add_color:4
 
 # Шаблон: msgid из исходников. Перегенерировать после правки строк:
@@ -427,8 +428,13 @@ $(BUILD_DIR)/test_weather_scroll: tests/test_weather_scroll.c src/core/i18n.c \
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_weather_scroll.c \
 		src/core/i18n.c $(LDFLAGS_PLUGIN)
 
+# GTK-тестам нужен дисплей. Без DISPLAY они падают с "cannot open
+# display", поэтому подставляем :0, если переменная не задана.
+XTEST_DISPLAY ?= :0
+
 test-weather-scroll: $(BUILD_DIR)/test_weather_scroll locale
-	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_weather_scroll
+	@DISPLAY=$(XTEST_DISPLAY) XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale \
+		$(BUILD_DIR)/test_weather_scroll
 
 # Проверка переноса пояснения в настройках батареи. Печатает
 # LABEL_WIDTH, WIN_WIDTH, WRAPPED и LABEL_FITS.
@@ -438,7 +444,8 @@ $(BUILD_DIR)/test_battery_wrap: tests/test_battery_wrap.c src/core/i18n.c \
 		src/core/i18n.c $(LDFLAGS_PLUGIN)
 
 test-battery-wrap: $(BUILD_DIR)/test_battery_wrap locale
-	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_battery_wrap
+	@DISPLAY=$(XTEST_DISPLAY) XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale \
+		$(BUILD_DIR)/test_battery_wrap
 
 # Переводы правого клика и оконных флагов. Проверяет форматные
 # строки "Add one more %s" и таблицы {label, what} с N_().

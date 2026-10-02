@@ -139,7 +139,10 @@ GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
 
     if (!spec || !content)
         return NULL;
-    frame = gtk_frame_new(spec->title);
+    /* Заголовок рамки переводится здесь, а не в dm_add_series_block:
+     * title - это подпись блока настроек, она видна пользователю,
+     * тогда как font_key/x_key/y_key рядом остаются ключами. */
+    frame = gtk_frame_new(_(spec->title));
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(box), 8);
     gtk_container_add(GTK_CONTAINER(frame), box);
@@ -187,6 +190,10 @@ GtkWidget *dm_series_block_widget(const DmSeriesBlockSpec *spec,
     gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(history_color), FALSE);
     g_object_set_data_full(G_OBJECT(history_color), "xs-key",
                            g_strdup(spec->history_color_key), g_free);
+    /* history_label уже переведён на стороне вызова dm_add_series_block:
+     * его десятый аргумент xgettext извлечь не может (см. Makefile,
+     * диапазон :4,10 вытаскивает только последний), поэтому там стоит
+     * явный _(). Здесь переводить второй раз незачем. */
     dm_series_compact_row(box, spec->history_label, history_color);
     return frame;
 }

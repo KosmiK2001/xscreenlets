@@ -1461,6 +1461,6 @@ static const XsPluginOps pl_ops = {
 
 static XsPluginDesc pl_desc = {
     "process_list", XS_API_VERSION, &pl_ops,
-    "Top processes sampled directly from /proc", "xscreenlets", "0.1"
+    N_("Top processes sampled directly from /proc"), "kosmik2001 <kosmik2001@gmail.com>", "0.1"
 };
 XS_PLUGIN_EXPORT(&pl_desc)
