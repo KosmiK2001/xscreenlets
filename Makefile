@@ -459,6 +459,15 @@ $(BUILD_DIR)/test_i18n_context: tests/test_i18n_context.c src/core/i18n.c | $(BU
 test-i18n-context: $(BUILD_DIR)/test_i18n_context locale
 	@LANGUAGE=ru $(BUILD_DIR)/test_i18n_context $(BUILD_DIR)/locale
 
+# Геометрия кнопок смены месяца в календаре. Координаты из
+# оригинального ClearCalendarScreenlet.py, гл. update_buttons
+# и detect_button.
+$(BUILD_DIR)/test_calendar_buttons: tests/test_calendar_buttons.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ tests/test_calendar_buttons.c
+
+test-calendar-buttons: $(BUILD_DIR)/test_calendar_buttons
+	@$(BUILD_DIR)/test_calendar_buttons
+
 
 install: all locale
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin

@@ -83,6 +83,9 @@ int main(int argc, char **argv)
     check("Top processes sampled directly from /proc",
           "Список процессов, снимаемый прямо из /proc");
 
+    /* Новая галка календаря: кнопки смены месяца в шапке. */
+    check("Month buttons", "Кнопки месяца");
+
     /* Два вызова подряд обязаны дать одну и ту же строку: tray.c
      * сравнивает подпись пункта меню с _("Running Instances"). */
     if (strcmp(_("Running Instances"), _("Running Instances")) != 0) {

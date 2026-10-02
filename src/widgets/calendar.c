@@ -43,6 +43,16 @@ typedef struct {
 	/* состояние просмотра */
 	int month_shift;        /* 0 = текущий месяц */
 	int cur_rows;           /* строк сетки видимого месяца (авто-высота) */
+	/* Кнопки смены месяца в шапке, как в оригинале
+	 * (ClearCalendarScreenlet.update_buttons/detect_button):
+	 * появляются при наведении на верхнюю полосу, по альфе.
+	 * alpha набирается по 0.2 за шаг, а кнопка под курсором
+	 * рисуется вторым проходом, как init_buttons в оригинале. */
+	gdouble btn_alpha;      /* 0..1, текущая видимость полосы */
+	int btn_pressed;        /* 1=назад 2=сегодня 3=вперёд, 0=нет */
+	int btn_hover;          /* курсор в полосе кнопок (для альфы) */
+	int btn_hover_idx;      /* индекс кнопки под курсором, 0=нет */
+	int enable_buttons;     /* «Смена месяца кнопками» */
 	/* события */
 	GPtrArray *events;
 } PrivData;
@@ -312,6 +322,60 @@ static void cal_rounded_rect(cairo_t *cr, double x, double y, double r,
 	cairo_fill(cr);
 }
 
+/* ---------- кнопки смены месяца (ClearCalendar) ----------
+ *
+ * Оригинал рисует их в левом верхнем углу кадра: горизонтальная
+ * полоса во всю ширину кадра и высотой 15 юнитов, три кнопки в
+ * её левой части.
+ *
+ * detect_button в оригинале: y 5.5..12.5, x 8.5..15.5 (назад),
+ * 18.5..25.5 (сегодня), 28.5..35.5 (вперёд). Координаты указаны в
+ * юнитах канона 102×base_h, поэтому здесь они же, а не пиксели окна.
+ */
+#define CAL_BTN_Y0      5.5
+#define CAL_BTN_Y1     12.5
+#define CAL_BTN_X0      8.5
+#define CAL_BTN_W       7.0
+#define CAL_BTN_GAP     3.0
+#define CAL_BTN_STRIP_W 100.0  /* ширина полосы: во весь кадр */
+#define CAL_BTN_STRIP_H  15.0  /* высота полосы: 15 юнитов */   /* ширина полосы-подложки: в оригинале
+                            update_buttons смотрит x >= 0 && x < 100,
+                            y 0..15. То есть полоса во всю ширину
+                            кадра, а не только под кнопками: курсор
+                            в любой её точке показывает кнопки. */
+#define CAL_BTN_ALPHA_STEP 0.2
+
+/* Кнопка под точкой (x,y) в юнитах канона; 0 = мимо.
+ *
+ * В оригинале полоса появляется, когда курсор в верхних
+ * CAL_BTN_STRIP юнитах (update_buttons: y >= 0 && y <= 15), а сама
+ * кнопка ловится уже по узкому прямоугольнику y 5.5..12.5. Отсюда
+ * два разных условия: cal_in_strip для видимости, cal_button_at для
+ * нажатия. Иначе курсор над пустым местом полосы гасил бы кнопки. */
+static gboolean cal_in_strip(double x, double y)
+{
+	return x >= 0.0 && x < CAL_BTN_STRIP_W
+	       && y >= 0.0 && y <= CAL_BTN_STRIP_H;
+	/* Ширина и высота полосы РАЗНЫЕ: 100 и 15. Поначалу обе оси
+	 * взяли одну константу, и тогда курсор в сетке дней (y>15)
+	 * показывал кнопки. Тест на y=40 это ловит. */
+}
+
+static int cal_button_at(double x, double y)
+{
+	int i;
+
+	if (y < CAL_BTN_Y0 || y > CAL_BTN_Y1)
+		return 0;
+	for (i = 0; i < 3; i++) {
+		double bx = CAL_BTN_X0 + i * (CAL_BTN_W + CAL_BTN_GAP);
+
+		if (x >= bx && x <= bx + CAL_BTN_W)
+			return i + 1;
+	}
+	return 0;
+}
+
 static void cal_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
 	PrivData *priv = p->priv;
@@ -382,6 +446,69 @@ static void cal_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	cal_color(cr, priv->font_color);
 	cairo_move_to(cr, 97.0 - ext.width, 5.0);
 	pango_cairo_show_layout(cr, layout);
+
+	/* ---- кнопки смены месяца ----
+	 *
+	 * Рисуются в тех же канонических координатах, что и остальное,
+	 * то есть до отката cairo_restore. Полоса-подложка идёт первым
+	 * проходом на btn_alpha, кнопка под курсором (или под пальцем) -
+	 * вторым, на полную альфу: так сделано в оригинале, где
+	 * init_buttons кладёт buttons-dim целиком, а наведение просто
+	 * меняет общую альфу полосы. */
+	if (priv->enable_buttons && priv->btn_alpha > 0.01) {
+		int bi;
+		int active = priv->btn_pressed ? priv->btn_pressed
+		                             : priv->btn_hover_idx;
+
+		cairo_save(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		if (xs_core_theme_has(p, "buttons-dim"))
+			xs_host_api()->theme_draw_native(p, cr, "buttons-dim",
+			                                 0.0, 0.0);
+		cairo_restore(cr);
+
+		/* Стрелки. Нажатая и наведённая рисуются ярче остальных,
+		 * поэтому цвет берём из font_color с полной альфой. */
+		cairo_save(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		for (bi = 0; bi < 3; bi++) {
+			double cx = CAL_BTN_X0 + bi * (CAL_BTN_W + CAL_BTN_GAP)
+			            + CAL_BTN_W / 2.0;
+			double cy = (CAL_BTN_Y0 + CAL_BTN_Y1) / 2.0;
+			double a = priv->btn_alpha
+			           * (bi + 1 == active ? 1.0 : 0.45);
+			double ax = 2.0, ay = 2.5;
+
+			cairo_save(cr);
+			cairo_set_source_rgba(cr, priv->font_color[0],
+			                      priv->font_color[1],
+			                      priv->font_color[2], a);
+			cairo_set_line_width(cr, 1.2);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+			cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+			/* 0 = влево (предыдущий месяц), 1 = «сегодня»,
+			 * 2 = вправо (следующий). Средняя рисуется точкой
+			 * с отрезками вверх-вниз, как месяц в оригинале. */
+			if (bi == 1) {
+				cairo_arc(cr, cx, cy - 1.2, 0.9, 0,
+				          2 * XS_PI_C);
+				cairo_fill(cr);
+				cairo_move_to(cr, cx, cy);
+				cairo_line_to(cr, cx, cy + 2.4);
+				cairo_stroke(cr);
+			} else {
+				double d = bi == 0 ? -1.0 : 1.0;
+
+				cairo_move_to(cr, cx + ax * d, cy);
+				cairo_line_to(cr, cx - ax * d, cy - ay);
+				cairo_line_to(cr, cx - ax * d, cy + ay);
+				cairo_close_path(cr);
+				cairo_fill(cr);
+			}
+			cairo_restore(cr);
+		}
+		cairo_restore(cr);
+	}
 
 	/* локализованные имена дней недели */
 	day_names = g_new0(char *, 7);
@@ -490,19 +617,113 @@ static void cal_fit_height(XsPlugin *p, PrivData *priv)
 	}
 }
 
-static gboolean calendar_button(XsPlugin *p, GdkEventButton *ev)
+/* Сдвиг видимого месяца с пересчётом высоты. delta: +1 вперёд,
+ * -1 назад, 0 — текущий месяц. */
+static void cal_shift_month(XsPlugin *p, int delta)
 {
 	PrivData *priv = p->priv;
 
 	if (!priv)
+		return;
+	if (delta == 0)
+		priv->month_shift = 0;
+	else {
+		priv->month_shift += delta;
+		if (priv->month_shift > 120)
+			priv->month_shift = 120;
+		if (priv->month_shift < -120)
+			priv->month_shift = -120;
+	}
+	cal_fit_height(p, priv);
+	if (p->win)
+		gtk_widget_queue_draw(p->win);
+}
+
+/* Экранные координаты события → канон 102×base_h, в котором нарисованы
+ * кнопки. Возвращает FALSE, если точка вне кадра (кадр центрирован). */
+static gboolean cal_event_to_canon(XsPlugin *p, int w, int h, double ex,
+                                   double ey, double *cx, double *cy)
+{
+	PrivData *priv = p->priv;
+	double k, base_h, ox, oy;
+
+	if (!priv)
+		return FALSE;
+	base_h = 25 + (priv->cur_rows < 5 ? 5 : priv->cur_rows) * 12 + 4;
+	k = w / 102.0;
+	if (h / base_h < k)
+		k = h / base_h;
+	ox = (w - 102.0 * k) / 2.0;
+	oy = (h - base_h * k) / 2.0;
+	if (k <= 0)
+		return FALSE;
+	*cx = (ex - ox) / k;
+	*cy = (ey - oy) / k;
+	return TRUE;
+}
+
+/* Наведение: запоминаем кнопку под курсором. Саму альфу двигает tick -
+ * как update_buttons в оригинале, там стоит таймер на 100 мс. */
+static gboolean calendar_motion(XsPlugin *p, GdkEventMotion *ev)
+{
+	PrivData *priv = p->priv;
+	double cx, cy;
+	int hit, idx;
+
+	if (!priv || !p->win || !priv->enable_buttons)
+		return FALSE;
+	if (!cal_event_to_canon(p, gtk_widget_get_allocated_width(p->win),
+	                        gtk_widget_get_allocated_height(p->win),
+	                        ev->x, ev->y, &cx, &cy))
+		return FALSE;
+	/* Видимость полосы даёт факт нахождения курсора в верхних
+	 * CAL_BTN_STRIP юнитах, а не попадание в кнопку. Иначе
+	 * кнопки гасли бы при уходе на пустое место полосы -
+	 * ровно то, что в оригинале делает update_buttons. */
+	hit = cal_in_strip(cx, cy) ? 1 : 0;
+	idx = cal_button_at(cx, cy);
+	if (hit != priv->btn_hover || idx != priv->btn_hover_idx) {
+		priv->btn_hover = hit;
+		priv->btn_hover_idx = idx;
+		gtk_widget_queue_draw(p->win);
+	}
+	return FALSE;   /* возврат ложно: перетаскивание окна не отменяем */
+}
+
+static gboolean calendar_button(XsPlugin *p, GdkEventButton *ev)
+{
+	PrivData *priv = p->priv;
+	double cx, cy;
+	int hit;
+
+	if (!priv)
 		return FALSE;
 	if (ev->button == 2) { /* средняя — вернуться к текущему месяцу */
-		priv->month_shift = 0;
-		cal_fit_height(p, priv);
-		if (p->win)
-			gtk_widget_queue_draw(p->win);
+		cal_shift_month(p, 0);
 		return TRUE;
 	}
+	if (!priv->enable_buttons || ev->button != 1)
+		return FALSE;
+	if (!cal_event_to_canon(p, gtk_widget_get_allocated_width(p->win),
+	                        gtk_widget_get_allocated_height(p->win),
+	                        ev->x, ev->y, &cx, &cy))
+		return FALSE;
+	hit = cal_button_at(cx, cy);
+	if (!hit)
+		return FALSE;
+	if (ev->type == GDK_BUTTON_PRESS) {
+		priv->btn_pressed = hit;
+		gtk_widget_queue_draw(p->win);
+		return TRUE;
+	}
+	/* RELEASE: средняя кнопка мыши не должна съедать событие */
+	if (priv->btn_pressed == hit) {
+		cal_shift_month(p, hit == 1 ? -1 : (hit == 3 ? 1 : 0));
+		priv->btn_pressed = 0;
+		gtk_widget_queue_draw(p->win);
+		return TRUE;
+	}
+	priv->btn_pressed = 0;
 	return FALSE;
 }
 
@@ -716,6 +937,17 @@ static void cal_bool_toggled(GtkToggleButton *btn, gpointer data)
 	g_key_file_set_boolean(priv->kf, p->name, key, active);
 	if (strcmp(key, "showevents") == 0)
 		priv->showevents = active;
+	else if (strcmp(key, "enable_buttons") == 0) {
+		priv->enable_buttons = active;
+		/* Выключили - убрать полосу сразу, не дожидаясь
+		 * спада альфы: иначе она мигнёт ещё до 0. */
+		if (!active) {
+			priv->btn_alpha = 0.0;
+			priv->btn_hover = 0;
+			priv->btn_hover_idx = 0;
+			priv->btn_pressed = 0;
+		}
+	}
 	xs_core_plugin_conf_flush(p->name);
 	if (p->win)
 		gtk_widget_queue_draw(p->win);
@@ -883,6 +1115,13 @@ static void cal_properties(XsPlugin *p, GtkNotebook *nb)
 	                       g_free);
 	g_signal_connect(w, "toggled", G_CALLBACK(cal_bool_toggled), p);
 
+	w = xs_prop_add_bool(GTK_BOX(page_box), "Month buttons",
+	                     "Show previous/today/next buttons in the "
+	                     "header on hover", priv->enable_buttons);
+	g_object_set_data_full(G_OBJECT(w), "xs-key",
+	                       g_strdup("enable_buttons"), g_free);
+	g_signal_connect(w, "toggled", G_CALLBACK(cal_bool_toggled), p);
+
 	cal_add_color(page_box, p, "Text color", "font_color",
 	              "font_color", priv->font_color);
 	cal_add_color(page_box, p, "Today color", "today_color",
@@ -1020,6 +1259,13 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 	                                         "/usr/share/screenlets/ClearCalendar/calendar.ics");
 	priv->showevents = g_key_file_get_boolean(kf, p->name, "showevents",
 	                                          NULL);
+	/* По умолчанию ВКЛЮЧЕНО, как в оригинале: там опция
+	 * enable_buttons создаётся со значением self.enable_buttons
+	 * = True. Через conf_int с дефолтом 1, потому что
+	 * g_key_file_get_boolean с NULL вернул бы FALSE при отсутствующем
+	 * ключе и кнопок не было бы вообще. */
+	priv->enable_buttons = xs_host_api()->conf_int(kf, p->name,
+	                                               "enable_buttons", 1) != 0;
 	cal_read_color(kf, p->name, "font_color", fc, priv->font_color);
 	cal_read_color(kf, p->name, "today_color", tc, priv->today_color);
 	cal_read_color(kf, p->name, "event_color", ec, priv->event_color);
@@ -1141,14 +1387,78 @@ static void cal_font_set(GtkFontButton *btn, gpointer data)
 		gtk_widget_queue_draw(p->win);
 }
 
+/* Альфа полосы кнопок набирается по 0.2 за тик, как в оригинале
+ * (там update_buttons вызывается таймером на 100 мс). Отсюда и
+ * интервал: пока полоса не набрана альфу и не сбросилась, тик должен
+ * быть быстрым, иначе проявление растягивается на десятки секунд. */
+#define CAL_BTN_TICK_MS 100
+#define CAL_TICK_IDLE_MS 10000
+
+static gboolean cal_buttons_settled(const PrivData *priv)
+{
+	if (!priv->enable_buttons)
+		return TRUE;
+	/* Пока видна хотя бы на 1% или ещё должна исчезнуть — не «устоялись». */
+	if (priv->btn_alpha > 0.001 && priv->btn_alpha < 0.999)
+		return FALSE;
+	return TRUE;
+}
+
 static guint calendar_tick(XsPlugin *p)
 {
+	PrivData *priv = p ? p->priv : NULL;
+
 	/* Окно подтягивается к каноническому кадру (204×base_h юнитов) на
 	 * каждом тике: если WM при старте/смене месяца не применил resize —
 	 * через 10 с размер сойдётся, «картинка меньше окна» исчезает. */
-	if (p && p->priv && p->win)
-		cal_fit_height(p, p->priv);
-	return 10000; /* раз в 10 с, как update_interval оригинала */
+	if (priv && p->win)
+		cal_fit_height(p, priv);
+
+	if (priv && priv->enable_buttons) {
+		gdouble prev = priv->btn_alpha;
+
+		if (priv->btn_hover || priv->btn_pressed) {
+			if (priv->btn_alpha < 1.0) {
+				priv->btn_alpha += CAL_BTN_ALPHA_STEP;
+				if (priv->btn_alpha > 1.0)
+					priv->btn_alpha = 1.0;
+			}
+		} else if (priv->btn_alpha > 0.0) {
+			priv->btn_alpha -= CAL_BTN_ALPHA_STEP;
+			if (priv->btn_alpha < 0.0)
+				priv->btn_alpha = 0.0;
+		}
+		if (priv->btn_alpha != prev && p->win)
+			gtk_widget_queue_draw(p->win);
+		if (!cal_buttons_settled(priv))
+			return CAL_BTN_TICK_MS;
+	}
+	return CAL_TICK_IDLE_MS; /* как update_interval оригинала */
+}
+
+/* Курсор ушёл с окна: сбрасываем наведение, иначе полоса кнопок
+ * останется видимой до следующего тика с btn_hover != 0. */
+static void calendar_leave(XsPlugin *p)
+{
+	PrivData *priv = p ? p->priv : NULL;
+
+	if (!priv)
+		return;
+	if (priv->btn_hover || priv->btn_pressed || priv->btn_hover_idx) {
+		priv->btn_hover = 0;
+		priv->btn_hover_idx = 0;
+		priv->btn_pressed = 0;
+		if (p->win)
+			gtk_widget_queue_draw(p->win);
+	}
+}
+
+static void calendar_enter(XsPlugin *p)
+{
+	PrivData *priv = p ? p->priv : NULL;
+
+	if (priv && priv->enable_buttons && p->win)
+		gtk_widget_queue_draw(p->win);
 }
 
 /* Plugin descriptor */
@@ -1157,7 +1467,9 @@ static XsPluginOps cal_ops = {
 	.draw = cal_draw,
 	.tick = calendar_tick,
 	.button = calendar_button,
-	.motion = NULL,
+	.motion = calendar_motion,
+	.enter = calendar_enter,
+	.leave = calendar_leave,
 	.shutdown = calendar_shutdown,
 	.menu = cal_menu,
 	.menu_cmd = cal_menu_cmd,

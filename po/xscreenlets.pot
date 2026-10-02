@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 13:30+0300\n"
+"POT-Creation-Date: 2026-10-02 16:27+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -70,77 +70,81 @@ msgstr ""
 msgid "Battery charge, remaining time and state from sysfs power_supply"
 msgstr ""
 
-#: src/widgets/calendar.c:655
+#: src/widgets/calendar.c:876
 msgid "View events"
 msgstr ""
 
-#: src/widgets/calendar.c:656
+#: src/widgets/calendar.c:877
 msgid "Update events"
 msgstr ""
 
-#: src/widgets/calendar.c:657
+#: src/widgets/calendar.c:878
 msgid "Toggle events"
 msgstr ""
 
-#: src/widgets/calendar.c:658
+#: src/widgets/calendar.c:879
 msgid "Back to today"
 msgstr ""
 
-#: src/widgets/calendar.c:683 src/widgets/clock.c:1091
+#: src/widgets/calendar.c:904 src/widgets/clock.c:1091
 #: src/widgets/frame_launcher.c:1220
 msgid "Theme"
 msgstr ""
 
-#: src/widgets/calendar.c:849
+#: src/widgets/calendar.c:1081
 msgid "Calendar specific options"
 msgstr ""
 
-#: src/widgets/calendar.c:869
+#: src/widgets/calendar.c:1101
 msgid "First Weekday"
 msgstr ""
 
-#: src/widgets/calendar.c:873
+#: src/widgets/calendar.c:1105
 msgid "iCalendar ics file path"
 msgstr ""
 
-#: src/widgets/calendar.c:880
+#: src/widgets/calendar.c:1112
 msgid "Show iCalendar events"
 msgstr ""
 
-#: src/widgets/calendar.c:886 src/widgets/clearrss.c:2338
+#: src/widgets/calendar.c:1118
+msgid "Month buttons"
+msgstr ""
+
+#: src/widgets/calendar.c:1125 src/widgets/clearrss.c:2338
 #: src/widgets/conlog_min.c:989
 msgid "Text color"
 msgstr ""
 
-#: src/widgets/calendar.c:888
+#: src/widgets/calendar.c:1127
 msgid "Today color"
 msgstr ""
 
-#: src/widgets/calendar.c:890
+#: src/widgets/calendar.c:1129
 msgid "Event day color"
 msgstr ""
 
-#: src/widgets/calendar.c:892
+#: src/widgets/calendar.c:1131
 msgid "Today event color"
 msgstr ""
 
-#: src/widgets/calendar.c:895
+#: src/widgets/calendar.c:1134
 msgid "Back color (default theme)"
 msgstr ""
 
-#: src/widgets/calendar.c:903
+#: src/widgets/calendar.c:1142
 msgid "Header font"
 msgstr ""
 
-#: src/widgets/calendar.c:910
+#: src/widgets/calendar.c:1149
 msgid "Day names font"
 msgstr ""
 
-#: src/widgets/calendar.c:917
+#: src/widgets/calendar.c:1156
 msgid "Days font"
 msgstr ""
 
-#: src/widgets/calendar.c:928
+#: src/widgets/calendar.c:1167
 msgid "iCalendar"
 msgstr ""
 
