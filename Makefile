@@ -26,12 +26,27 @@ THEME_DIR ?=
 # установки), непустое = системный каталог из пакета.
 LOCALEDIR ?=
 TEXTDOMAIN ?= xscreenlets
-EXTRA_CFLAGS += -DXS_LOCALEDIR='"$(LOCALEDIR)"' -DXS_TEXTDOMAIN='"$(TEXTDOMAIN)"'
+# ВНИМАНИЕ: это += НЕ работает, когда ebuild передаёт EXTRA_CFLAGS=...
+# на командной строке make. Переменная из командной строки имеет
+# приоритет над присваиваниями в makefile, и все += молча отбрасываются:
+#
+#   EXTRA_CFLAGS = base ; EXTRA_CFLAGS += FROMMAKEFILE
+#   make            -> [base FROMMAKEFILE]
+#   make EXTRA_CFLAGS=-DFROMCMDLINE  -> [-DFROMCMDLINE]   # потеряно
+#
+# Именно так был потерян -DXS_LOCALEDIR, а с ним весь gettext: демон
+# собирался, ошибок не было, интерфейс оставался английским. Поэтому
+# LOCALEDIR передаётся отдельной переменной XS_I18N_CFLAGS, которую
+# командная строка не перекрывает.
+# Флаги подключаются через CFLAGS, а не EXTRA_CFLAGS: именно CFLAGS
+# ebuild на командной строке не передаёт, поэтому даже полное
+# перекрытие EXTRA_CFLAGS не съест i18n-флаги.
+XS_I18N_CFLAGS = -DXS_LOCALEDIR='"$(LOCALEDIR)"' -DXS_TEXTDOMAIN='"$(TEXTDOMAIN)"' -DHAVE_GETTEXT
+CFLAGS += $(XS_I18N_CFLAGS)
 
 # gettext() есть в glibc, поэтому -lintl не нужен; HAVE_GETTEXT включает
 # макрос _() в i18n.h. Без него интерфейс остаётся английским, и проект
 # продолжает собираться.
-EXTRA_CFLAGS += -DHAVE_GETTEXT
 EXTRA_CFLAGS += -DXS_PLUGIN_DIR='"$(PLUGIN_DIR)"' -DXS_THEME_DIR='"$(THEME_DIR)"' 
 
 LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
