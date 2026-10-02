@@ -402,6 +402,16 @@ test-i18n-window: $(BUILD_DIR)/test_i18n_window locale
 	@echo "Открылось окно с переводами. Закройте его, когда посмотрите."
 	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_i18n_window
 
+# Проверка прокрутки в настройках погоды. Печатает HAS_VSCROLL=1, если
+# полоса по вертикали появилась, и держит окно открытым для осмотра.
+$(BUILD_DIR)/test_weather_scroll: tests/test_weather_scroll.c src/core/i18n.c \
+		include/xs_api.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_weather_scroll.c \
+		src/core/i18n.c $(LDFLAGS_PLUGIN)
+
+test-weather-scroll: $(BUILD_DIR)/test_weather_scroll locale
+	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_weather_scroll
+
 
 install: all locale
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin

@@ -3080,18 +3080,35 @@ static GtkWidget *cw_font_button(const char *font, const char *key)
 static void cw_properties(XsPlugin *p, GtkNotebook *nb)
 {
     CwPriv *priv = p ? p->priv : NULL;
-    GtkWidget *page, *grid;
+    GtkWidget *page, *inner, *scroller, *grid;
     GtkWidget *cb, *entry, *spin;
     int r = 0;
 
     if (!priv)
         return;
     page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_container_set_border_width(GTK_CONTAINER(page), 8);
+    /* Прокрутка обязательна: страница погоды содержит около тридцати
+     * строк, а окно Properties фиксировано 490x450 (см.
+     * xs_core_show_properties в common.c). Без прокрутки нижние поля -
+     * шрифты и цвета - просто не помещались и не были видны, прокрутить
+     * было нечем. Приём тот же, что в conlog.c и conlog_min.c:
+     * вертикальная AUTOMATIC, ширина не прокручивается и естественная
+     * ширина не распространяется - иначе окно растёт по горизонтали. */
+    scroller = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_width(
+        GTK_SCROLLED_WINDOW(scroller), FALSE);
+    gtk_scrolled_window_set_propagate_natural_height(
+        GTK_SCROLLED_WINDOW(scroller), FALSE);
+    inner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(inner), 8);
+    gtk_container_add(GTK_CONTAINER(scroller), inner);
+    gtk_box_pack_start(GTK_BOX(page), scroller, TRUE, TRUE, 0);
     grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 5);
-    gtk_box_pack_start(GTK_BOX(page), grid, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(inner), grid, FALSE, FALSE, 0);
     /* Пояснение строчно: одним длинным label окно настроек растягивало
      * на всю ширину этой строки. */
     {
@@ -3107,7 +3124,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
             GtkWidget *lb = gtk_label_new(notes[k]);
 
             gtk_label_set_xalign(GTK_LABEL(lb), 0.0);
-            gtk_box_pack_start(GTK_BOX(page), lb, FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(inner), lb, FALSE, FALSE, 0);
         }
     }
     gtk_notebook_append_page(nb, page, gtk_label_new(_("Weather")));
