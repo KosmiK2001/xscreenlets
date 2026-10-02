@@ -380,6 +380,9 @@ static void reset_shape_schedule(XsWinState *state);
 static gboolean xs_core_tick_cb(XsPlugin *p);
 static void set_tick(XsPlugin *p, guint ms);
 static gboolean theme_load(XsPlugin *p, const char *dir);
+static void theme_draw_ninepatch(XsPlugin *p, cairo_t *cr,
+                                  const char *element, double x, double y,
+                                  double width, double height);
 static void theme_draw(XsPlugin *p, cairo_t *cr, const char *el,
                        double x, double y, double width);
 static void theme_draw_full(XsPlugin *p, cairo_t *cr, const char *el,
@@ -2859,13 +2862,30 @@ static gboolean xs_core_tick_cb(XsPlugin *p)
     return G_SOURCE_CONTINUE;
 }
 
-/* Элемент темы: RsvgHandle (*.svg) или GdkPixbuf (*.png) */
+/* Элемент темы: RsvgHandle (*.svg) или GdkPixbuf (*.png).
+ *
+ * np_valid = TRUE, если в SVG есть <xscreenlets-ninepatch .../> с
+ * границами срезов. Тогда элемент рисуется как 9-slice: углы в
+ * натуральном размере, середина тянется. Нужно фонам со
+ * скруглениями: при наивном theme_draw_full на нестандартную
+ * высоту скругление растягивалось вместе с фоном, и низ уезжал
+ * за пределы окна (число 30 в 6-строчном месяце).
+ *
+ * Границы отнесены к натуральному размеру SVG. */
 typedef struct {
 	gboolean is_svg;
 	union {
 		RsvgHandle *svg;
 		GdkPixbuf *png;
 	} u;
+	gboolean np_valid;
+	/* bbox ТЕЛА в натуральных координатах SVG и радиус угла */
+	double np_x0, np_y0, np_x1, np_y1;
+	double np_radius;
+	/* границы header/bottom; если 0 - берутся np_y0+radius и
+	 * np_y1-radius. top бывает выше radius: header включает
+	 * верхнюю бликовую полосу, идущую дальше скругления. */
+	double np_top, np_bottom;
 } XsThemeItem;
 
 static void xs_theme_item_free(gpointer v)
@@ -3027,6 +3047,93 @@ char *xs_core_find_theme(const char *plugin, const char *theme)
     return out;
 }
 
+/* Прочитать <xscreenlets-ninepatch top= bottom= left= right=/> из SVG.
+ *
+ * Метаданные лежат в самом файле, а не в коде: тема остаётся
+ * самодостаточной и переезжает вместе с апплетом. Разбор -
+ * текстовый поиск тега, без XML-парсера: атрибутов ровно четыре,
+ * файл маленький, а тянуть libxml ради этого не надо.
+ *
+ * Числа записаны как 16.900 / 75.917, поэтому g_ascii_strtod.
+ * Любого из четырёх атрибутов нет - метаданных нет, элемент
+ * рисуется как раньше. */
+static void theme_read_ninepatch(const char *path, XsThemeItem *it)
+{
+	gchar *text = NULL;
+	gsize len = 0;
+	gchar *tag, *end;
+	double x0, y0, x1, y1, radius, top, bottom;
+	static const char *const keys[7] = { "x0", "y0", "x1", "y1",
+	                                     "radius", "top", "bottom" };
+	double v[7] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+	gboolean got[7] = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
+	int i;
+
+	if (!it || !path)
+		return;
+	if (!g_file_get_contents(path, &text, &len, NULL))
+		return;
+
+	/* Ищем метку в любом месте файла и разбираем атрибуты до '/>' */
+	tag = strstr(text, "<xscreenlets-ninepatch");
+	if (!tag) {
+		g_free(text);
+		return;
+	}
+	end = strpbrk(tag, ">");
+	if (!end) {
+		g_free(text);
+		return;
+	}
+
+	for (i = 0; i < 7; i++) {
+		gchar *k = g_strdup_printf("%s=\"", keys[i]);
+		gchar *at = g_strstr_len(tag, end - tag, k);
+
+		g_free(k);
+		if (!at)
+			continue;
+		at += strlen(keys[i]) + 2; /* перешагиваем имя и кавычку */
+		v[i] = g_ascii_strtod(at, NULL);
+		got[i] = TRUE;
+	}
+	g_free(text);
+
+	/* Обязательны bbox тела и радиус: без них нельзя понять, что
+	 * масштабировать. top/bottom необязательны - тогда header и
+	 * bottom идут ровно по скруглению. */
+	if (!got[0] || !got[1] || !got[2] || !got[3] || !got[4])
+		return;
+	if (v[2] <= v[0] || v[3] <= v[1] || v[4] <= 0.0)
+		return;
+
+	x0 = v[0];
+	y0 = v[1];
+	x1 = v[2];
+	y1 = v[3];
+	radius = v[4];
+	top = got[5] && v[5] > 0.0 ? v[5] : y0 + radius;
+	bottom = got[6] && v[6] > 0.0 ? v[6] : y1 - radius;
+
+	/* top/bottom заданы от холста (как координаты в файле), а
+	 * скругление живёт внутри тела. Если граница header ушла выше
+	 * верха тела или ниже низа - метаданные ошибочны, рисуем
+	 * элемент обычным способом. */
+	if (top <= y0 || bottom >= y1 || bottom <= top)
+		return;
+
+	it->np_valid = TRUE;
+	it->np_x0 = x0;
+	it->np_y0 = y0;
+	it->np_x1 = x1;
+	it->np_y1 = y1;
+	it->np_radius = radius;
+	it->np_top = top;
+	it->np_bottom = bottom;
+}
+
+
+/* Загрузить каталог темы в кэш окна. */
 static gboolean theme_load(XsPlugin *p, const char *dir)
 {
     XsWinState *state;
@@ -3066,6 +3173,7 @@ static gboolean theme_load(XsPlugin *p, const char *dir)
         if (is_svg) {
             it->is_svg = TRUE;
             it->u.svg = rsvg_handle_new_from_file(path, NULL);
+            theme_read_ninepatch(path, it);
         } else {
             it->is_svg = FALSE;
             it->u.png = gdk_pixbuf_new_from_file(path, NULL);
@@ -3382,11 +3490,38 @@ static void set_tick(XsPlugin *p, guint ms)
     if (!state)
         return;
     if (state->tick_id) {
-        g_source_remove(state->tick_id);
-        state->tick_id = 0;
+        if (ms > 0 && state->tick_ms == ms) {
+            /* Интервал не изменился - таймер трогать незачем. */
+        } else if (ms > 0) {
+            /* Меняем интервал НА ЛЕТУ, не пересоздавая источник.
+             *
+             * Раньше здесь стояло g_source_remove + g_timeout_add.
+             * Но set_tick зовут ИЗ САМОГО тика (xs_core_tick_cb), и
+             * g_source_remove на сработавшем источнике отложенно
+             * помечает его на удаление: новый таймер создаётся,
+             * а текущий по возвращении из колбэка ещё жив и
+             * продолжает срабатывать по старому интервалу. Из-за
+             * этого просьба «тикай чаще» срабатывала только через
+             * текущий интервал - в календаре это и давало задержку
+             * 7-9 секунд до появления кнопок при наведении.
+             *
+             * modify_by_user_time меняет период существующего
+             * источника, не трогая его идентичность. */
+            GSource *src =
+                g_main_context_find_source_by_id(
+                    g_main_context_default(), state->tick_id);
+
+            if (src)
+                g_source_set_ready_time(src,
+                                       g_get_monotonic_time() /
+                                           1000 + (gint64)ms * 1000);
+        } else {
+            g_source_remove(state->tick_id);
+            state->tick_id = 0;
+        }
     }
     state->tick_ms = ms;
-    if (ms > 0)
+    if (ms > 0 && !state->tick_id)
         state->tick_id = g_timeout_add(ms, (GSourceFunc)xs_core_tick_cb, p);
 }
 
@@ -3539,18 +3674,18 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     g_signal_connect(window, "leave-notify-event",
                      G_CALLBACK(on_leave_notify), p);
     if (p->ops && p->ops->motion)
-        g_signal_connect(window, "motion-notify-event",
-                         G_CALLBACK(on_motion), p);
+	g_signal_connect(window, "motion-notify-event",
+	                 G_CALLBACK(on_motion), p);
     {
-        GdkEventMask events = GDK_BUTTON_PRESS_MASK |
-                              GDK_BUTTON_RELEASE_MASK |
-                              GDK_SCROLL_MASK |
-                              GDK_ENTER_NOTIFY_MASK |
-                              GDK_LEAVE_NOTIFY_MASK;
-        if (p->ops && p->ops->motion)
-            events |= GDK_POINTER_MOTION_MASK |
-                      GDK_POINTER_MOTION_HINT_MASK;
-        gtk_widget_add_events(window, events);
+	GdkEventMask events = GDK_BUTTON_PRESS_MASK |
+	                      GDK_BUTTON_RELEASE_MASK |
+	                      GDK_SCROLL_MASK |
+	                      GDK_ENTER_NOTIFY_MASK |
+	                      GDK_LEAVE_NOTIFY_MASK;
+	if (p->ops && p->ops->motion)
+	    events |= GDK_POINTER_MOTION_MASK |
+	              GDK_POINTER_MOTION_HINT_MASK;
+	gtk_widget_add_events(window, events);
     }
     gtk_widget_show_all(window);
 
@@ -3628,6 +3763,149 @@ static void host_conf_set_dbl(GKeyFile *kf, const char *section,
 {
     g_key_file_set_double(kf, section, key, value);
 }
+/* Нарисовать элемент темы как 9-slice: углы в натуральном размере,
+ * середина тянется.
+ *
+ * Нужно фонам со скруглением. theme_draw_full масштабирует SVG по
+ * обеим осям, поэтому скругление растягивается пропорционально
+ * высоте окна: на низком окне углы получаются острыми, на высоком -
+ * сплющенными. Для календаря это значило, что низ фона уезжал за
+ * окно, и число 30 в 6-строчном месяце оказывалось на голом месте.
+ *
+ * Метод как в frame_launcher (theme-tl/tr/bl/br + полосы), только
+ * срезы берутся из самого SVG: theme_draw_full здесь умеет и
+ * viewport, но метаданные всё равно надо где-то хранить.
+ *
+ * Середина по вертикали растягивается, поэтому градиент фона
+ * в ней растягивается тоже. Это осознанно: иначе стык был бы
+ * виден. Углы и полосы не растягиваются никогда. */
+static void theme_draw_ninepatch(XsPlugin *p, cairo_t *cr,
+                                  const char *element, double x, double y,
+                                  double width, double height)
+{
+	XsThemeItem *it;
+	RsvgRectangle vp;
+	double dx0, dx1, dy0, dy1;
+	/* границы центральной полосы в координатах SVG и назначения */
+	double mcx0, mcx1, mcy0, mcy1;
+	double dmx0, dmx1, dmy0, dmy1;
+	double hdr_h, bot_h;  /* высоты header и bottom в назначении */
+	int row, col;
+
+	if (!p || !cr || !element)
+		return;
+	it = theme_item(p, element);
+	if (!it || !it->is_svg || !it->u.svg)
+		return;
+
+	/* Без метаданных ведём себя как обычный theme_draw_full:
+	 * вызывающий код не обязан знать, 9-slice это или нет. */
+	if (!it->np_valid) {
+		theme_draw_full(p, cr, element, x, y, width, height);
+		return;
+	}
+
+	/* Работаем в координатах тела, а не холста: у этих файлов
+	 * холст шире содержимого (date-bg.svg: холст 132, тело в
+	 * x=0.23..99.77), и масштабирование всего холста съедало
+	 * ширину - фон занимал 75% окна и обрывался раньше конца
+	 * заголовка. Поэтому координаты назначения отсчитываем от
+	 * dx0/dy0, а срезы - от краёв тела, и масштаб углов 1:1. */
+
+	dx0 = x;
+	dx1 = x + width;
+	dy0 = y;
+	dy1 = y + height;
+
+	/* Срезы в координатах SVG: скругление от краёв тела. */
+	mcx0 = it->np_x0 + it->np_radius;
+	mcx1 = it->np_x1 - it->np_radius;
+
+	/* Углы идут 1:1 - БЕЗ масштаба. Это весь смысл 9-slice: если
+	 * умножить на sy/sx, скругление растянется и станет овалом.
+	 * Тянуть можно только середину.
+	 *
+	 * Высота header = бликовая полоса (np_top), если задана, иначе
+	 * одно скругление. bottom = симметрично от низа тела. */
+	hdr_h = it->np_top - it->np_y0;
+	bot_h = it->np_y1 - it->np_bottom;
+
+	/* Если окно ниже, чем header+bottom, углы сжимаем
+	 * пропорционально - иначе они бы наложились. */
+	if (hdr_h + bot_h > height) {
+		double share = height / (hdr_h + bot_h);
+
+		hdr_h *= share;
+		bot_h *= share;
+	}
+
+	mcy0 = it->np_top;
+	mcy1 = it->np_bottom;
+	/* Ширина углов - тоже натуральная, без масштаба. */
+	dmx0 = dx0 + it->np_radius;
+	dmx1 = dx1 - it->np_radius;
+	dmy0 = dy0 + hdr_h;
+	dmy1 = dy1 - bot_h;
+
+	cairo_save(cr);
+	cairo_rectangle(cr, x, y, width, height);
+	cairo_clip(cr);
+
+	/* Каждый кусок - тот же SVG, но viewport вырезает нужный
+	 * участок, а cairo кладёт его в свой прямоугольник. Координаты
+	 * viewport остаются натуральными, поэтому градиент внутри
+	 * куска считается в его собственных координатах. */
+#define XS_NP_DRAW(sel_x0, sel_y0, sel_x1, sel_y1, dst_x, dst_y, dst_w, dst_h) \
+	do { \
+		vp.x = (sel_x0); \
+		vp.y = (sel_y0); \
+		vp.width = (sel_x1) - (sel_x0); \
+		vp.height = (sel_y1) - (sel_y0); \
+		if (vp.width > 0.0 && vp.height > 0.0 && \
+		    (dst_w) > 0.0 && (dst_h) > 0.0) { \
+			cairo_save(cr); \
+			cairo_translate(cr, (dst_x), (dst_y)); \
+			cairo_scale(cr, (dst_w) / vp.width, (dst_h) / vp.height); \
+			rsvg_handle_render_document(it->u.svg, cr, &vp, NULL); \
+			cairo_restore(cr); \
+		} \
+	} while (0)
+
+	/* header: левое скругление + растянутая шапка + правое */
+	XS_NP_DRAW(it->np_x0, it->np_y0, mcx0, mcy0, dx0, dy0,
+	           (dmx0 - dx0), hdr_h);
+	XS_NP_DRAW(mcx0, it->np_y0, mcx1, mcy0, dmx0, dy0,
+	           (dmx1 - dmx0), hdr_h);
+	XS_NP_DRAW(mcx1, it->np_y0, it->np_x1, mcy0, dmx1, dy0,
+	           (dx1 - dmx1), hdr_h);
+
+	/* середина: растягивается по вертикали и по горизонтали */
+	XS_NP_DRAW(it->np_x0, mcy0, mcx0, mcy1, dx0, dmy0,
+	           (dmx0 - dx0), (dmy1 - dmy0));
+	XS_NP_DRAW(mcx0, mcy0, mcx1, mcy1, dmx0, dmy0,
+	           (dmx1 - dmx0), (dmy1 - dmy0));
+	XS_NP_DRAW(mcx1, mcy0, it->np_x1, mcy1, dmx1, dmy0,
+	           (dx1 - dmx1), (dmy1 - dmy0));
+
+	/* bottom: так же, как header, но с нижними углами */
+	XS_NP_DRAW(it->np_x0, mcy1, mcx0, it->np_y1, dx0, dmy1,
+	           (dmx0 - dx0), bot_h);
+	XS_NP_DRAW(mcx0, mcy1, mcx1, it->np_y1, dmx0, dmy1,
+	           (dmx1 - dmx0), bot_h);
+	XS_NP_DRAW(mcx1, mcy1, it->np_x1, it->np_y1, dmx1, dmy1,
+	           (dx1 - dmx1), bot_h);
+
+#undef XS_NP_DRAW
+	cairo_restore(cr);
+}
+
+static void host_theme_draw_ninepatch(XsPlugin *p, cairo_t *cr,
+                                      const char *element, double x, double y,
+                                      double width, double height)
+{
+    theme_draw_ninepatch(p, cr, element, x, y, width, height);
+}
+
 static gboolean host_theme_load(XsPlugin *p, const char *dir)
 {
     return theme_load(p, dir);
@@ -4370,6 +4648,8 @@ static XsHostApi host_api = {
     .resize = host_resize,
     .theme_draw_full = host_theme_draw_full,
     .theme_draw_native = host_theme_draw_native,
+    .theme_draw_ninepatch = host_theme_draw_ninepatch,
+
     .start_guest = start_guest,
     .stop_guest = stop_guest,
     .start_guest_new = start_guest_new,

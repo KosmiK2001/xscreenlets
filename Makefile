@@ -511,6 +511,26 @@ install: all locale
 			$(INSTALL) -m 0644 "$$f" $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/clearrss/$$name/; \
 		done; \
 	done
+	@# Темы календаря и погоды ставим тем же циклом. У них в SVG
+	@# лежат <xscreenlets-ninepatch/> - границы срезов для 9-slice.
+	@# Без установки календарь падал бы на оригинальный date-bg.svg
+	@# из /usr/share/screenlets, где метаданных нет, и фон снова
+	@# растягивался бы со скруглением.
+	@for w in clearcalendar clearweather; do \
+		for t in themes/$$w/*/; do \
+			[ -d "$$t" ] || continue; \
+			name=$$(basename $$t); \
+			$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/$$w/$$name; \
+			for f in $$t*.svg; do \
+				[ -f "$$f" ] || continue; \
+				$(INSTALL) -m 0644 "$$f" $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/$$w/$$name/; \
+			done; \
+		done; \
+		for f in themes/$$w/*.svg; do \
+			[ -f "$$f" ] || continue; \
+			$(INSTALL) -m 0644 "$$f" $(DESTDIR)$(PREFIX)/lib/xscreenlets/themes/$$w/; \
+		done; \
+	done
 	@# Переводы: циклом по LINGUAS, как темы выше. Каталог повторяет
 	@# путь, который ищет gettext: <localedir>/<lang>/LC_MESSAGES/<domain>.mo
 	@# Плоская раскладка (lang.mo рядом) не работает и молча даёт

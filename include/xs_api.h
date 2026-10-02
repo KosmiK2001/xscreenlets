@@ -140,6 +140,13 @@ struct _XsHostApi {
 	 * кламп позиций, move, переснятие фона */
 	void (*refit_guests)(XsPlugin *host, int cx, int cy, int cw,
 	                     int ch);
+	/* элемент темы как 9-slice: углы в натуральном размере,
+	 * середина тянется. Срезы берутся из самого SVG
+	 * (<xscreenlets-ninepatch top= bottom= left= right=/>).
+	 * Без метаданных ведёт себя как theme_draw_full. */
+	void (*theme_draw_ninepatch)(XsPlugin *p, cairo_t *cr,
+	                                const char *el, double x, double y,
+	                                double width, double height);
 	/* 1 = core не рисует свой Scale-спиннер (плагин рисует свой) */
 	int no_core_scale;
 };

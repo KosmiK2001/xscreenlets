@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- xscreenlets: фон ClearCalendar, ОДИН путь на всю высоту (5 строк).
+
+     Раньше фон нарезался на header/middle/bottom и рисовался тремя
+     вызовами theme_draw_full. Каждый вызов - отдельная растеризация
+     rsvg, стыкующиеся края сетятся независимо, а полупрозрачная
+     заливка (opacity 0.5178) в нахлёсте давала тёмный ряд: это и
+     были 1px полосы. Ни пиксельная привязка, ни обрезка middle на
+     1 px их не убирали - нахлёстом их убрать нельзя.
+
+     Здесь clipPath нет вообще: тело - один замкнутый путь, внутри
+     файла нет ни одной границы, шов появиться не может.
+     Скругления не растягиваются (R=6.85 задан прямо в координатах
+     пути), высота растёт только за счёт длины вертикальных участков.
+
+     Два файла - под 5 и 6 строк сетки: подложка и тема должны
+     доставать до последней строки чисел, иначе 30/31 в
+     6-строчном месяце уезжали за пределы окна. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="100" height="82.5000" viewBox="0 0.5000 100 82.5000">
+  <defs>
+<linearGradient id="linearGradient5166" gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.8294904,0,0,1.0254857,-3.9168786,-17.916856)"
+       x1="64.5" y1="97" x2="65" y2="-66.065086">
+      <stop style="stop-color:#52555b;stop-opacity:1;" offset="0" id="s1" />
+      <stop style="stop-color:#666666;stop-opacity:0;" offset="1" id="s2" />
+    </linearGradient>
+<linearGradient id="linearGradient5170" gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.8315976,0,0,0.9702716,-3.3537599,-16.579325)"
+       x1="60" y1="19" x2="60" y2="34.505085">
+      <stop style="stop-color:#ffffff;stop-opacity:1;" offset="0" id="s3" />
+      <stop style="stop-color:#ffffff;stop-opacity:0;" offset="1" id="s4" />
+    </linearGradient>
+  </defs>
+  <path style="opacity:0.51779935;fill:url(#linearGradient5166);fill-opacity:1;fill-rule:nonzero;stroke:#090909;stroke-width:0.46114813999999998;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" d="M 7.08264370,0.73057582 C 3.27581690,0.73057582 0.23057408,4.23944480 0.23057408,8.59420760 L 0.23057408,74.90580000 C 0.23057408,79.26059440 3.27581690,82.76942400 7.08264370,82.76942400 L 92.91735638,82.76942400 C 96.72418500,82.76942400 99.76942600,79.26059440 99.76942600,74.90580000 L 99.76942600,8.59420760 C 99.76942600,4.58016070 97.17531100,1.29686230 93.78640400,0.80618796 C 93.64944700,0.81895636 93.52667300,0.84399300 93.38529500,0.84399300 C 93.07558000,0.84399300 92.76904100,0.78978623 92.48284300,0.73057582 z" />
+<rect style="opacity:0.51779935;fill:url(#linearGradient5170);fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.98983228000000001px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" width="98.55278" height="16.019348" x="0.80000001" y="0.88065183" ry="6.5100002" />
+</svg>

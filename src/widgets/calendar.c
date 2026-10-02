@@ -50,7 +50,10 @@ typedef struct {
 	 * рисуется вторым проходом, как init_buttons в оригинале. */
 	gdouble btn_alpha;      /* 0..1, текущая видимость полосы */
 	int btn_pressed;        /* 1=назад 2=сегодня 3=вперёд, 0=нет */
-	int btn_hover;          /* курсор в полосе кнопок (для альфы) */
+	guint btn_timer;        /* отдельный 100-мс таймер анимации кнопок;
+	                        в оригинале их крутит отдельный
+	                        update_buttons, а НЕ основной tick */
+	int btn_hover;          /* курсор в полосе (для альфы) */
 	int btn_hover_idx;      /* индекс кнопки под курсором, 0=нет */
 	int enable_buttons;     /* «Смена месяца кнопками» */
 	/* события */
@@ -337,13 +340,23 @@ static void cal_rounded_rect(cairo_t *cr, double x, double y, double r,
 #define CAL_BTN_X0      8.5
 #define CAL_BTN_W       7.0
 #define CAL_BTN_GAP     3.0
-#define CAL_BTN_STRIP_W 100.0  /* ширина полосы: во весь кадр */
-#define CAL_BTN_STRIP_H  15.0  /* высота полосы: 15 юнитов */   /* ширина полосы-подложки: в оригинале
-                            update_buttons смотрит x >= 0 && x < 100,
-                            y 0..15. То есть полоса во всю ширину
-                            кадра, а не только под кнопками: курсор
-                            в любой её точке показывает кнопки. */
+#define CAL_BTN_STRIP_W 100.0  /* ширина полосы: во весь кадр. В
+                            оригинале update_buttons смотрит
+                            x >= 0 && x < 100 и y 0..15: полоса
+                            во всю ширину кадра, а не только под
+                            кнопками, поэтому курсор в любой её
+                            точке показывает кнопки. */
+#define CAL_BTN_STRIP_H  15.0  /* высота полосы: 15 юнитов */
+#define CAL_FRAME_H      105  /* высота кадра, как height=105*2 в оригинале */
+#define CAL_BG_H          82  /* как в оригинале:
+                                  draw_rounded_rectangle(ctx,0,1,8,100,82) */
 #define CAL_BTN_ALPHA_STEP 0.2
+
+/* Число строк сетки под текущий видимый месяц. Объявлено здесь,
+ * потому что используется и в cal_draw, и в обработчиках. */
+static void cal_update_rows(PrivData *priv);
+static void cal_buttons_timer_start(XsPlugin *p);
+static void cal_canon_geom(int w, int h, double *k, double *ox, double *oy);
 
 /* Кнопка под точкой (x,y) в юнитах канона; 0 = мимо.
  *
@@ -386,33 +399,40 @@ static void cal_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	PangoRectangle ink;
 	char num[16];
 	double k;
-	double base_h;
 	double ox, oy;
 	int col, row, day;
 	int i;
 	char **day_names = NULL;
 	gboolean theme_bg;
+	/* Границы фона. Теперь он один файл без стыков, поэтому нужны
+	 * только высота и имя элемента (см. расчёт ниже). */
+	double cal_bg_top, cal_bg_h;
+	const char *cal_bg_el;
 
 	if (!priv || !p->win)
 		return;
 	cal_visible_month(priv, &cm);
-	priv->cur_rows = (cm.start_col + cm.days_in_month - 1) / 7 + 1;
-	{
-		int rows = priv->cur_rows;
-
-		if (rows < 5)
-			rows = 5;
-		/* Канонический кадр: CAL_W × base_h юнитов, масштаб ОДИН по обеим
-		 * осям (min) — пропорции не зависят от поведения WM при resize.
-		 * Кадр центрируется в окне; вне его остаётся прозрачность. */
-		base_h = 25 + rows * 12 + 4;
-	}
-
-	k = w / 102.0;                /* канон по ширине = 102 юнита (контент) */
-	if (h / (double)base_h < k)
-		k = h / (double)base_h;
-	ox = (w - 102.0 * k) / 2.0;
-	oy = (h - base_h * k) / 2.0;
+	cal_update_rows(priv);   /* канон обязан совпадать с событиями */
+	/* Высота кадра ПОСТОЯННА - как в оригинале:
+	 *
+	 *   Screenlet.__init__(self, width=int(102*2),
+	 *                       height=int(105*2), uses_theme=True)
+	 *
+	 * То есть 105 юнитов ВСЕГДА, независимо от числа строк
+	 * месяца. Раньше было base_h = 25 + rows*12 + 4, то есть
+	 * 89 при 5 строках и 101 при 6. Из-за этого число 30/31
+	 * в 6-строчном месяце уезжало за подложку: сетка
+	 * кончается на 25+5*12+10 = 95, а подложка 82.
+	 *
+	 * При 105 всё влезает: подложка 82, тема 100, сетка
+	 * максимум 95 - и высота окна перестаёт скакать при
+	 * смене месяца. Масштаб ОДИН по обеим осям (min), кадр
+	 * центрируется в окне, вне его - прозрачность. */
+	/* Геометрия кадра - из общей cal_canon_geom, чтобы обработчики
+	 * событий и отрисовка не могли разойтись (см. комментарий
+	 * рядом с ней: раньше здесь было 89, а в обработчиках 105, и
+	 * кнопки не ловились). */
+	cal_canon_geom(w, h, &k, &ox, &oy);
 	cairo_save(cr);
 	cairo_translate(cr, ox, oy);
 	cairo_scale(cr, k, k);
@@ -422,17 +442,82 @@ static void cal_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 	 * native тема поверх; зона ниже темы остаётся прозрачной — как у
 	 * питона (там снизу окна тоже нет подложки). */
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-	theme_bg = xs_core_theme_has(p, "date-bg") || xs_core_theme_has(p, "back");
+	/* Фон темы - три физических среза исходного date-bg.svg:
+	 * header (верхнее скругление + бликовая полоса), middle (прямая
+	 * полоса) и bottom (нижнее скругление). Их натуральные высоты
+	 * 16.17 + 59.02 + 6.85 = 82.04, то есть ровно CAL_BG_H.
+	 *
+	 * Раньше был один date-bg.svg на весь кадр: он рассчитан на
+	 * 100x83, а окно календаря 102x105, и низ фона уезжал под
+	 * последнюю строку чисел. Скругления при растягивании ещё и
+	 * становились овалами - чем выше окно, тем площе углы. */
+	theme_bg = xs_core_theme_has(p, "date-bg-5row");
+	{
+		/* Швов больше нет by construction: фон - это ОДИН файл
+		 * date-bg-5row / date-bg-6row, где тело является одним
+		 * замкнутым путём на всю высоту (clipPath внутри нет вообще).
+		 * Раньше фон нарезался на header/middle/bottom и рисовался
+		 * тремя вызовами theme_draw_full - это три независимые
+		 * растеризации rsvg, стыкующиеся края которых сетятся
+		 * раздельно, а полупрозрачная заливка (opacity 0.5178) в
+		 * нахлёсте даёт тёмный ряд в 1 px. Нахлёстом это не
+		 * убирается принципиально, нужно было убрать сами стыки.
+		 *
+		 * Высота файла выбирается по числу строк сетки: подложка и
+		 * тема обязаны доставать до последней строки чисел, иначе
+		 * 30/31 в 6-строчном месяце уезжали за пределы окна.
+		 *
+		 * Скругления не растягиваются: R=6.85 задан прямо в
+		 * координатах пути, высота растёт только за счёт длины
+		 * вертикальных участков. */
+		double bg_h;
+
+		bg_h = (priv->cur_rows > 5) ? 94.5 : 82.5;
+		/* Подложка и тема одной высоты: стыка не бывает. */
+		cal_bg_top = 0.5;
+		cal_bg_h = bg_h;
+		cal_bg_el = (priv->cur_rows > 5) ? "date-bg-6row" : "date-bg-5row";
+	}
 	cal_color(cr, priv->background_color);
 	{
-		int bg_h = (int)base_h - 2;
-
-		if (bg_h > 82)
-			bg_h = 82;   /* оригинал: draw_rounded_rectangle(0,1,8,100,82) */
-		cal_rounded_rect(cr, 0, 1, 8, 100, bg_h);
+		/* Подложка - ровно под тему, той же высоты и с того же
+		 * верхнего края. В оригинале здесь
+		 * draw_rounded_rectangle(ctx, 0, 1, 8, 100, 82), но у
+		 * оригинала окно всегда 105 юнитов, и низ 82..105
+		 * остаётся прозрачным: в 6-строчном месяце последняя
+		 * строка сетки (cy до 85) попадала именно туда, и 30/31
+		 * висели без фона - пользователь описывал это как
+		 * «30 за пределами окна». Это баг оригинального
+		 * ClearCalendar, а не наш.
+		 *
+		 * Теперь высота общая с темой (cal_bg_h), подобранная под
+		 * число строк, поэтому подложка и тема заканчиваются
+		 * одной линией, а сетка всегда внутри фона. */
+		cal_rounded_rect(cr, 0, cal_bg_top, 8, 100, cal_bg_h);
 	}
+	/* Тема - один файл на всю высоту, одним вызовом.
+	 *
+	 * Раньше здесь был один date-bg.svg, растянутый на весь кадр
+	 * (105): скругление тянулось вместе с фоном, углы становились
+	 * овалами, а низ уезжал за окно. Потом фон нарезали на три
+	 * среза, но три вызова theme_draw_full - это три независимые
+	 * растеризации rsvg, и стыкующиеся края давали тёмные полосы
+	 * в 1 px (полупрозрачная заливка в нахлёсте).
+	 *
+	 * Теперь ни того, ни другого: date-bg-5row / date-bg-6row -
+	 * один замкнутый путь на всю высоту, clipPath внутри нет,
+	 * скругления заданы прямо в координатах пути и не тянутся.
+	 * Высота файла совпадает с подложкой, поэтому стыка нет. */
 	if (theme_bg)
-		xs_host_api()->theme_draw_native(p, cr, "date-bg", 0.0, 0.0);
+		xs_host_api()->theme_draw_full(p, cr, cal_bg_el,
+		                               0.0, cal_bg_top, 100.0, cal_bg_h);
+	/* Ширина срезов 99.54 естественная, а канон - 100 юнитов, поэтому
+	 * каждый кладётся с растяжением по ширине на 0.5%. Это отличает
+	 * theme_draw_full от theme_draw_native: native взял бы размер из
+	 * самого файла (132x100 px), и серая тема с чёрной подложкой
+	 * заканчивались бы на разной высоте - пользователь видел
+	 * «серый фон короче чёрного». Здесь прямоугольник задан явно
+	 * и совпадает с подложкой по построению. */
 
 	layout = pango_cairo_create_layout(cr);
 
@@ -586,17 +671,17 @@ static void cal_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 
 /* ---------- события мыши: колесо и средняя кнопка ---------- */
 
-/* Живой ресайз под высоту сетки видимого месяца (устраняет пустоту снизу).
- * rows по формуле сетки; высота = заголовок(25) + rows*12 + паддинг 4. */
+/* Подогнать окно под канон 102 x CAL_FRAME_H.
+ *
+ * Высота постоянная (105), как height=105*2 в оригинале.
+ * Раньше считалась от числа строк месяца, и окно меняло размер
+ * при смене месяца - наряду с тем, что число 30/31 уезжало
+ * за пределы подложки.
+ */
 static void cal_fit_height(XsPlugin *p, PrivData *priv)
 {
-	int rows = priv->cur_rows;
-	int base_h;
+	int base_h = CAL_FRAME_H;
 	double scale;
-
-	if (rows < 5)
-		rows = 5;
-	base_h = 25 + rows * 12 + 4;
 	/* scale — единый источник истины: конфиг (Properties/Size пишут туда
 	 * напрямую, priv->scale при этом не обновляется — иначе тик откатит
 	 * окно к старому размеру). */
@@ -619,6 +704,25 @@ static void cal_fit_height(XsPlugin *p, PrivData *priv)
 
 /* Сдвиг видимого месяца с пересчётом высоты. delta: +1 вперёд,
  * -1 назад, 0 — текущий месяц. */
+/* Пересчитать число строк сетки под ТЕКУЩИЙ видимый месяц.
+ *
+ * Нужно вызывать до cal_fit_height: тот берёт cur_rows, а
+ * обновляли мы это поле только в cal_draw, то есть уже после
+ * подгонки окна. В итоге при смене месяца, где строк не 5,
+ * окно подгонялось под высоту ПРЕДЫДУЩЕГО месяца: размер
+ * скакал при наведении на кнопку. Плюс рассинхрон кнопок -
+ * они нарисованы в кадре по одним base_h, а ловились по
+ * другому. */
+static void cal_update_rows(PrivData *priv)
+{
+	CalMonth cm;
+
+	cal_visible_month(priv, &cm);
+	priv->cur_rows = (cm.start_col + cm.days_in_month - 1) / 7 + 1;
+}
+
+/* Сдвиг видимого месяца с пересчётом высоты. delta: +1 вперёд,
+ * -1 назад, 0 — текущий месяц. */
 static void cal_shift_month(XsPlugin *p, int delta)
 {
 	PrivData *priv = p->priv;
@@ -634,27 +738,45 @@ static void cal_shift_month(XsPlugin *p, int delta)
 		if (priv->month_shift < -120)
 			priv->month_shift = -120;
 	}
-	cal_fit_height(p, priv);
+	cal_update_rows(priv);   /* сначала строки нового месяца */
+	cal_fit_height(p, priv); /* потом размер под них */
 	if (p->win)
 		gtk_widget_queue_draw(p->win);
 }
 
-/* Экранные координаты события → канон 102×base_h, в котором нарисованы
- * кнопки. Возвращает FALSE, если точка вне кадра (кадр центрирован). */
+/* Экранные координаты события → канон, в котором нарисованы кнопки.
+ * Возвращает FALSE, если точка вне кадра (кадр центрирован).
+ *
+ * ВАЖНО: геометрия кадра обязана совпадать с cal_draw ДО МЕЛОЧЕЙ.
+ * Раньше здесь стояло base_h = 25 + rows*12 + 4 (89 при 5 строках),
+ * а в cal_draw - CAL_FRAME_H (105). По X масштаб совпадал, а по Y
+ * обработчик ждал кнопку на 18 px ниже нарисованной - полоса кнопки
+ * 7 юнитов, ошибка 8.0 юнита, то есть мимо. Отсюда «кнопки то
+ * работают, то нет»: в 5-строчных месяцах не ловились вообще, в
+ * 6-строчных (ошибка 2.0 юнита) ловились. Скролл работал всегда -
+ * он координаты не проверяет.
+ *
+ * Поэтому берём ровно тот же расчёт, что и отрисовка. */
+static void cal_canon_geom(int w, int h, double *k, double *ox, double *oy)
+{
+	double base_h = CAL_FRAME_H;
+	double kk = w / 102.0;
+
+	if (h / (double)base_h < kk)
+		kk = h / (double)base_h;
+	*k = kk;
+	*ox = (w - 102.0 * kk) / 2.0;
+	*oy = (h - base_h * kk) / 2.0;
+}
+
 static gboolean cal_event_to_canon(XsPlugin *p, int w, int h, double ex,
                                    double ey, double *cx, double *cy)
 {
-	PrivData *priv = p->priv;
-	double k, base_h, ox, oy;
+	double k, ox, oy;
 
-	if (!priv)
+	if (!p || !p->priv)
 		return FALSE;
-	base_h = 25 + (priv->cur_rows < 5 ? 5 : priv->cur_rows) * 12 + 4;
-	k = w / 102.0;
-	if (h / base_h < k)
-		k = h / base_h;
-	ox = (w - 102.0 * k) / 2.0;
-	oy = (h - base_h * k) / 2.0;
+	cal_canon_geom(w, h, &k, &ox, &oy);
 	if (k <= 0)
 		return FALSE;
 	*cx = (ex - ox) / k;
@@ -685,6 +807,10 @@ static gboolean calendar_motion(XsPlugin *p, GdkEventMotion *ev)
 	if (hit != priv->btn_hover || idx != priv->btn_hover_idx) {
 		priv->btn_hover = hit;
 		priv->btn_hover_idx = idx;
+		/* Курсор впервые вошёл в полосу - сразу заводим
+		 * 100-мс таймер, не дожидаясь общего тика. */
+		if (hit)
+			cal_buttons_timer_start(p);
 		gtk_widget_queue_draw(p->win);
 	}
 	return FALSE;   /* возврат ложно: перетаскивание окна не отменяем */
@@ -713,6 +839,7 @@ static gboolean calendar_button(XsPlugin *p, GdkEventButton *ev)
 		return FALSE;
 	if (ev->type == GDK_BUTTON_PRESS) {
 		priv->btn_pressed = hit;
+		cal_buttons_timer_start(p);
 		gtk_widget_queue_draw(p->win);
 		return TRUE;
 	}
@@ -743,6 +870,7 @@ static gboolean calendar_scroll(XsPlugin *p, GdkEventScroll *ev)
 		priv->month_shift = 120;
 	if (priv->month_shift < -120)
 		priv->month_shift = -120;
+	cal_update_rows(priv);
 	cal_fit_height(p, priv);
 	if (p->win)
 		gtk_widget_queue_draw(p->win);
@@ -760,6 +888,7 @@ static void cal_menu_cmd(XsPlugin *p, const char *cmd)
 		return;
 	if (strcmp(cmd, "back_today") == 0) {
 		priv->month_shift = 0;
+		cal_update_rows(priv);
 		cal_fit_height(p, priv);
 		if (p->win)
 			gtk_widget_queue_draw(p->win);
@@ -946,6 +1075,10 @@ static void cal_bool_toggled(GtkToggleButton *btn, gpointer data)
 			priv->btn_hover = 0;
 			priv->btn_hover_idx = 0;
 			priv->btn_pressed = 0;
+			if (priv->btn_timer) {
+				g_source_remove(priv->btn_timer);
+				priv->btn_timer = 0;
+			}
 		}
 	}
 	xs_core_plugin_conf_flush(p->name);
@@ -1330,12 +1463,7 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 	}
 
 	cal_ics_load(priv);
-	{
-		CalMonth cm;
-
-		cal_visible_month(priv, &cm);
-		priv->cur_rows = (cm.start_col + cm.days_in_month - 1) / 7 + 1;
-	}
+	cal_update_rows(priv);
 	cal_fit_height(p, priv); /* высота окна по строкам месяца сразу */
 	xs_host_api()->set_tick(p, 10000); /* update_interval=10 как в ориг. */
 	return 0;
@@ -1344,6 +1472,13 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 static void calendar_shutdown(XsPlugin *p)
 {
 	PrivData *priv = p->priv;
+
+	/* Таймер анимации ссылается на плагин: если его не снять,
+	 * он выстрелит в освобождённую память. */
+	if (priv && priv->btn_timer) {
+		g_source_remove(priv->btn_timer);
+		priv->btn_timer = 0;
+	}
 
 	if (!priv)
 		return;
@@ -1394,16 +1529,6 @@ static void cal_font_set(GtkFontButton *btn, gpointer data)
 #define CAL_BTN_TICK_MS 100
 #define CAL_TICK_IDLE_MS 10000
 
-static gboolean cal_buttons_settled(const PrivData *priv)
-{
-	if (!priv->enable_buttons)
-		return TRUE;
-	/* Пока видна хотя бы на 1% или ещё должна исчезнуть — не «устоялись». */
-	if (priv->btn_alpha > 0.001 && priv->btn_alpha < 0.999)
-		return FALSE;
-	return TRUE;
-}
-
 static guint calendar_tick(XsPlugin *p)
 {
 	PrivData *priv = p ? p->priv : NULL;
@@ -1411,46 +1536,87 @@ static guint calendar_tick(XsPlugin *p)
 	/* Окно подтягивается к каноническому кадру (204×base_h юнитов) на
 	 * каждом тике: если WM при старте/смене месяца не применил resize —
 	 * через 10 с размер сойдётся, «картинка меньше окна» исчезает. */
-	if (priv && p->win)
+	if (priv && p->win) {
+		/* cur_rows мог устареть, если месяц сменили мимо
+		 * cal_shift_month (например, внешним вызовом). */
+		cal_update_rows(priv);
 		cal_fit_height(p, priv);
-
-	if (priv && priv->enable_buttons) {
-		gdouble prev = priv->btn_alpha;
-
-		if (priv->btn_hover || priv->btn_pressed) {
-			if (priv->btn_alpha < 1.0) {
-				priv->btn_alpha += CAL_BTN_ALPHA_STEP;
-				if (priv->btn_alpha > 1.0)
-					priv->btn_alpha = 1.0;
-			}
-		} else if (priv->btn_alpha > 0.0) {
-			priv->btn_alpha -= CAL_BTN_ALPHA_STEP;
-			if (priv->btn_alpha < 0.0)
-				priv->btn_alpha = 0.0;
-		}
-		if (priv->btn_alpha != prev && p->win)
-			gtk_widget_queue_draw(p->win);
-		if (!cal_buttons_settled(priv))
-			return CAL_BTN_TICK_MS;
 	}
+
+	/* Анимации кнопок больше НЕ здесь: она живёт на своём
+	 * 100-мс таймере (cal_buttons_timer), который запускает
+	 * calendar_motion и гасит calendar_leave. Держать её в
+	 * общем тике означало ждать текущий интервал - то есть
+	 * появление кнопок отставало на 6-9 секунд. В оригинале
+	 * update_buttons тоже отдельный таймер на 100 мс. */
 	return CAL_TICK_IDLE_MS; /* как update_interval оригинала */
 }
 
-/* Курсор ушёл с окна: сбрасываем наведение, иначе полоса кнопок
- * останется видимой до следующего тика с btn_hover != 0. */
+/* Анимация полосы кнопок на собственном таймере 100 мс.
+ *
+ * В оригинале это отдельный таймер update_buttons. Мы держали
+ * анимацию в общем tick календаря (10 с) и просили его
+ * ускорить, но просьба применялась только когда текущий
+ * интервал истекал - отсюда задержка 6-9 секунд до
+ * появления кнопок при наведении.
+ */
+static gboolean cal_buttons_timer(gpointer data)
+{
+	XsPlugin *p = data;
+	PrivData *priv;
+	gdouble prev;
+
+	if (!p || !(priv = p->priv))
+		return G_SOURCE_REMOVE;
+	prev = priv->btn_alpha;
+	if (priv->btn_hover || priv->btn_pressed) {
+		if (priv->btn_alpha < 1.0) {
+			priv->btn_alpha += CAL_BTN_ALPHA_STEP;
+			if (priv->btn_alpha > 1.0)
+				priv->btn_alpha = 1.0;
+		}
+	} else if (priv->btn_alpha > 0.0) {
+		priv->btn_alpha -= CAL_BTN_ALPHA_STEP;
+		if (priv->btn_alpha < 0.0)
+			priv->btn_alpha = 0.0;
+	}
+	if (priv->btn_alpha != prev && p->win)
+		gtk_widget_queue_draw(p->win);
+	/* Полоса погасла - таймер не нужен до следующего наведения. */
+	if (priv->btn_alpha <= 0.0 && !priv->btn_hover && !priv->btn_pressed) {
+		priv->btn_timer = 0;
+		return G_SOURCE_REMOVE;
+	}
+	return G_SOURCE_CONTINUE;
+}
+
+static void cal_buttons_timer_start(XsPlugin *p)
+{
+	PrivData *priv;
+
+	if (!p || !(priv = p->priv) || !priv->enable_buttons)
+		return;
+	if (priv->btn_timer)
+		return;
+	priv->btn_timer = g_timeout_add(CAL_BTN_TICK_MS, cal_buttons_timer, p);
+}
+
+/* Курсор ушёл с окна: сбрасываем наведение и гасим полосу. */
 static void calendar_leave(XsPlugin *p)
 {
 	PrivData *priv = p ? p->priv : NULL;
 
 	if (!priv)
 		return;
-	if (priv->btn_hover || priv->btn_pressed || priv->btn_hover_idx) {
-		priv->btn_hover = 0;
-		priv->btn_hover_idx = 0;
-		priv->btn_pressed = 0;
-		if (p->win)
-			gtk_widget_queue_draw(p->win);
-	}
+	priv->btn_hover = 0;
+	priv->btn_hover_idx = 0;
+	priv->btn_pressed = 0;
+	/* Таймер сам догасит альфу шагами по 0.2 — так же,
+	 * как update_buttons в оригинале, а не рывком. */
+	if (priv->btn_alpha > 0.0)
+		cal_buttons_timer_start(p);
+	else if (p->win)
+		gtk_widget_queue_draw(p->win);
 }
 
 static void calendar_enter(XsPlugin *p)
