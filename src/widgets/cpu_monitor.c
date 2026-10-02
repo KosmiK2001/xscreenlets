@@ -36,6 +36,11 @@
 #define CM_DEFAULT_WINDOW_HEIGHT 152
 #define CM_TEXT_PADDING 2.0
 #define CM_CORE_MARGIN 2.0
+/* Радиус скругления фона апплета, в пикселях окна. Скругляется
+ * только общий фон: ячейки графиков внутри остаются прямоугольными,
+ * иначе сетка выглядит рваной. */
+#define CM_CORNER_RADIUS 8.0
+#define CM_CORNER_RADIUS_MAX 64
 #define CM_HISTORY_MIN_POINTS 1
 #define CM_HISTORY_MAX_POINTS 4096
 #define CM_LOAD_COMPONENTS 4
@@ -75,8 +80,10 @@ typedef struct {
     gint rows;
     int window_width;
     int window_height;
+    int corner_radius;
     char *font;
     gdouble background_color[4];
+    gdouble border_color[4];
     gdouble text_color[4];
     gdouble temp_color[4];
     gdouble load_colors[4][4];
@@ -93,6 +100,8 @@ typedef struct {
 } PrivData;
 
 static const gdouble cm_color_background[4] = {0.04, 0.04, 0.05, 0.88};
+/* Рамка по контуру скругления, тот же цвет что у network_monitor. */
+static const gdouble cm_color_border[4] = {0.549020, 0.580392, 0.619608, 1.0};
 static const gdouble cm_color_text[4] = {0.88, 0.90, 0.94, 1.0};
 static const gdouble cm_color_temp[4] = {1.0, 0.38, 0.18, 1.0};
 static const gdouble cm_color_system[4] = {0.16, 0.58, 0.95, 1.0};
@@ -746,6 +755,19 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
     cairo_stroke(cr);
 }
 
+/* Путь скруглённого прямоугольника на весь кадр. Только контур,
+ * без fill: вызывающий сам решает, заливать или клипать. */
+static void cm_rounded_rect_path(cairo_t *cr, double w, double h, double r)
+{
+    r = MIN(r, MIN(w, h) / 2.0);
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, w - r, r, r, -G_PI / 2, 0);
+    cairo_arc(cr, w - r, h - r, r, 0, G_PI / 2);
+    cairo_arc(cr, r, h - r, r, G_PI / 2, G_PI);
+    cairo_arc(cr, r, r, r, G_PI, 3 * G_PI / 2);
+    cairo_close_path(cr);
+}
+
 static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 {
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
@@ -758,7 +780,13 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_rgba(cr, priv->background_color[0], priv->background_color[1],
                           priv->background_color[2], priv->background_color[3]);
-    cairo_paint(cr);
+    /* Фон заливается по контуру со скруглёнными углами. В углах
+     * остаётся прозрачность, сквозь которую видно рабочий стол. */
+    cm_rounded_rect_path(cr, width, height, priv->corner_radius);
+    cairo_fill_preserve(cr);
+    /* Дальше рисуются ячейки графиков: клип по тому же контуру,
+     * иначе содержимое вылезет за скругление. */
+    cairo_clip(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
     font = pango_font_description_from_string(priv->font);
     layout = pango_cairo_create_layout(cr);
@@ -838,6 +866,28 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
                         priv->background_color);
         }
     }
+    /* Рамка по внешнему контуру окна, поверх содержимого - так же
+     * как в network_monitor. */
+    if (priv->border_color[3] > 0.01) {
+        cairo_save(cr);
+        /* Содержимое уже нарисовано, клип рамке больше не нужен: он
+         * срезал бы половину обводки по самой кромке окна. Контур
+         * сдвигаем внутрь на половину толщины, чтобы обводка целиком
+         * легла на поверхность. */
+        cairo_reset_clip(cr);
+        cairo_translate(cr, 0.5, 0.5);
+        cm_rounded_rect_path(cr, width - 1.0, height - 1.0,
+                             priv->corner_radius > 0.5
+                                 ? priv->corner_radius - 0.5 : 0.0);
+        cairo_set_source_rgba(cr, priv->border_color[0],
+                              priv->border_color[1],
+                              priv->border_color[2],
+                              priv->border_color[3]);
+        cairo_set_line_width(cr, 1.0);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
+
     g_object_unref(layout);
     cairo_destroy(cr);
     cairo_surface_mark_dirty(surface);
@@ -867,6 +917,10 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
                                                   CM_DEFAULT_WINDOW_WIDTH);
     priv->window_height = xs_host_api()->conf_int(kf, p->name, "window_height",
                                                    CM_DEFAULT_WINDOW_HEIGHT);
+    priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                                         "corner_radius",
+                                                         CM_CORNER_RADIUS),
+                                 0, CM_CORNER_RADIUS_MAX);
     priv->update_ms = CLAMP(priv->update_ms, 100U, 60000U);
     priv->columns = CLAMP(priv->columns, 1, 16);
     priv->rows = CLAMP(priv->rows, 1, 16);
@@ -877,6 +931,8 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
         g_key_file_set_string(kf, p->name, "font", priv->font);
     cm_read_color(priv, "background_color", cm_color_background,
                   priv->background_color);
+    cm_read_color(priv, "border_color", cm_color_border,
+                  priv->border_color);
     cm_read_color(priv, "text_color", cm_color_text, priv->text_color);
     cm_read_color(priv, "temp_color", cm_color_temp, priv->temp_color);
     cm_read_color(priv, "system_color", cm_color_system, &priv->load_colors[0][0]);
@@ -890,6 +946,7 @@ static int cm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_integer(kf, p->name, "rows", priv->rows);
     g_key_file_set_integer(kf, p->name, "window_width", priv->window_width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->window_height);
+    g_key_file_set_integer(kf, p->name, "corner_radius", priv->corner_radius);
     xs_core_plugin_conf_flush(p->name);
     if (!cm_socket_claims)
         cm_socket_claims = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -1061,6 +1118,9 @@ static void cm_int_changed(GtkSpinButton *spin, gpointer data)
     } else if (strcmp(key, "window_height") == 0) {
         priv->window_height = CLAMP(value, 80, 1200);
         value = priv->window_height;
+    } else if (strcmp(key, "corner_radius") == 0) {
+        priv->corner_radius = CLAMP(value, 0, CM_CORNER_RADIUS_MAX);
+        value = priv->corner_radius;
     }
     g_key_file_set_integer(priv->kf, p->name, key, value);
     if (priv->plugin->win) {
@@ -1112,6 +1172,8 @@ static void cm_color_set(GtkColorButton *button, gpointer data)
     key = g_object_get_data(G_OBJECT(button), "xs-key");
     if (strcmp(key, "background_color") == 0)
         target = priv->background_color;
+    else if (strcmp(key, "border_color") == 0)
+        target = priv->border_color;
     else if (strcmp(key, "text_color") == 0)
         target = priv->text_color;
     else if (strcmp(key, "temp_color") == 0)
@@ -1183,6 +1245,12 @@ static void cm_properties(XsPlugin *p, GtkNotebook *nb)
         g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup(int_keys[i]), g_free);
         g_signal_connect(w, "value-changed", G_CALLBACK(cm_int_changed), p);
     }
+    w = xs_prop_add_int(GTK_BOX(page), "Corner radius",
+                        "Rounding of the applet background corners, px; "
+                        "0 gives square corners", priv->corner_radius,
+                        0, CM_CORNER_RADIUS_MAX, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("corner_radius"), g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cm_int_changed), p);
     w = xs_prop_add_int(GTK_BOX(page), "Window width",
                         "Overall applet width in pixels", priv->window_width,
                         100, 1600, 1);
@@ -1198,6 +1266,7 @@ static void cm_properties(XsPlugin *p, GtkNotebook *nb)
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("font"), g_free);
     g_signal_connect(w, "font-set", G_CALLBACK(cm_font_set), p);
     cm_add_color(p, page, "Background", "background_color", priv->background_color);
+    cm_add_color(p, page, "Border", "border_color", priv->border_color);
     cm_add_color(p, page, "Text", "text_color", priv->text_color);
     cm_add_color(p, page, "Temperature", "temp_color", priv->temp_color);
     cm_add_color(p, page, "System load", "system_color", &priv->load_colors[0][0]);
