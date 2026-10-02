@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 12:10+0300\n"
+"POT-Creation-Date: 2026-10-02 12:16+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -24,6 +24,26 @@ msgid ""
 "that expose a battery there (e.g. a Logitech mouse when the hid-logitech-"
 "hidpp module is loaded). Shows \"No battery\" when no source is found, "
 "instead of failing."
+msgstr ""
+
+#: src/widgets/acpi_battery.c:447 src/widgets/clearrss.c:2386
+#: src/widgets/cpu_monitor.c:1186 src/widgets/disk_monitor.c:1297
+#: src/widgets/memory_monitor.c:680 src/widgets/process_list.c:1194
+msgid "Window width"
+msgstr ""
+
+#: src/widgets/acpi_battery.c:449 src/widgets/clearrss.c:2389
+#: src/widgets/cpu_monitor.c:1191 src/widgets/disk_monitor.c:1297
+#: src/widgets/memory_monitor.c:681 src/widgets/process_list.c:1196
+msgid "Window height"
+msgstr ""
+
+#: src/widgets/acpi_battery.c:451
+msgid "Update interval (s)"
+msgstr ""
+
+#: src/widgets/acpi_battery.c:453
+msgid "Low battery threshold (%)"
 msgstr ""
 
 #: src/widgets/acpi_battery.c:457
@@ -81,6 +101,27 @@ msgstr ""
 
 #: src/widgets/calendar.c:880
 msgid "Show iCalendar events"
+msgstr ""
+
+#: src/widgets/calendar.c:886 src/widgets/clearrss.c:2338
+#: src/widgets/conlog_min.c:989
+msgid "Text color"
+msgstr ""
+
+#: src/widgets/calendar.c:888
+msgid "Today color"
+msgstr ""
+
+#: src/widgets/calendar.c:890
+msgid "Event day color"
+msgstr ""
+
+#: src/widgets/calendar.c:892
+msgid "Today event color"
+msgstr ""
+
+#: src/widgets/calendar.c:895
+msgid "Back color (default theme)"
 msgstr ""
 
 #: src/widgets/calendar.c:903
@@ -148,16 +189,14 @@ msgstr ""
 msgid "Published-time color"
 msgstr ""
 
-#: src/widgets/clearrss.c:2301 src/widgets/network_monitor.c:2719
+#: src/widgets/clearrss.c:2301 src/widgets/cpu_monitor.c:1201
+#: src/widgets/disk_monitor.c:1323 src/widgets/memory_monitor.c:687
+#: src/widgets/network_monitor.c:2719 src/widgets/process_list.c:1205
 msgid "Text"
 msgstr ""
 
 #: src/widgets/clearrss.c:2325
 msgid "Text font and size"
-msgstr ""
-
-#: src/widgets/clearrss.c:2338 src/widgets/conlog_min.c:989
-msgid "Text color"
 msgstr ""
 
 #: src/widgets/clearrss.c:2354
@@ -186,14 +225,6 @@ msgstr ""
 
 #: src/widgets/clearrss.c:2377
 msgid "News count"
-msgstr ""
-
-#: src/widgets/clearrss.c:2386 src/widgets/cpu_monitor.c:1186
-msgid "Window width"
-msgstr ""
-
-#: src/widgets/clearrss.c:2389 src/widgets/cpu_monitor.c:1191
-msgid "Window height"
 msgstr ""
 
 #: src/widgets/clearrss.c:2401
@@ -517,7 +548,8 @@ msgid "First-line indent"
 msgstr ""
 
 #: src/widgets/conlog.c:1521 src/widgets/conlog_min.c:996
-#: src/widgets/sensors.c:2182
+#: src/widgets/cpu_monitor.c:1200 src/widgets/memory_monitor.c:684
+#: src/widgets/process_list.c:1200 src/widgets/sensors.c:2182
 msgid "Background"
 msgstr ""
 
@@ -553,7 +585,7 @@ msgstr ""
 msgid "Conlog"
 msgstr ""
 
-#: src/widgets/conlog_min.c:943
+#: src/widgets/conlog_min.c:943 src/widgets/process_list.c:1203
 msgid "Title"
 msgstr ""
 
@@ -581,7 +613,7 @@ msgstr ""
 msgid "Text font"
 msgstr ""
 
-#: src/widgets/conlog_min.c:983
+#: src/widgets/conlog_min.c:983 src/widgets/process_list.c:1198
 msgid "Title font"
 msgstr ""
 
@@ -606,6 +638,26 @@ msgstr ""
 msgid "Font"
 msgstr ""
 
+#: src/widgets/cpu_monitor.c:1202
+msgid "Temperature"
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1203
+msgid "System load"
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1204
+msgid "User load"
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1205
+msgid "Nice load"
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1206
+msgid "I/O wait"
+msgstr ""
+
 #: src/widgets/cpu_monitor.c:1207
 msgid "CPU Monitor"
 msgstr ""
@@ -616,6 +668,29 @@ msgstr ""
 
 #: src/widgets/disk_monitor.c:1295
 msgid "Graph label"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1297
+msgid "Corner radius"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1297 src/widgets/memory_monitor.c:679
+#: src/widgets/network_monitor.c:2855 src/widgets/process_list.c:1141
+msgid "Update (ms)"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1297
+msgid "Rate smoothing (samples)"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1322 src/widgets/memory_monitor.c:685
+#: src/widgets/network_monitor.c:2715
+msgid "Graph background"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1324 src/widgets/memory_monitor.c:688
+#: src/widgets/network_monitor.c:2720
+msgid "Graph border"
 msgstr ""
 
 #: src/widgets/disk_monitor.c:1335
@@ -724,6 +799,26 @@ msgid ""
 "both graphs right-to-left."
 msgstr ""
 
+#: src/widgets/memory_monitor.c:689
+msgid "RAM user/apps"
+msgstr ""
+
+#: src/widgets/memory_monitor.c:690
+msgid "RAM shared"
+msgstr ""
+
+#: src/widgets/memory_monitor.c:691
+msgid "RAM buffers"
+msgstr ""
+
+#: src/widgets/memory_monitor.c:692
+msgid "RAM cache"
+msgstr ""
+
+#: src/widgets/memory_monitor.c:693
+msgid "Swap history"
+msgstr ""
+
 #: src/widgets/memory_monitor.c:694
 msgid "Memory Monitor"
 msgstr ""
@@ -775,16 +870,8 @@ msgstr ""
 msgid "Appearance"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2715
-msgid "Graph background"
-msgstr ""
-
 #: src/widgets/network_monitor.c:2717
 msgid "Window background"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2720
-msgid "Graph border"
 msgstr ""
 
 #: src/widgets/network_monitor.c:2755
@@ -803,10 +890,6 @@ msgstr ""
 msgid "Window corner"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2855
-msgid "Update (ms)"
-msgstr ""
-
 #: src/widgets/network_monitor.c:2857
 msgid "Smoothing"
 msgstr ""
@@ -819,6 +902,10 @@ msgstr ""
 msgid ""
 "Process list sampled directly from /proc; default layout "
 "follows .conkyrc_proc."
+msgstr ""
+
+#: src/widgets/process_list.c:1143
+msgid "Rows"
 msgstr ""
 
 #: src/widgets/process_list.c:1147
@@ -867,6 +954,18 @@ msgstr ""
 
 #: src/widgets/process_list.c:1188
 msgid "Conky (${top cpu} — 100% = all online threads)"
+msgstr ""
+
+#: src/widgets/process_list.c:1199
+msgid "Row font"
+msgstr ""
+
+#: src/widgets/process_list.c:1202
+msgid "Accent"
+msgstr ""
+
+#: src/widgets/process_list.c:1204
+msgid "Column headers"
 msgstr ""
 
 #: src/widgets/process_list.c:1206

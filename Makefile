@@ -306,6 +306,21 @@ POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 # забытый перевод. Проверено на clock.c: msgid "Time Zone" с
 # msgid_plural "The Time Zone to use for this screenlet".
 #
+# Обёртки над xs_prop_add_* в десяти апплетах. Номера разные, и это
+# проверено поштучно, а не по подобию:
+#
+#   :3 - подпись третья, ключа конфига нет:  cal_add_color,
+#        cm_add_color, pl_add_color, pl_add_font, pl_add_int
+#   :4 - перед подписью стоит key:            ab_int_prop,
+#        dm_add_color, dm_add_int, mm_add_int, mm_add_color
+#
+# Если взять для всех :3, то у второй группы вместо подписей
+# извлекаются КЛЮЧИ КОНФИГОВ (window_width, text_color, swap_color),
+# которые переводить нельзя. При :4 у первой группы наоборот пусто.
+#
+# Сами обёртки проксируют в xs_prop_add_*, который переводит, так что
+# в рантайме подписи уже были русскими. Не извлекались они в POT.
+#
 # Описания остаются английскими намеренно: это справочный текст в
 # подсказке, а не элемент интерфейса. Если понадобится - отдельным ключом
 # :3 и отдельным msgid, но НЕ вперемешку с :2.
@@ -329,7 +344,11 @@ XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
                   xs_prop_add_int:2 xs_prop_add_float:2 \
                   xs_prop_add_choices:2 xs_prop_add_color:2 \
                   xs_prop_add_font:2 xs_prop_add_time:2 \
-                  xs_prop_add_row:2 xs_prop_add_group_header:2
+                  xs_prop_add_row:2 xs_prop_add_group_header:2 \
+                  cal_add_color:3 cm_add_color:3 pl_add_color:3 \
+                  pl_add_font:3 pl_add_int:3 \
+                  ab_int_prop:4 dm_add_color:4 dm_add_int:4 \
+                  mm_add_int:4 mm_add_color:4
 
 # Шаблон: msgid из исходников. Перегенерировать после правки строк:
 #   make po-update

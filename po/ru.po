@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 12:10+0300\n"
+"POT-Creation-Date: 2026-10-02 12:16+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -28,6 +28,26 @@ msgid ""
 "hidpp module is loaded). Shows \"No battery\" when no source is found, "
 "instead of failing."
 msgstr ""
+
+#: src/widgets/acpi_battery.c:447 src/widgets/clearrss.c:2386
+#: src/widgets/cpu_monitor.c:1186 src/widgets/disk_monitor.c:1297
+#: src/widgets/memory_monitor.c:680 src/widgets/process_list.c:1194
+msgid "Window width"
+msgstr "Ширина окна"
+
+#: src/widgets/acpi_battery.c:449 src/widgets/clearrss.c:2389
+#: src/widgets/cpu_monitor.c:1191 src/widgets/disk_monitor.c:1297
+#: src/widgets/memory_monitor.c:681 src/widgets/process_list.c:1196
+msgid "Window height"
+msgstr "Высота окна"
+
+#: src/widgets/acpi_battery.c:451
+msgid "Update interval (s)"
+msgstr "Интервал обновления, с"
+
+#: src/widgets/acpi_battery.c:453
+msgid "Low battery threshold (%)"
+msgstr "Порог низкого заряда, %"
 
 #: src/widgets/acpi_battery.c:457
 msgid "Show percentage"
@@ -85,6 +105,27 @@ msgstr "Путь к файлу iCalendar (.ics)"
 #: src/widgets/calendar.c:880
 msgid "Show iCalendar events"
 msgstr "Показывать события iCalendar"
+
+#: src/widgets/calendar.c:886 src/widgets/clearrss.c:2338
+#: src/widgets/conlog_min.c:989
+msgid "Text color"
+msgstr "Цвет текста"
+
+#: src/widgets/calendar.c:888
+msgid "Today color"
+msgstr "Цвет сегодняшнего дня"
+
+#: src/widgets/calendar.c:890
+msgid "Event day color"
+msgstr "Цвет дня с событием"
+
+#: src/widgets/calendar.c:892
+msgid "Today event color"
+msgstr "Цвет события на сегодня"
+
+#: src/widgets/calendar.c:895
+msgid "Back color (default theme)"
+msgstr "Цвет фона (тема по умолчанию)"
 
 #: src/widgets/calendar.c:903
 msgid "Header font"
@@ -151,17 +192,15 @@ msgstr "Шрифт и размер времени публикации"
 msgid "Published-time color"
 msgstr "Цвет времени публикации"
 
-#: src/widgets/clearrss.c:2301 src/widgets/network_monitor.c:2719
+#: src/widgets/clearrss.c:2301 src/widgets/cpu_monitor.c:1201
+#: src/widgets/disk_monitor.c:1323 src/widgets/memory_monitor.c:687
+#: src/widgets/network_monitor.c:2719 src/widgets/process_list.c:1205
 msgid "Text"
 msgstr "Текст"
 
 #: src/widgets/clearrss.c:2325
 msgid "Text font and size"
 msgstr "Шрифт и размер текста"
-
-#: src/widgets/clearrss.c:2338 src/widgets/conlog_min.c:989
-msgid "Text color"
-msgstr "Цвет текста"
 
 #: src/widgets/clearrss.c:2354
 msgid "Rss-specific settings."
@@ -190,14 +229,6 @@ msgstr "Число новостей автоматически"
 #: src/widgets/clearrss.c:2377
 msgid "News count"
 msgstr "Число новостей"
-
-#: src/widgets/clearrss.c:2386 src/widgets/cpu_monitor.c:1186
-msgid "Window width"
-msgstr "Ширина окна"
-
-#: src/widgets/clearrss.c:2389 src/widgets/cpu_monitor.c:1191
-msgid "Window height"
-msgstr "Высота окна"
 
 #: src/widgets/clearrss.c:2401
 msgid "Show feed name"
@@ -520,7 +551,8 @@ msgid "First-line indent"
 msgstr "Отступ первой строки"
 
 #: src/widgets/conlog.c:1521 src/widgets/conlog_min.c:996
-#: src/widgets/sensors.c:2182
+#: src/widgets/cpu_monitor.c:1200 src/widgets/memory_monitor.c:684
+#: src/widgets/process_list.c:1200 src/widgets/sensors.c:2182
 msgid "Background"
 msgstr "Фон"
 
@@ -556,7 +588,7 @@ msgstr "Отладка"
 msgid "Conlog"
 msgstr "Conlog"
 
-#: src/widgets/conlog_min.c:943
+#: src/widgets/conlog_min.c:943 src/widgets/process_list.c:1203
 msgid "Title"
 msgstr "Заголовок"
 
@@ -584,7 +616,7 @@ msgstr "Шрифты и цвета"
 msgid "Text font"
 msgstr "Шрифт текста"
 
-#: src/widgets/conlog_min.c:983
+#: src/widgets/conlog_min.c:983 src/widgets/process_list.c:1198
 msgid "Title font"
 msgstr "Шрифт заголовка"
 
@@ -609,6 +641,26 @@ msgstr "ID сокета"
 msgid "Font"
 msgstr "Шрифт"
 
+#: src/widgets/cpu_monitor.c:1202
+msgid "Temperature"
+msgstr "Температура"
+
+#: src/widgets/cpu_monitor.c:1203
+msgid "System load"
+msgstr "Нагрузка системы"
+
+#: src/widgets/cpu_monitor.c:1204
+msgid "User load"
+msgstr "Нагрузка пользователя"
+
+#: src/widgets/cpu_monitor.c:1205
+msgid "Nice load"
+msgstr "Нагрузка nice"
+
+#: src/widgets/cpu_monitor.c:1206
+msgid "I/O wait"
+msgstr "Ожидание ввода-вывода"
+
 #: src/widgets/cpu_monitor.c:1207
 msgid "CPU Monitor"
 msgstr "Монитор ЦП"
@@ -620,6 +672,29 @@ msgstr "Показывать график температуры"
 #: src/widgets/disk_monitor.c:1295
 msgid "Graph label"
 msgstr "Подпись графика"
+
+#: src/widgets/disk_monitor.c:1297
+msgid "Corner radius"
+msgstr "Скругление углов"
+
+#: src/widgets/disk_monitor.c:1297 src/widgets/memory_monitor.c:679
+#: src/widgets/network_monitor.c:2855 src/widgets/process_list.c:1141
+msgid "Update (ms)"
+msgstr "Обновление, мс"
+
+#: src/widgets/disk_monitor.c:1297
+msgid "Rate smoothing (samples)"
+msgstr "Сглаживание, отсчёты"
+
+#: src/widgets/disk_monitor.c:1322 src/widgets/memory_monitor.c:685
+#: src/widgets/network_monitor.c:2715
+msgid "Graph background"
+msgstr "Фон графика"
+
+#: src/widgets/disk_monitor.c:1324 src/widgets/memory_monitor.c:688
+#: src/widgets/network_monitor.c:2720
+msgid "Graph border"
+msgstr "Рамка графика"
 
 #: src/widgets/disk_monitor.c:1335
 msgid "Disk Monitor"
@@ -653,6 +728,7 @@ msgstr "Запущенный апплет (main_daemon):"
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
 msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
+"Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
@@ -739,6 +815,26 @@ msgid ""
 "both graphs right-to-left."
 msgstr ""
 
+#: src/widgets/memory_monitor.c:689
+msgid "RAM user/apps"
+msgstr "ОЗУ: процессы"
+
+#: src/widgets/memory_monitor.c:690
+msgid "RAM shared"
+msgstr "ОЗУ: общая"
+
+#: src/widgets/memory_monitor.c:691
+msgid "RAM buffers"
+msgstr "ОЗУ: буферы"
+
+#: src/widgets/memory_monitor.c:692
+msgid "RAM cache"
+msgstr "ОЗУ: кэш"
+
+#: src/widgets/memory_monitor.c:693
+msgid "Swap history"
+msgstr "История свопа"
+
 #: src/widgets/memory_monitor.c:694
 msgid "Memory Monitor"
 msgstr "Монитор памяти"
@@ -792,17 +888,9 @@ msgstr "Цвет графика"
 msgid "Appearance"
 msgstr "Вид"
 
-#: src/widgets/network_monitor.c:2715
-msgid "Graph background"
-msgstr "Фон графика"
-
 #: src/widgets/network_monitor.c:2717
 msgid "Window background"
 msgstr "Фон окна"
-
-#: src/widgets/network_monitor.c:2720
-msgid "Graph border"
-msgstr "Рамка графика"
 
 #: src/widgets/network_monitor.c:2755
 msgid "Name"
@@ -820,10 +908,6 @@ msgstr "Скругление графика, px"
 msgid "Window corner"
 msgstr "Скругление окна, px"
 
-#: src/widgets/network_monitor.c:2855
-msgid "Update (ms)"
-msgstr "Обновление, мс"
-
 #: src/widgets/network_monitor.c:2857
 msgid "Smoothing"
 msgstr "Сглаживание"
@@ -837,6 +921,10 @@ msgid ""
 "Process list sampled directly from /proc; default layout "
 "follows .conkyrc_proc."
 msgstr ""
+
+#: src/widgets/process_list.c:1143
+msgid "Rows"
+msgstr "Строки"
 
 #: src/widgets/process_list.c:1147
 msgid "Default sort"
@@ -885,6 +973,18 @@ msgstr "По ядрам (100% = один поток)"
 #: src/widgets/process_list.c:1188
 msgid "Conky (${top cpu} — 100% = all online threads)"
 msgstr "Conky (${top cpu} — 100% = все активные потоки)"
+
+#: src/widgets/process_list.c:1199
+msgid "Row font"
+msgstr "Шрифт строк"
+
+#: src/widgets/process_list.c:1202
+msgid "Accent"
+msgstr "Акцент"
+
+#: src/widgets/process_list.c:1204
+msgid "Column headers"
+msgstr "Заголовки столбцов"
 
 #: src/widgets/process_list.c:1206
 msgid "Process List"
@@ -1096,6 +1196,50 @@ msgstr "Перезапустить апплеты"
 #: src/core/tray.c:266
 msgid "Stop all Applets"
 msgstr "Остановить все апплеты"
+
+#, fuzzy
+#~ msgid "window_width"
+#~ msgstr "Ширина окна"
+
+#, fuzzy
+#~ msgid "window_height"
+#~ msgstr "Высота окна"
+
+#, fuzzy
+#~ msgid "update_interval"
+#~ msgstr "Интервал обновления"
+
+#, fuzzy
+#~ msgid "update_ms"
+#~ msgstr "Обновление, мс"
+
+#, fuzzy
+#~ msgid "graph_background_color"
+#~ msgstr "Фон графика"
+
+#, fuzzy
+#~ msgid "text_color"
+#~ msgstr "Цвет текста"
+
+#, fuzzy
+#~ msgid "border_color"
+#~ msgstr "Цвет заголовка"
+
+#, fuzzy
+#~ msgid "background_color"
+#~ msgstr "Цвет фона:"
+
+#, fuzzy
+#~ msgid "ram_color"
+#~ msgstr "Цвет графика"
+
+#, fuzzy
+#~ msgid "cache_color"
+#~ msgstr "Цвет фона"
+
+#, fuzzy
+#~ msgid "swap_color"
+#~ msgstr "Цвет графика"
 
 #~ msgid "Город или индекс:"
 #~ msgstr "Город или индекс:"
