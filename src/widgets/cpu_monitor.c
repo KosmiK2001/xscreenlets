@@ -41,6 +41,9 @@
  * иначе сетка выглядит рваной. */
 #define CM_CORNER_RADIUS 8.0
 #define CM_CORNER_RADIUS_MAX 64
+/* Минимальный зазор между внешней рамкой и ближайшим внутренним
+ * контуром в зоне скругления. */
+#define CM_INNER_GAP 1.0
 #define CM_HISTORY_MIN_POINTS 1
 #define CM_HISTORY_MAX_POINTS 4096
 #define CM_LOAD_COMPONENTS 4
@@ -701,13 +704,22 @@ static gboolean cm_sample_cpu(PrivData *priv)
     return TRUE;
 }
 
+static double cm_nested_radius(double d, double other, double outer);
+
+static void cm_rect_path_rounded(cairo_t *cr, double x, double y,
+                                 double w, double h,
+                                 double r_tl, double r_tr,
+                                 double r_br, double r_bl);
+
 static void cm_draw_history(cairo_t *cr, double x, double y, double width,
                             double height, CoreData *core, guint thread,
                             guint points, guint head, guint count,
                             const gdouble colors[4][4],
-                            const gdouble background[4])
+                            const gdouble background[4],
+                            double win_w, double win_h, double radius)
 {
     const double inset = 1.0;
+    double radii[4], inner[4];
     double plot_x = x + inset;
     double plot_y = y + inset;
     double plot_width = MAX(1.0, width - 2.0 * inset);
@@ -716,13 +728,27 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
     guint used = MIN(count, points);
     guint start = (head + points - used) % points;
     guint sample;
+    /* Внутренние контуры повторяют скругление окна изнутри:
+     * угол блока, попавший в зону внешнего радиуса, получает свой
+     * радиус так, чтобы между ним и внешней рамкой остался зазор. */
+    double outer = (radius > 0.5) ? radius - 0.5 : 0.0;
+    double x1 = x + width, y1 = y + height;
 
-    cairo_rectangle(cr, x, y, width, height);
+    radii[0] = cm_nested_radius(x, y, outer);
+    radii[1] = cm_nested_radius(win_w - x1, y, outer);
+    radii[2] = cm_nested_radius(win_w - x1, win_h - y1, outer);
+    radii[3] = cm_nested_radius(x, win_h - y1, outer);
+
+    cm_rect_path_rounded(cr, x, y, width, height,
+                         radii[0], radii[1], radii[2], radii[3]);
     cairo_set_source_rgba(cr, background[0], background[1],
                           background[2], background[3] * 0.82);
     cairo_fill(cr);
     cairo_save(cr);
-    cairo_rectangle(cr, plot_x, plot_y, plot_width, plot_height);
+    /* Полосы рисуются под тем же скруглённым контуром, иначе
+     * столбики вылезут за скруглённый угол блока. */
+    cm_rect_path_rounded(cr, x, y, width, height,
+                         radii[0], radii[1], radii[2], radii[3]);
     cairo_clip(cr);
     for (sample = 0; sample < used; sample++) {
         const gdouble *load;
@@ -749,10 +775,64 @@ static void cm_draw_history(cairo_t *cr, double x, double y, double width,
         }
     }
     cairo_restore(cr);
+    /* Внутренняя рамка блока: толщина прежняя (0.5), но контур
+     * повторяет скругление, иначе она вылезает за угол блока. */
     cairo_set_source_rgba(cr, 0.75, 0.75, 0.80, 0.65);
     cairo_set_line_width(cr, 0.5);
-    cairo_rectangle(cr, x + 0.25, y + 0.25, width - 0.5, height - 0.5);
+    inner[0] = cm_nested_radius(x + 0.25, y + 0.25, outer);
+    inner[1] = cm_nested_radius(win_w - x1 - 0.25, y + 0.25, outer);
+    inner[2] = cm_nested_radius(win_w - x1 - 0.25, win_h - y1 + 0.25, outer);
+    inner[3] = cm_nested_radius(x + 0.25, win_h - y1 + 0.25, outer);
+    cm_rect_path_rounded(cr, x + 0.25, y + 0.25, width - 0.5, height - 0.5,
+                         inner[0], inner[1], inner[2], inner[3]);
     cairo_stroke(cr);
+}
+
+/* Радиус вложенного контура: угол внутреннего прямоугольника,
+ * отстоящий от края окна на d, повторяет внешнее скругление,
+ * оставляя зазор. d — расстояние от угла до края окна.
+ * Возвращает 0 для углов вне зоны скругления. */
+static double cm_nested_radius(double d, double other, double outer)
+{
+    double r;
+
+    if (outer <= 0.5)
+        return 0.0;
+    r = outer - MAX(d, other);
+    return (r > 0.0) ? r : 0.0;
+}
+
+/* Путь прямоугольника со скруглением только в указанных углах.
+ * Радиусы идут в порядке: левый-верхний, правый-верхний,
+ * правый-нижний, левый-нижний. Радиус 0 = прямой угол. */
+static void cm_rect_path_rounded(cairo_t *cr, double x, double y,
+                                 double w, double h,
+                                 double r_tl, double r_tr,
+                                 double r_br, double r_bl)
+{
+    double x1 = x + w, y1 = y + h;
+    double lim = MIN(w, h) / 2.0;
+
+    r_tl = CLAMP(r_tl, 0.0, lim);
+    r_tr = CLAMP(r_tr, 0.0, lim);
+    r_br = CLAMP(r_br, 0.0, lim);
+    r_bl = CLAMP(r_bl, 0.0, lim);
+
+    cairo_new_sub_path(cr);
+    cairo_move_to(cr, x + r_tl, y);
+    cairo_line_to(cr, x1 - r_tr, y);
+    if (r_tr > 0.0)
+        cairo_arc(cr, x1 - r_tr, y + r_tr, r_tr, -G_PI / 2, 0);
+    cairo_line_to(cr, x1, y1 - r_br);
+    if (r_br > 0.0)
+        cairo_arc(cr, x1 - r_br, y1 - r_br, r_br, 0, G_PI / 2);
+    cairo_line_to(cr, x + r_bl, y1);
+    if (r_bl > 0.0)
+        cairo_arc(cr, x + r_bl, y1 - r_bl, r_bl, G_PI / 2, G_PI);
+    cairo_line_to(cr, x, y + r_tl);
+    if (r_tl > 0.0)
+        cairo_arc(cr, x + r_tl, y + r_tl, r_tl, G_PI, 3 * G_PI / 2);
+    cairo_close_path(cr);
 }
 
 /* Путь скруглённого прямоугольника на весь кадр. Только контур,
@@ -818,10 +898,33 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
                               priv->text_color[2],
                               priv->text_color[3] * priv->background_color[3]);
         cairo_set_line_width(cr, 1.0);
-        cairo_rectangle(cr, cell_left + 0.5, cell_top + 0.5,
-                        cell_right - cell_left - 1.0,
-                        cell_bottom - cell_top - 1.0);
-        cairo_stroke(cr);
+        /* Ячейки у края окна отодвинуты внутрь, иначе их рамка ложится
+         * поверх внешней рамки и угол срезается скруглением. */
+        {
+            double fx = cell_left + 0.5, fy = cell_top + 0.5;
+            double fw = cell_right - cell_left - 1.0;
+            double fh = cell_bottom - cell_top - 1.0;
+
+            if (col == 0)
+                fx += CM_INNER_GAP;
+            if (row == 0)
+                fy += CM_INNER_GAP;
+            if (col == MAX(priv->columns, 1) - 1)
+                fw -= CM_INNER_GAP;
+            if (row == MAX(priv->rows, 1) - 1)
+                fh -= CM_INNER_GAP;
+            cm_rect_path_rounded(cr, fx, fy, MAX(1.0, fw), MAX(1.0, fh),
+                                 cm_nested_radius(fx, fy,
+                                                  priv->corner_radius - 0.5),
+                                 cm_nested_radius(width - (fx + fw), fy,
+                                                  priv->corner_radius - 0.5),
+                                 cm_nested_radius(width - (fx + fw),
+                                                  height - (fy + fh),
+                                                  priv->corner_radius - 0.5),
+                                 cm_nested_radius(fx, height - (fy + fh),
+                                                  priv->corner_radius - 0.5));
+            cairo_stroke(cr);
+        }
 
         pango_layout_set_text(layout, "0", -1);
         pango_layout_get_pixel_size(layout, NULL, &text_height);
@@ -833,7 +936,8 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
             cm_draw_history(cr, x, y, block_w, block_h, core, 0,
                             core->history_points, priv->history_head,
                             priv->history_count, priv->load_colors,
-                            priv->background_color);
+                            priv->background_color, width, height,
+                            priv->corner_radius);
             text_y = y + block_h;
         text = isfinite(core->frequency_mhz) ?
                g_strdup_printf("%.2fG", core->frequency_mhz / 1000.0) : g_strdup("---");
@@ -863,7 +967,8 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         cm_draw_history(cr, x, text_y + middle_h, block_w, block_h,
                         core, 1, core->history_points, priv->history_head,
                         priv->history_count, priv->load_colors,
-                        priv->background_color);
+                        priv->background_color, width, height,
+                        priv->corner_radius);
         }
     }
     /* Рамка по внешнему контуру окна, поверх содержимого - так же
