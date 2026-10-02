@@ -116,18 +116,40 @@ static void on_popup_menu(GtkStatusIcon *icon, guint button,
 
 void xs_tray_init(void)
 {
+    gboolean g_tray_icon_set = FALSE;
+
     g_tray = gtk_status_icon_new();
     if (!g_tray) {
         xs_log_impl("tray: failed to create GtkStatusIcon, continuing without tray");
         return;
     }
-    /* Иконка "xscreenlets" в теме отсутствует — берём svg оригинального
-     * screenlets (как в python2-daemon), fallback — icon-name. */
-    if (g_file_test("/usr/share/icons/screenlets.svg", G_FILE_TEST_EXISTS))
-        gtk_status_icon_set_from_file(g_tray,
-                                      "/usr/share/icons/screenlets.svg");
-    else
-        gtk_status_icon_set_from_icon_name(g_tray, "xscreenlets");
+    /* Значок трея: сначала собственный из пакета
+     * (/usr/share/icons/xscreenlets/screenlets-tray.png — его ставит
+     * ebuild вместе со всеми иконками из icons/). Раньше здесь был
+     * жёсткий путь /usr/share/icons/screenlets.svg, но этот файл
+     * принадлежал python2-пакету screenlets и на машине без него
+     * демон падал в fallback на имя "xscreenlets", которого в теме
+     * нет — трей оставался пустым.
+     *
+     * .svg оставлен вторым: на части систем сохраняется старый значок,
+     * и переходить на него молча не стоит. */
+    {
+        static const char *tray_icons[] = {
+            "/usr/share/icons/xscreenlets/screenlets-tray.png",
+            "/usr/share/icons/screenlets.svg",
+            NULL
+        };
+        int i;
+
+        for (i = 0; tray_icons[i] && !g_tray_icon_set; i++) {
+            if (g_file_test(tray_icons[i], G_FILE_TEST_EXISTS)) {
+                gtk_status_icon_set_from_file(g_tray, tray_icons[i]);
+                g_tray_icon_set = TRUE;
+            }
+        }
+        if (!g_tray_icon_set)
+            gtk_status_icon_set_from_icon_name(g_tray, "xscreenlets");
+    }
     gtk_status_icon_set_tooltip_text(g_tray, "Xscreenlets");
     g_object_ref_sink(g_tray);
     g_menu = GTK_MENU(gtk_menu_new());
