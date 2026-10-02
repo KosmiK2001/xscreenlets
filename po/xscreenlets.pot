@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 11:47+0300\n"
+"POT-Creation-Date: 2026-10-02 12:00+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -148,7 +148,7 @@ msgstr ""
 msgid "Published-time color"
 msgstr ""
 
-#: src/widgets/clearrss.c:2301
+#: src/widgets/clearrss.c:2301 src/widgets/network_monitor.c:2719
 msgid "Text"
 msgstr ""
 
@@ -497,11 +497,13 @@ msgstr ""
 msgid "Window"
 msgstr ""
 
-#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2174
+#: src/widgets/conlog.c:1513 src/widgets/network_monitor.c:2844
+#: src/widgets/sensors.c:2174
 msgid "Width"
 msgstr ""
 
-#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2176
+#: src/widgets/conlog.c:1515 src/widgets/network_monitor.c:2846
+#: src/widgets/sensors.c:2176
 msgid "Height"
 msgstr ""
 
@@ -538,6 +540,7 @@ msgid "Socket ID"
 msgstr ""
 
 #: src/widgets/cpu_monitor.c:1196 src/widgets/memory_monitor.c:682
+#: src/widgets/network_monitor.c:2729
 msgid "Font"
 msgstr ""
 
@@ -565,7 +568,7 @@ msgstr ""
 msgid "Y"
 msgstr ""
 
-#: src/widgets/disk_monitor_core.c:173
+#: src/widgets/disk_monitor_core.c:173 src/widgets/network_monitor.c:2735
 msgid "Position"
 msgstr ""
 
@@ -671,8 +674,55 @@ msgstr ""
 msgid "Interface"
 msgstr ""
 
+#: src/widgets/network_monitor.c:2627
+msgid "Graph"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2632
+msgid "Graph max (KiB/s, 0=auto)"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2674 src/widgets/network_monitor.c:2808
+#: src/widgets/sensors.c:2131
+msgid "Label"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2678 src/widgets/network_monitor.c:2811
+msgid "Label X/Y"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2686 src/widgets/network_monitor.c:2742
+#: src/widgets/network_monitor.c:2818
+msgid "Placement"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2692 src/widgets/network_monitor.c:2825
+#: src/widgets/sensors.c:2134
+msgid "Value"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2698 src/widgets/network_monitor.c:2830
+msgid "Value X/Y"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2705
+msgid "Graph color"
+msgstr ""
+
 #: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2129
 msgid "Appearance"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2715
+msgid "Graph background"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2717
+msgid "Window background"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2720
+msgid "Graph border"
 msgstr ""
 
 #: src/widgets/network_monitor.c:2755
@@ -681,6 +731,22 @@ msgstr ""
 
 #: src/widgets/network_monitor.c:2762
 msgid "IP"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2849
+msgid "Graph corner"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2853
+msgid "Window corner"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2855
+msgid "Update (ms)"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2857
+msgid "Smoothing"
 msgstr ""
 
 #: src/widgets/network_monitor.c:2883
@@ -751,14 +817,6 @@ msgstr ""
 
 #: src/widgets/sensors.c:2114
 msgid "Show"
-msgstr ""
-
-#: src/widgets/sensors.c:2131
-msgid "Label"
-msgstr ""
-
-#: src/widgets/sensors.c:2134
-msgid "Value"
 msgstr ""
 
 #: src/widgets/sensors.c:2135

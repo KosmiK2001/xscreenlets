@@ -270,7 +270,12 @@ POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 # Проверено: без номеров все четыре дают 0 извлечённых строк, с номерами
 # 16, 17, 2 и 5 соответственно.
 #
-# Плюс nm_* : первый аргумент - ключ конфига, но он не переводится
+# Плюс nm_*: первый аргумент - ключ конфига, но он не переводится.
+# Подписи идут вторым по счёту строковым, а не третьим: у nm_add_int,
+# nm_add_color, nm_add_font, nm_add_combo первым идёт key, поэтому
+# подпись там 4-я. nm_add_inline_text(g, label_txt, ...) - 3-я.
+# Перевод делает nm_grid_add_label, но извлекать строки надо по
+# ключам nm_add_*, иначе в POT попадают пять строк вместо тридцати.
 # (не находит msgstr и остаётся как есть), так что в POT попадает и он.
 # clock_props_group сюда НЕ входит: у него два строковых аргумента
 # (title и info), а при двух ключах одного имени xgettext берёт
@@ -317,6 +322,9 @@ XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
                   rss_menu_item:3 cal_menu_item:3 cw_menu_item_add:3 \
                   cw_row:3 dm_series_compact_row:2 ab_bool_prop:5 \
                   cl_props_group:2 \
+                  nm_add_xy:3 nm_add_pos:3 nm_add_int:4 \
+                  nm_add_color:4 nm_add_font:4 nm_add_combo:4 \
+                  nm_add_inline_text:3 \
                   xs_prop_add_string:2 xs_prop_add_bool:2 \
                   xs_prop_add_int:2 xs_prop_add_float:2 \
                   xs_prop_add_choices:2 xs_prop_add_color:2 \

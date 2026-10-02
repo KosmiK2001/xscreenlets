@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 11:47+0300\n"
+"POT-Creation-Date: 2026-10-02 12:00+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -151,7 +151,7 @@ msgstr "Шрифт и размер времени публикации"
 msgid "Published-time color"
 msgstr "Цвет времени публикации"
 
-#: src/widgets/clearrss.c:2301
+#: src/widgets/clearrss.c:2301 src/widgets/network_monitor.c:2719
 msgid "Text"
 msgstr "Текст"
 
@@ -500,11 +500,13 @@ msgstr "Строк в буфере"
 msgid "Window"
 msgstr "Окно"
 
-#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2174
+#: src/widgets/conlog.c:1513 src/widgets/network_monitor.c:2844
+#: src/widgets/sensors.c:2174
 msgid "Width"
 msgstr "Ширина"
 
-#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2176
+#: src/widgets/conlog.c:1515 src/widgets/network_monitor.c:2846
+#: src/widgets/sensors.c:2176
 msgid "Height"
 msgstr "Высота"
 
@@ -541,6 +543,7 @@ msgid "Socket ID"
 msgstr "ID сокета"
 
 #: src/widgets/cpu_monitor.c:1196 src/widgets/memory_monitor.c:682
+#: src/widgets/network_monitor.c:2729
 msgid "Font"
 msgstr "Шрифт"
 
@@ -568,7 +571,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: src/widgets/disk_monitor_core.c:173
+#: src/widgets/disk_monitor_core.c:173 src/widgets/network_monitor.c:2735
 msgid "Position"
 msgstr "Позиция"
 
@@ -588,6 +591,7 @@ msgstr "Запущенный апплет (main_daemon):"
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
 msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
+"Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
@@ -685,9 +689,56 @@ msgstr "/"
 msgid "Interface"
 msgstr "Интерфейс"
 
+#: src/widgets/network_monitor.c:2627
+msgid "Graph"
+msgstr "График"
+
+#: src/widgets/network_monitor.c:2632
+msgid "Graph max (KiB/s, 0=auto)"
+msgstr "Максимум графика (КиБ/с, 0=авто)"
+
+#: src/widgets/network_monitor.c:2674 src/widgets/network_monitor.c:2808
+#: src/widgets/sensors.c:2131
+msgid "Label"
+msgstr "Метка"
+
+#: src/widgets/network_monitor.c:2678 src/widgets/network_monitor.c:2811
+msgid "Label X/Y"
+msgstr "Позиция подписи X/Y"
+
+#: src/widgets/network_monitor.c:2686 src/widgets/network_monitor.c:2742
+#: src/widgets/network_monitor.c:2818
+msgid "Placement"
+msgstr "Размещение"
+
+#: src/widgets/network_monitor.c:2692 src/widgets/network_monitor.c:2825
+#: src/widgets/sensors.c:2134
+msgid "Value"
+msgstr "Число"
+
+#: src/widgets/network_monitor.c:2698 src/widgets/network_monitor.c:2830
+msgid "Value X/Y"
+msgstr "Позиция значения X/Y"
+
+#: src/widgets/network_monitor.c:2705
+msgid "Graph color"
+msgstr "Цвет графика"
+
 #: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2129
 msgid "Appearance"
 msgstr "Вид"
+
+#: src/widgets/network_monitor.c:2715
+msgid "Graph background"
+msgstr "Фон графика"
+
+#: src/widgets/network_monitor.c:2717
+msgid "Window background"
+msgstr "Фон окна"
+
+#: src/widgets/network_monitor.c:2720
+msgid "Graph border"
+msgstr "Рамка графика"
 
 #: src/widgets/network_monitor.c:2755
 msgid "Name"
@@ -696,6 +747,22 @@ msgstr "Имя"
 #: src/widgets/network_monitor.c:2762
 msgid "IP"
 msgstr "IP"
+
+#: src/widgets/network_monitor.c:2849
+msgid "Graph corner"
+msgstr "Скругление графика, px"
+
+#: src/widgets/network_monitor.c:2853
+msgid "Window corner"
+msgstr "Скругление окна, px"
+
+#: src/widgets/network_monitor.c:2855
+msgid "Update (ms)"
+msgstr "Обновление, мс"
+
+#: src/widgets/network_monitor.c:2857
+msgid "Smoothing"
+msgstr "Сглаживание"
 
 #: src/widgets/network_monitor.c:2883
 msgid "Network Monitor"
@@ -766,14 +833,6 @@ msgstr "Сенсоры не найдены"
 #: src/widgets/sensors.c:2114
 msgid "Show"
 msgstr "Показывать"
-
-#: src/widgets/sensors.c:2131
-msgid "Label"
-msgstr "Метка"
-
-#: src/widgets/sensors.c:2134
-msgid "Value"
-msgstr "Число"
 
 #: src/widgets/sensors.c:2135
 msgid "Value colour"
