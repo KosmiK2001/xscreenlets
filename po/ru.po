@@ -5,11 +5,12 @@
 # Английский - исходный язык проекта, русский - перевод. Строки в C пишутся
 # по-английски; русский вариант живёт здесь. Чтобы добавить перевод строки,
 # откройте нужное свойство в настройках апплета и найдите его в этом файле.
+#: src/widgets/network_monitor.c:2568
 msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 01:16+0300\n"
+"POT-Creation-Date: 2026-10-02 08:50+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -24,6 +25,10 @@ msgstr ""
 msgid "ACPI Battery"
 msgstr "Батарея"
 
+#: src/widgets/calendar.c:683 src/widgets/clock.c:1091
+msgid "Theme"
+msgstr "Тема"
+
 #: src/widgets/calendar.c:849
 msgid "Calendar specific options"
 msgstr "Настройки календаря"
@@ -32,13 +37,58 @@ msgstr "Настройки календаря"
 msgid "iCalendar"
 msgstr "iCalendar"
 
+#: src/widgets/clearrss.c:1897
+msgid "Feeds"
+msgstr "Ленты"
+
+#: src/widgets/clearrss.c:1913 src/core/common.c:1647
+msgid "Themes"
+msgstr "Темы"
+
+#: src/widgets/clearrss.c:2188
+msgid "Align header left/center/right"
+msgstr "Выравнивание заголовка: по левому краю / по центру / по правому краю"
+
 #: src/widgets/clearrss.c:2203 src/widgets/clearrss.c:2252
+#: src/widgets/clearrss.c:2395 src/widgets/network_monitor.c:2727
 msgid "Header"
 msgstr "Заголовок"
+
+#: src/widgets/clearrss.c:2227
+msgid "Header font and size"
+msgstr "Шрифт и размер заголовка"
+
+#: src/widgets/clearrss.c:2240
+msgid "Header color"
+msgstr "Цвет заголовка"
+
+#: src/widgets/clearrss.c:2276
+msgid "Published-time font and size"
+msgstr "Шрифт и размер времени публикации"
+
+#: src/widgets/clearrss.c:2289
+msgid "Published-time color"
+msgstr "Цвет времени публикации"
 
 #: src/widgets/clearrss.c:2301
 msgid "Text"
 msgstr "Текст"
+
+#: src/widgets/clearrss.c:2325
+msgid "Text font and size"
+msgstr "Шрифт и размер текста"
+
+#: src/widgets/clearrss.c:2338
+msgid "Text color"
+msgstr "Цвет текста"
+
+#: src/widgets/clearrss.c:2356
+msgid "Feed"
+msgstr "Лента"
+
+#: src/widgets/clearrss.c:2412
+msgid "Text settings"
+msgstr "Настройки текста"
 
 #: src/widgets/clearrss.c:2433
 msgid "Rss"
@@ -52,19 +102,108 @@ msgstr "Погода"
 msgid "Alarm-Time"
 msgstr "Время будильника"
 
-#: src/widgets/conlog.c:1410
+#: src/widgets/clock.c:1062
+msgid "Get Clock Skins"
+msgstr "Получить скины часов"
+
+#: src/widgets/conlog.c:1403
+msgid "Command"
+msgstr "Команда"
+
+#: src/widgets/conlog.c:1413
 msgid "Arguments are passed to the process directly, without a shell.\n"
 msgstr "Аргументы передаются процессу напрямую, без оболочки.\n"
 
-#: src/widgets/conlog.c:1422
+#: src/widgets/conlog.c:1425
 msgid "Window title (optional)"
 msgstr "Заголовок окна (необязательно)"
 
+#: src/widgets/conlog.c:1434
+msgid "Clear output"
+msgstr "Очистить вывод"
+
+#: src/widgets/conlog.c:1444
+msgid "Appearance: window label"
+msgstr "Вид: метка окна"
+
+#: src/widgets/conlog.c:1459
+msgid "Label font"
+msgstr "Шрифт метки"
+
+#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2129
+msgid "Label colour"
+msgstr "Цвет метки"
+
+#: src/widgets/conlog.c:1464
+msgid "Offset X"
+msgstr "Смещение по X"
+
 #: src/widgets/conlog.c:1466
+msgid "Offset Y"
+msgstr "Смещение по Y"
+
+#: src/widgets/conlog.c:1469
 msgid "Y offset: a negative value pulls the label up."
 msgstr "Смещение по Y: отрицательное значение подтягивает метку вверх."
 
-#: src/widgets/conlog.c:1553
+#: src/widgets/conlog.c:1478
+msgid "Behaviour"
+msgstr "Поведение"
+
+#: src/widgets/conlog.c:1490
+msgid "Strip colours (ANSI)"
+msgstr "Вырезать цвета (ANSI)"
+
+#: src/widgets/conlog.c:1492
+msgid "Keep output colours"
+msgstr "Сохранять цвета вывода"
+
+#: src/widgets/conlog.c:1494
+msgid "Per-level colours"
+msgstr "Цвета по уровню"
+
+#: src/widgets/conlog.c:1496
+msgid "Follow the tail"
+msgstr "Следовать за хвостом"
+
+#: src/widgets/conlog.c:1497
+msgid "Lines in buffer"
+msgstr "Строк в буфере"
+
+#: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
+#: src/widgets/sensors.c:2169 src/core/common.c:1564 src/core/common.c:1713
+msgid "Window"
+msgstr "Окно"
+
+#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2171
+msgid "Width"
+msgstr "Ширина"
+
+#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2173
+msgid "Height"
+msgstr "Высота"
+
+#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2175
+msgid "Corner rounding"
+msgstr "Скругление"
+
+#: src/widgets/conlog.c:1519
+msgid "First-line indent"
+msgstr "Отступ первой строки"
+
+#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2179
+msgid "Background"
+msgstr "Фон"
+
+#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2181
+msgid "Border"
+msgstr "Рамка"
+
+#: src/widgets/conlog.c:1529
+msgid "Level colours"
+msgstr "Цвета уровней"
+
+#: src/widgets/conlog.c:1556
 msgid "Conlog"
 msgstr "Conlog"
 
@@ -99,11 +238,28 @@ msgstr "Запущенный апплет (main_daemon):"
 #: src/widgets/frame_launcher.c:1175
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
 msgstr ""
-"Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
+"Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
+"Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 
 #: src/widgets/frame_launcher.c:1182
 msgid "Frame"
 msgstr "Рамка"
+
+#: src/widgets/frame_launcher.c:1238
+msgid ""
+"Create a NEW applet of the selected type right inside the frame (it is not "
+"added to the daemon autostart)"
+msgstr ""
+"Создать НОВЫЙ апплет выбранного типа сразу внутри рамки (в автостарт демона "
+"не попадает)"
+
+#: src/widgets/frame_launcher.c:1241
+msgid ""
+"Take an already running applet: it will be stopped in the daemon, moved into "
+"the frame and removed from autostart"
+msgstr ""
+"Забрать уже запущенный апплет: он остановится в демоне, будет перенесён в "
+"рамку и убран из автостарта"
 
 #: src/widgets/launcher.c:837
 msgid "Some options related to the Launcher-Screenlet."
@@ -113,25 +269,45 @@ msgstr "Параметры апплета Launcher."
 msgid "Starter"
 msgstr "Запуск"
 
+#: src/widgets/launcher.c:894
+msgid "scale = original × Scale; end_size = fixed size in px"
+msgstr "scale = оригинал × Scale; end_size = жёсткий размер в px"
+
+#: src/widgets/launcher.c:906
+msgid "Multiplier of the image natural size"
+msgstr "Множитель к natural-размеру изображения"
+
+#: src/widgets/launcher.c:933
+msgid "Fixed size of the picture"
+msgstr "Жёсткий размер картинки"
+
 #: src/widgets/memory_monitor.c:694
 msgid "Memory Monitor"
 msgstr "Монитор памяти"
 
-#: src/widgets/network_monitor.c:2362 src/widgets/network_monitor.c:2414
 # Разделитель "скачано/всего" в сетевом мониторе. Не переводится:
 # это символ, а не слово.
+#: src/widgets/network_monitor.c:2366 src/widgets/network_monitor.c:2418
 msgid "/"
 msgstr "/"
 
-#: src/widgets/network_monitor.c:2749
+#: src/widgets/network_monitor.c:2603 src/widgets/network_monitor.c:2620
+msgid "Interface"
+msgstr "Интерфейс"
+
+#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2126
+msgid "Appearance"
+msgstr "Вид"
+
+#: src/widgets/network_monitor.c:2755
 msgid "Name"
 msgstr "Имя"
 
-#: src/widgets/network_monitor.c:2756
+#: src/widgets/network_monitor.c:2762
 msgid "IP"
 msgstr "IP"
 
-#: src/widgets/network_monitor.c:2877
+#: src/widgets/network_monitor.c:2883
 msgid "Network Monitor"
 msgstr "Сетевой монитор"
 
@@ -139,23 +315,111 @@ msgstr "Сетевой монитор"
 msgid "Process List"
 msgstr "Список процессов"
 
-#: src/widgets/sensors.c:1903
+#: src/widgets/sensors.c:1905
 msgid "No sensors found"
 msgstr "Сенсоры не найдены"
 
-#: src/widgets/sensors.c:2190
+#: src/widgets/sensors.c:2111
+msgid "Show"
+msgstr "Показывать"
+
+#: src/widgets/sensors.c:2128
+msgid "Label"
+msgstr "Метка"
+
+#: src/widgets/sensors.c:2131
+msgid "Value"
+msgstr "Число"
+
+#: src/widgets/sensors.c:2132
+msgid "Value colour"
+msgstr "Цвет числа"
+
+#: src/widgets/sensors.c:2147
+msgid "Units"
+msgstr "Единицы"
+
+#: src/widgets/sensors.c:2153
+msgid "Layout"
+msgstr "Раскладка"
+
+#: src/widgets/sensors.c:2155
+msgid "Label position"
+msgstr "Позиция метки"
+
+#: src/widgets/sensors.c:2157
+msgid "Value position"
+msgstr "Позиция числа"
+
+#: src/widgets/sensors.c:2159
+msgid "Value right-aligned"
+msgstr "Число вправо"
+
+#: src/widgets/sensors.c:2161
+msgid "First line"
+msgstr "Первая строка"
+
+#: src/widgets/sensors.c:2163
+msgid "Line step"
+msgstr "Шаг строк"
+
+#: src/widgets/sensors.c:2177
+msgid "Refresh, ms"
+msgstr "Обновление, мс"
+
+#: src/widgets/sensors.c:2192
 msgid "Sensors"
 msgstr "Сенсоры"
 
-#: src/core/applet_manager.c:903
+#: src/core/applet_manager.c:243
+#, c-format
+msgid ""
+"Reset the settings of all instances of type %s (%d in total)?\n"
+"Their configs will be deleted and the instances restarted with default "
+"settings."
+msgstr ""
+"Сбросить настройки всех инстансов типа %s (%d шт.)?\n"
+"Конфиги будут удалены, инстансы перезапущены с настройками по умолчанию."
+
+#: src/core/applet_manager.c:249 src/core/applet_manager.c:329
+msgid "Reset settings"
+msgstr "Сброс настроек"
+
+#: src/core/applet_manager.c:322
+msgid "Start"
+msgstr "Запустить"
+
+#: src/core/applet_manager.c:673
+#, c-format
+msgid "«%s» is a guest instance: its autostart is managed by its frame host."
+msgstr "«%s» — гостевой инстанс: автозапуском управляет его frame-хост."
+
+#: src/core/applet_manager.c:708
+#, c-format
+msgid ""
+"Delete config «%s»?\n"
+"The instance will be stopped and deleted."
+msgstr ""
+"Удалить конфиг «%s»?\n"
+"Инстанс будет остановлен и удалён."
+
+#: src/core/applet_manager.c:838
+msgid "Delete config"
+msgstr "Удалить конфиг"
+
+#: src/core/applet_manager.c:842
+msgid "Edit"
+msgstr "Редактировать"
+
+#: src/core/applet_manager.c:904
 msgid "Applets"
 msgstr "Апплеты"
 
-#: src/core/applet_manager.c:906
+#: src/core/applet_manager.c:907
 msgid "Running"
 msgstr "Запущенные"
 
-#: src/core/applet_manager.c:909
+#: src/core/applet_manager.c:910
 msgid "Configs"
 msgstr "Конфигурации"
 
@@ -166,6 +430,10 @@ msgstr "О программе"
 #: src/core/common.c:1468
 msgid "Scale"
 msgstr "Масштаб"
+
+#: src/core/common.c:1486
+msgid "Size is set by End width/height (Resize mode = end_size)"
+msgstr "Размер задаётся End width/height (Resize mode = end_size)"
 
 #: src/core/common.c:1495
 msgid "Opacity"
@@ -183,10 +451,6 @@ msgstr "Позиция по Y"
 msgid "User label"
 msgstr "Метка"
 
-#: src/core/common.c:1564 src/core/common.c:1713
-msgid "Window"
-msgstr "Окно"
-
 #: src/core/common.c:1570
 msgid "Options"
 msgstr "Параметры"
@@ -198,10 +462,6 @@ msgid ""
 msgstr ""
 "Темы позволяют легко менять внешний вид апплетов. На этой странице "
 "перечислены все доступные темы для данного апплета."
-
-#: src/core/common.c:1647
-msgid "Themes"
-msgstr "Темы"
 
 #: src/core/common.c:1694
 msgid "Size"
@@ -218,6 +478,37 @@ msgstr "Сведения..."
 #: src/core/common.c:1764 src/core/tray.c:267
 msgid "Quit"
 msgstr "Выход"
+
+#: src/core/common.c:2399
+#, c-format
+msgid ""
+"Dead symlink: %s\n"
+"\n"
+"Config not found. Delete the symlink?"
+msgstr ""
+"Мёртвый symlink: %s\n"
+"\n"
+"Конфиг не найден. Удалить symlink?"
+
+#: src/core/common.c:2403
+msgid "Delete"
+msgstr "Удалить"
+
+#: src/core/common.c:2404
+msgid "Point to another config"
+msgstr "Указать другой конфиг"
+
+#: src/core/common.c:2405 src/core/common.c:2411
+msgid "Cancel"
+msgstr "Отмена"
+
+#: src/core/common.c:2410
+msgid "Choose a config in .plugins"
+msgstr "Выберите конфиг в .plugins"
+
+#: src/core/common.c:2412
+msgid "Select"
+msgstr "Выбрать"
 
 #: src/core/tray.c:184
 msgid "Running Instances"

@@ -17,6 +17,19 @@ static const char *const MENU[] = {
     "Stop all Applets", "About", "Quit",
     /* контекстное меню апплета (common.c) */
     "Size", "Window", "Properties...", "Info...",
+    /* подписи полей и заголовки секций: они передаются литералами в
+     * хелперы cl_row/sen_row/nm_grid_add_label, а не через _() прямо,
+     * поэтому проверяются здесь отдельно от меню. */
+    "Show", "Appearance", "Layout", "Window", "Command", "Behaviour",
+    "Level colours", "Strip colours (ANSI)", "Lines in buffer",
+    "Per-level colours", "Keep output colours", "First-line indent",
+    "Corner rounding", "Label colour", "Label font", "Offset X", "Offset Y",
+    "Refresh, ms", "Value position", "Label position", "Value right-aligned",
+    "Line step", "First line", "Value", "Units",
+    "Start", "Reset settings", "Delete config", "Edit",
+    "Delete", "Cancel", "Select", "Choose a config in .plugins",
+    "Clear output", "Feeds", "Get Clock Skins", "Text settings",
+    "Header font and size", "Text font and size", "Header color",
     /* для контроля: свойства */
     "Opacity", "Themes", "No sensors found",
 };

@@ -240,13 +240,13 @@ static void am_reset_type(GtkButton *b, gpointer data)
                                  GTK_DIALOG_MODAL,
                                  GTK_MESSAGE_QUESTION,
                                  GTK_BUTTONS_OK_CANCEL,
-                                 "Сбросить настройки всех инстансов "
-                                 "типа %s (%d шт.)?\n"
-                                 "Конфиги будут удалены, инстансы "
-                                 "перезапущены с настройками по "
-                                 "умолчанию.",
+                                 _("Reset the settings of all instances "
+                                   "of type %s (%d in total)?\n"
+                                   "Their configs will be deleted and the "
+                                   "instances restarted with default "
+                                   "settings."),
                                  type, victims->len);
-    gtk_window_set_title(GTK_WINDOW(dlg), "Сброс настроек");
+    gtk_window_set_title(GTK_WINDOW(dlg), _("Reset settings"));
     resp = gtk_dialog_run(GTK_DIALOG(dlg));
     gtk_widget_destroy(dlg);
     if (resp != GTK_RESPONSE_OK) {
@@ -319,14 +319,14 @@ static GtkWidget *am_build_types_page(void)
         lbl = gtk_label_new(type);
         gtk_box_pack_start(GTK_BOX(box), lbl, FALSE, FALSE, 0);
 
-        btn_run = gtk_button_new_with_label("Запустить");
+        btn_run = gtk_button_new_with_label(_("Start"));
         g_object_set_data_full(G_OBJECT(btn_run), "am-type",
                                g_strdup(type), g_free);
         g_signal_connect(btn_run, "clicked",
                          G_CALLBACK(am_launch_type), NULL);
         gtk_box_pack_start(GTK_BOX(box), btn_run, FALSE, FALSE, 0);
 
-        btn_reset = gtk_button_new_with_label("Сброс настроек");
+        btn_reset = gtk_button_new_with_label(_("Reset settings"));
         g_object_set_data_full(G_OBJECT(btn_reset), "am-type",
                                g_strdup(type), g_free);
         g_signal_connect(btn_reset, "clicked",
@@ -670,8 +670,8 @@ static void am_autostart_toggled(GtkCellRendererToggle *cell,
             GtkWidget *dlg = gtk_message_dialog_new(
                 GTK_WINDOW(am_window), GTK_DIALOG_MODAL,
                 GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
-                "«%s» — гостевой инстанс: автозапуском управляет "
-                "его frame-хост.",
+                _("\u00ab%s\u00bb is a guest instance: its autostart is "
+                  "managed by its frame host."),
                 name);
             gtk_dialog_run(GTK_DIALOG(dlg));
             gtk_widget_destroy(dlg);
@@ -705,7 +705,8 @@ static void am_conf_delete(GtkButton *b, gpointer data)
     dlg = gtk_message_dialog_new(
         GTK_WINDOW(am_window), GTK_DIALOG_MODAL,
         GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
-        "Удалить конфиг «%s»?\nИнстанс будет остановлен и удалён.",
+        _("Delete config \u00ab%s\u00bb?\nThe instance will be stopped "
+          "and deleted."),
         name);
     resp = gtk_dialog_run(GTK_DIALOG(dlg));
     gtk_widget_destroy(dlg);
@@ -834,11 +835,11 @@ static GtkWidget *am_build_configs_page(void)
     gtk_container_set_border_width(GTK_CONTAINER(hb), 6);
     gtk_style_context_add_class(
         gtk_widget_get_style_context(hb), "am-toolbar");
-    btn = gtk_button_new_with_label("Удалить конфиг");
+    btn = gtk_button_new_with_label(_("Delete config"));
     g_signal_connect(btn, "clicked", G_CALLBACK(am_conf_delete),
                      NULL);
     gtk_box_pack_start(GTK_BOX(hb), btn, FALSE, FALSE, 0);
-    btn = gtk_button_new_with_label("Редактировать");
+    btn = gtk_button_new_with_label(_("Edit"));
     g_signal_connect(btn, "clicked", G_CALLBACK(am_conf_edit), NULL);
     gtk_box_pack_start(GTK_BOX(hb), btn, FALSE, FALSE, 0);
 

@@ -3,22 +3,27 @@
 # This file is distributed under the same license as the xscreenlets package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 #
+#: src/widgets/network_monitor.c:2568
 #, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 01:16+0300\n"
+"POT-Creation-Date: 2026-10-02 08:50+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
 #: src/widgets/acpi_battery.c:459
 msgid "ACPI Battery"
+msgstr ""
+
+#: src/widgets/calendar.c:683 src/widgets/clock.c:1091
+msgid "Theme"
 msgstr ""
 
 #: src/widgets/calendar.c:849
@@ -29,12 +34,57 @@ msgstr ""
 msgid "iCalendar"
 msgstr ""
 
+#: src/widgets/clearrss.c:1897
+msgid "Feeds"
+msgstr ""
+
+#: src/widgets/clearrss.c:1913 src/core/common.c:1647
+msgid "Themes"
+msgstr ""
+
+#: src/widgets/clearrss.c:2188
+msgid "Align header left/center/right"
+msgstr ""
+
 #: src/widgets/clearrss.c:2203 src/widgets/clearrss.c:2252
+#: src/widgets/clearrss.c:2395 src/widgets/network_monitor.c:2727
 msgid "Header"
+msgstr ""
+
+#: src/widgets/clearrss.c:2227
+msgid "Header font and size"
+msgstr ""
+
+#: src/widgets/clearrss.c:2240
+msgid "Header color"
+msgstr ""
+
+#: src/widgets/clearrss.c:2276
+msgid "Published-time font and size"
+msgstr ""
+
+#: src/widgets/clearrss.c:2289
+msgid "Published-time color"
 msgstr ""
 
 #: src/widgets/clearrss.c:2301
 msgid "Text"
+msgstr ""
+
+#: src/widgets/clearrss.c:2325
+msgid "Text font and size"
+msgstr ""
+
+#: src/widgets/clearrss.c:2338
+msgid "Text color"
+msgstr ""
+
+#: src/widgets/clearrss.c:2356
+msgid "Feed"
+msgstr ""
+
+#: src/widgets/clearrss.c:2412
+msgid "Text settings"
 msgstr ""
 
 #: src/widgets/clearrss.c:2433
@@ -49,19 +99,108 @@ msgstr ""
 msgid "Alarm-Time"
 msgstr ""
 
-#: src/widgets/conlog.c:1410
+#: src/widgets/clock.c:1062
+msgid "Get Clock Skins"
+msgstr ""
+
+#: src/widgets/conlog.c:1403
+msgid "Command"
+msgstr ""
+
+#: src/widgets/conlog.c:1413
 msgid "Arguments are passed to the process directly, without a shell.\n"
 msgstr ""
 
-#: src/widgets/conlog.c:1422
+#: src/widgets/conlog.c:1425
 msgid "Window title (optional)"
 msgstr ""
 
+#: src/widgets/conlog.c:1434
+msgid "Clear output"
+msgstr ""
+
+#: src/widgets/conlog.c:1444
+msgid "Appearance: window label"
+msgstr ""
+
+#: src/widgets/conlog.c:1459
+msgid "Label font"
+msgstr ""
+
+#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2129
+msgid "Label colour"
+msgstr ""
+
+#: src/widgets/conlog.c:1464
+msgid "Offset X"
+msgstr ""
+
 #: src/widgets/conlog.c:1466
+msgid "Offset Y"
+msgstr ""
+
+#: src/widgets/conlog.c:1469
 msgid "Y offset: a negative value pulls the label up."
 msgstr ""
 
-#: src/widgets/conlog.c:1553
+#: src/widgets/conlog.c:1478
+msgid "Behaviour"
+msgstr ""
+
+#: src/widgets/conlog.c:1490
+msgid "Strip colours (ANSI)"
+msgstr ""
+
+#: src/widgets/conlog.c:1492
+msgid "Keep output colours"
+msgstr ""
+
+#: src/widgets/conlog.c:1494
+msgid "Per-level colours"
+msgstr ""
+
+#: src/widgets/conlog.c:1496
+msgid "Follow the tail"
+msgstr ""
+
+#: src/widgets/conlog.c:1497
+msgid "Lines in buffer"
+msgstr ""
+
+#: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
+#: src/widgets/sensors.c:2169 src/core/common.c:1564 src/core/common.c:1713
+msgid "Window"
+msgstr ""
+
+#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2171
+msgid "Width"
+msgstr ""
+
+#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2173
+msgid "Height"
+msgstr ""
+
+#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2175
+msgid "Corner rounding"
+msgstr ""
+
+#: src/widgets/conlog.c:1519
+msgid "First-line indent"
+msgstr ""
+
+#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2179
+msgid "Background"
+msgstr ""
+
+#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2181
+msgid "Border"
+msgstr ""
+
+#: src/widgets/conlog.c:1529
+msgid "Level colours"
+msgstr ""
+
+#: src/widgets/conlog.c:1556
 msgid "Conlog"
 msgstr ""
 
@@ -101,6 +240,18 @@ msgstr ""
 msgid "Frame"
 msgstr ""
 
+#: src/widgets/frame_launcher.c:1238
+msgid ""
+"Create a NEW applet of the selected type right inside the frame (it is not "
+"added to the daemon autostart)"
+msgstr ""
+
+#: src/widgets/frame_launcher.c:1241
+msgid ""
+"Take an already running applet: it will be stopped in the daemon, moved into "
+"the frame and removed from autostart"
+msgstr ""
+
 #: src/widgets/launcher.c:837
 msgid "Some options related to the Launcher-Screenlet."
 msgstr ""
@@ -109,23 +260,43 @@ msgstr ""
 msgid "Starter"
 msgstr ""
 
+#: src/widgets/launcher.c:894
+msgid "scale = original × Scale; end_size = fixed size in px"
+msgstr ""
+
+#: src/widgets/launcher.c:906
+msgid "Multiplier of the image natural size"
+msgstr ""
+
+#: src/widgets/launcher.c:933
+msgid "Fixed size of the picture"
+msgstr ""
+
 #: src/widgets/memory_monitor.c:694
 msgid "Memory Monitor"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2362 src/widgets/network_monitor.c:2414
+#: src/widgets/network_monitor.c:2366 src/widgets/network_monitor.c:2418
 msgid "/"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2749
+#: src/widgets/network_monitor.c:2603 src/widgets/network_monitor.c:2620
+msgid "Interface"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2126
+msgid "Appearance"
+msgstr ""
+
+#: src/widgets/network_monitor.c:2755
 msgid "Name"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2756
+#: src/widgets/network_monitor.c:2762
 msgid "IP"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2877
+#: src/widgets/network_monitor.c:2883
 msgid "Network Monitor"
 msgstr ""
 
@@ -133,23 +304,107 @@ msgstr ""
 msgid "Process List"
 msgstr ""
 
-#: src/widgets/sensors.c:1903
+#: src/widgets/sensors.c:1905
 msgid "No sensors found"
 msgstr ""
 
-#: src/widgets/sensors.c:2190
+#: src/widgets/sensors.c:2111
+msgid "Show"
+msgstr ""
+
+#: src/widgets/sensors.c:2128
+msgid "Label"
+msgstr ""
+
+#: src/widgets/sensors.c:2131
+msgid "Value"
+msgstr ""
+
+#: src/widgets/sensors.c:2132
+msgid "Value colour"
+msgstr ""
+
+#: src/widgets/sensors.c:2147
+msgid "Units"
+msgstr ""
+
+#: src/widgets/sensors.c:2153
+msgid "Layout"
+msgstr ""
+
+#: src/widgets/sensors.c:2155
+msgid "Label position"
+msgstr ""
+
+#: src/widgets/sensors.c:2157
+msgid "Value position"
+msgstr ""
+
+#: src/widgets/sensors.c:2159
+msgid "Value right-aligned"
+msgstr ""
+
+#: src/widgets/sensors.c:2161
+msgid "First line"
+msgstr ""
+
+#: src/widgets/sensors.c:2163
+msgid "Line step"
+msgstr ""
+
+#: src/widgets/sensors.c:2177
+msgid "Refresh, ms"
+msgstr ""
+
+#: src/widgets/sensors.c:2192
 msgid "Sensors"
 msgstr ""
 
-#: src/core/applet_manager.c:903
+#: src/core/applet_manager.c:243
+#, c-format
+msgid ""
+"Reset the settings of all instances of type %s (%d in total)?\n"
+"Their configs will be deleted and the instances restarted with default "
+"settings."
+msgstr ""
+
+#: src/core/applet_manager.c:249 src/core/applet_manager.c:329
+msgid "Reset settings"
+msgstr ""
+
+#: src/core/applet_manager.c:322
+msgid "Start"
+msgstr ""
+
+#: src/core/applet_manager.c:673
+#, c-format
+msgid "«%s» is a guest instance: its autostart is managed by its frame host."
+msgstr ""
+
+#: src/core/applet_manager.c:708
+#, c-format
+msgid ""
+"Delete config «%s»?\n"
+"The instance will be stopped and deleted."
+msgstr ""
+
+#: src/core/applet_manager.c:838
+msgid "Delete config"
+msgstr ""
+
+#: src/core/applet_manager.c:842
+msgid "Edit"
+msgstr ""
+
+#: src/core/applet_manager.c:904
 msgid "Applets"
 msgstr ""
 
-#: src/core/applet_manager.c:906
+#: src/core/applet_manager.c:907
 msgid "Running"
 msgstr ""
 
-#: src/core/applet_manager.c:909
+#: src/core/applet_manager.c:910
 msgid "Configs"
 msgstr ""
 
@@ -159,6 +414,10 @@ msgstr ""
 
 #: src/core/common.c:1468
 msgid "Scale"
+msgstr ""
+
+#: src/core/common.c:1486
+msgid "Size is set by End width/height (Resize mode = end_size)"
 msgstr ""
 
 #: src/core/common.c:1495
@@ -177,10 +436,6 @@ msgstr ""
 msgid "User label"
 msgstr ""
 
-#: src/core/common.c:1564 src/core/common.c:1713
-msgid "Window"
-msgstr ""
-
 #: src/core/common.c:1570
 msgid "Options"
 msgstr ""
@@ -189,10 +444,6 @@ msgstr ""
 msgid ""
 "Themes allow you to easily switch the appearance of your Screenlets. On this "
 "page you find a list of all available themes for this Screenlet."
-msgstr ""
-
-#: src/core/common.c:1647
-msgid "Themes"
 msgstr ""
 
 #: src/core/common.c:1694
@@ -209,6 +460,34 @@ msgstr ""
 
 #: src/core/common.c:1764 src/core/tray.c:267
 msgid "Quit"
+msgstr ""
+
+#: src/core/common.c:2399
+#, c-format
+msgid ""
+"Dead symlink: %s\n"
+"\n"
+"Config not found. Delete the symlink?"
+msgstr ""
+
+#: src/core/common.c:2403
+msgid "Delete"
+msgstr ""
+
+#: src/core/common.c:2404
+msgid "Point to another config"
+msgstr ""
+
+#: src/core/common.c:2405 src/core/common.c:2411
+msgid "Cancel"
+msgstr ""
+
+#: src/core/common.c:2410
+msgid "Choose a config in .plugins"
+msgstr ""
+
+#: src/core/common.c:2412
+msgid "Select"
 msgstr ""
 
 #: src/core/tray.c:184

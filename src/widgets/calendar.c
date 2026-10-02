@@ -680,7 +680,7 @@ static void cal_menu(XsPlugin *p, GtkMenu *m)
 			                 G_CALLBACK(cal_theme_toggled), p);
 			gtk_menu_shell_append(GTK_MENU_SHELL(sub), mi);
 		}
-		item = gtk_menu_item_new_with_label("Theme");
+		item = gtk_menu_item_new_with_label(_("Theme"));
 		gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), sub);
 		gtk_menu_shell_append(GTK_MENU_SHELL(m), item);
 	}

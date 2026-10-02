@@ -246,10 +246,39 @@ LINGUAS = $(patsubst po/%.po,%,$(wildcard po/*.po))
 
 POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 
+
+# Помеченные для перевода функции. Кроме "_" есть хелперы, которые
+# принимают подпись и сами вызывают gtk_label_new(_(label)): подписи
+# передаются литералами в десятках вызовов, и в разметке они остаются
+# обычными строками. Без --keyword их xgettext не видит, и перевод молча
+# не работает - ровно тот дефект, который пришлось искать вручную.
+#
+#   nm_grid_add_label  подписи полей сетевого монитора
+#   nm_section         заголовки секций сетевого монитора
+#   cl_row             подписи полей conlog
+#   sen_row            подписи полей sensors
+#
+# Номера аргументов обязательны. Без суффикса ":N" xgettext берёт ТОЛЬКО
+# первый строковый аргумент функции, а у этих хелперов первый - GtkWidget
+# или ключ конфига:
+#
+#   cl_row(grid, row, label, w)          label - третий
+#   sen_row(g, label, widget)            label - второй
+#   nm_grid_add_label(g, label)          label - второй
+#   nm_section(page, title)              title - второй
+#
+# Проверено: без номеров все четыре дают 0 извлечённых строк, с номерами
+# 16, 17, 2 и 5 соответственно.
+#
+# Плюс nm_* : первый аргумент - ключ конфига, но он не переводится
+# (не находит msgstr и остаётся как есть), так что в POT попадает и он.
+XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2
+
 # Шаблон: msgid из исходников. Перегенерировать после правки строк:
 #   make po-update
 $(BUILD_DIR)/po/xscreenlets.pot: $(POTFILES)
-	xgettext --from-code=UTF-8 --language=C --keyword=_ \
+	xgettext --from-code=UTF-8 --language=C \
+		$(foreach k,$(XGETTEXT_KEYWORDS),--keyword=$(k)) \
 		--add-comments=Translators --package-name=xscreenlets \
 		--copyright-holder=KosmiK2001 --output=$@ $(POTFILES)
 

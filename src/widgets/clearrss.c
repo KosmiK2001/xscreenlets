@@ -1894,7 +1894,7 @@ static void rss_menu(XsPlugin *p, GtkMenu *menu)
     };
     int i;
 
-    item = gtk_menu_item_new_with_label("Feeds");
+    item = gtk_menu_item_new_with_label(_("Feeds"));
     sub = gtk_menu_new();
     for (i = 0; feeds[i].name; i++) {
         char *cmd = g_strdup_printf("feed:%s", feeds[i].url);
@@ -1910,7 +1910,7 @@ static void rss_menu(XsPlugin *p, GtkMenu *menu)
     rss_menu_item(GTK_WIDGET(menu), p, "Refresh", "refresh");
     rss_menu_item(GTK_WIDGET(menu), p, "Previous item", "prev_item");
     rss_menu_item(GTK_WIDGET(menu), p, "Next item", "next_item");
-    item = gtk_menu_item_new_with_label("Themes");
+    item = gtk_menu_item_new_with_label(_("Themes"));
     sub = gtk_menu_new();
     {
         GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
@@ -2185,7 +2185,7 @@ static GtkWidget *rss_header_align_buttons(XsPlugin *p, PrivData *priv)
         gtk_button_set_image(GTK_BUTTON(button), image);
         gtk_button_set_always_show_image(GTK_BUTTON(button), TRUE);
         gtk_button_set_relief(GTK_BUTTON(button), GTK_RELIEF_NONE);
-        gtk_widget_set_tooltip_text(button, "Align header left/center/right");
+        gtk_widget_set_tooltip_text(button, _("Align header left/center/right"));
         gtk_widget_set_size_request(button, 30, 26);
         gtk_toggle_button_set_mode(GTK_TOGGLE_BUTTON(button), FALSE);
         gtk_toggle_button_set_active(
@@ -2224,7 +2224,7 @@ static GtkWidget *rss_header_font_color_row(XsPlugin *p, PrivData *priv)
     if (priv->header_font)
         gtk_font_button_set_font_name(GTK_FONT_BUTTON(font), priv->header_font);
 #pragma GCC diagnostic pop
-    gtk_widget_set_tooltip_text(font, "Header font and size");
+    gtk_widget_set_tooltip_text(font, _("Header font and size"));
     gtk_widget_set_halign(font, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(row), font, FALSE, TRUE, 0);
     g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("header_font"),
@@ -2237,7 +2237,7 @@ static GtkWidget *rss_header_font_color_row(XsPlugin *p, PrivData *priv)
 
     color = gtk_color_button_new_with_rgba(&rgba);
     gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
-    gtk_widget_set_tooltip_text(color, "Header color");
+    gtk_widget_set_tooltip_text(color, _("Header color"));
     gtk_widget_set_halign(color, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(row), color, FALSE, TRUE, 0);
     g_object_set_data_full(G_OBJECT(color), "xs-key", g_strdup("header_color"),
@@ -2273,7 +2273,7 @@ static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
     if (priv->time_font)
         gtk_font_button_set_font_name(GTK_FONT_BUTTON(font), priv->time_font);
 #pragma GCC diagnostic pop
-    gtk_widget_set_tooltip_text(font, "Published-time font and size");
+    gtk_widget_set_tooltip_text(font, _("Published-time font and size"));
     gtk_widget_set_halign(font, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(row), font, FALSE, TRUE, 0);
     g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("time_font"),
@@ -2286,7 +2286,7 @@ static GtkWidget *rss_time_settings_row(XsPlugin *p, PrivData *priv)
 
     color = gtk_color_button_new_with_rgba(&rgba);
     gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
-    gtk_widget_set_tooltip_text(color, "Published-time color");
+    gtk_widget_set_tooltip_text(color, _("Published-time color"));
     gtk_widget_set_halign(color, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(row), color, FALSE, TRUE, 0);
     g_object_set_data_full(G_OBJECT(color), "xs-key", g_strdup("time_color"),
@@ -2322,7 +2322,7 @@ static GtkWidget *rss_text_settings_row(XsPlugin *p, PrivData *priv)
     if (priv->text_font)
         gtk_font_button_set_font_name(GTK_FONT_BUTTON(font), priv->text_font);
 #pragma GCC diagnostic pop
-    gtk_widget_set_tooltip_text(font, "Text font and size");
+    gtk_widget_set_tooltip_text(font, _("Text font and size"));
     gtk_widget_set_halign(font, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(row), font, FALSE, TRUE, 0);
     g_object_set_data_full(G_OBJECT(font), "xs-key", g_strdup("font"),
@@ -2335,7 +2335,7 @@ static GtkWidget *rss_text_settings_row(XsPlugin *p, PrivData *priv)
 
     color = gtk_color_button_new_with_rgba(&rgba);
     gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(color), TRUE);
-    gtk_widget_set_tooltip_text(color, "Text color");
+    gtk_widget_set_tooltip_text(color, _("Text color"));
     gtk_widget_set_halign(color, GTK_ALIGN_END);
     gtk_box_pack_start(GTK_BOX(row), color, FALSE, TRUE, 0);
     g_object_set_data_full(G_OBJECT(color), "xs-key", g_strdup("rgba_color"),
@@ -2353,7 +2353,7 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
     gtk_container_set_border_width(GTK_CONTAINER(page), 10);
     xs_prop_add_group_header(GTK_BOX(page), "Rss-specific settings.");
     {
-        GtkWidget *feed_frame = gtk_frame_new("Feed");
+        GtkWidget *feed_frame = gtk_frame_new(_("Feed"));
         GtkWidget *feed_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 
         gtk_frame_set_shadow_type(GTK_FRAME(feed_frame), GTK_SHADOW_IN);
@@ -2392,7 +2392,7 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_box_pack_start(GTK_BOX(page), feed_frame, FALSE, FALSE, 0);
     }
     {
-        GtkWidget *header_frame = gtk_frame_new("Header");
+        GtkWidget *header_frame = gtk_frame_new(_("Header"));
         GtkWidget *header_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 
         gtk_frame_set_shadow_type(GTK_FRAME(header_frame), GTK_SHADOW_IN);
@@ -2409,7 +2409,7 @@ static void rss_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_box_pack_start(GTK_BOX(page), header_frame, FALSE, FALSE, 0);
     }
     {
-        GtkWidget *text_frame = gtk_frame_new("Text settings");
+        GtkWidget *text_frame = gtk_frame_new(_("Text settings"));
         GtkWidget *text_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 
         gtk_frame_set_shadow_type(GTK_FRAME(text_frame), GTK_SHADOW_IN);

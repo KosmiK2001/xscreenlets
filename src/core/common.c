@@ -1483,8 +1483,8 @@ static void xs_core_show_properties(XsPlugin *p)
             if (smode && strcmp(smode, "end_size") == 0) {
                 gtk_widget_set_sensitive(spin, FALSE);
                 gtk_widget_set_tooltip_text(
-                    spin, "Размер задаётся End width/height "
-                          "(Resize mode = end_size)");
+                    spin, _("Size is set by End width/height "
+                            "(Resize mode = end_size)"));
             }
             gtk_grid_attach(GTK_GRID(inner_page), spin, 1, row, 1, 1);
             g_signal_connect(spin, "value-changed",
@@ -2396,20 +2396,20 @@ int xs_dead_link_dialog(GtkWindow *parent, const char *linkname,
     *new_name = NULL;
     dlg = gtk_message_dialog_new(parent, GTK_DIALOG_MODAL,
                                  GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
-                                 "Мёртвый symlink: %s\n\n"
-                                 "Конфиг не найден. Удалить symlink?",
+                                 _("Dead symlink: %s\n\n"
+                                   "Config not found. Delete the symlink?"),
                                  linkname);
     gtk_dialog_add_buttons(GTK_DIALOG(dlg),
-                           "Удалить", 1,
-                           "Указать другой конфиг", 2,
-                           "Отмена", 3,
+                           _("Delete"), 1,
+                           _("Point to another config"), 2,
+                           _("Cancel"), 3,
                            NULL);
     res = gtk_dialog_run(GTK_DIALOG(dlg));
     if (res == 2) {
         GtkWidget *fc = gtk_file_chooser_dialog_new(
-            "Выберите конфиг в .plugins", parent,
-            GTK_FILE_CHOOSER_ACTION_OPEN, "Отмена", GTK_RESPONSE_CANCEL,
-            "Выбрать", GTK_RESPONSE_ACCEPT, NULL);
+            _("Choose a config in .plugins"), parent,
+            GTK_FILE_CHOOSER_ACTION_OPEN, _("Cancel"), GTK_RESPONSE_CANCEL,
+            _("Select"), GTK_RESPONSE_ACCEPT, NULL);
         char *dotdir = g_path_get_dirname(g_plugin_conf_dir);
         char *sub = g_build_filename(dotdir, ".plugins", NULL);
 

@@ -1235,12 +1235,12 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 		g_signal_connect(b2, "clicked",
 		                 G_CALLBACK(fl_add_running_clicked), p);
 		gtk_widget_set_tooltip_text(
-		    b1, "Создать НОВЫЙ апплет выбранного типа сразу внутри "
-		        "рамки (в автостарт демона не попадает)");
+		    b1, _("Create a NEW applet of the selected type right inside "
+		           "the frame (it is not added to the daemon autostart)"));
 		gtk_widget_set_tooltip_text(
-		    b2, "Забрать уже запущенный апплет: он остановится в "
-		        "демоне, будет перенесён в рамку и убран из "
-		        "автостарта");
+		    b2, _("Take an already running applet: it will be stopped in "
+		           "the daemon, moved into the frame and removed from "
+		           "autostart"));
 		gtk_box_pack_start(GTK_BOX(hb), b1, TRUE, TRUE, 0);
 		gtk_box_pack_start(GTK_BOX(hb), b2, TRUE, TRUE, 0);
 		gtk_box_pack_start(GTK_BOX(page), hb, FALSE, FALSE, 4);

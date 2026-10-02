@@ -891,8 +891,8 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 		else
 			gtk_combo_box_set_active(GTK_COMBO_BOX(combo), 0);
 		xs_prop_add_row(GTK_BOX(page), "Resize method",
-		                "scale = оригинал × Scale; end_size = "
-		                "жёсткий размер в px",
+		                _("scale = original \u00d7 Scale; end_size = "
+		                  "fixed size in px"),
 		                combo);
 
 		/* свой Scale spin (core-Scale для лаунчера скрыт) */
@@ -903,7 +903,7 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 
 			scale_row = xs_prop_add_row(
 			    GTK_BOX(page), "Scale",
-			    "Множитель к natural-размеру изображения",
+			    _("Multiplier of the image natural size"),
 			    spin);
 			g_signal_connect(spin, "value-changed",
 			                 G_CALLBACK(launcher_prop_scale_changed),
@@ -930,7 +930,7 @@ static void launcher_properties(XsPlugin *p, GtkNotebook *nb)
 				                   TRUE, 0);
 				end_row = xs_prop_add_row(
 				    GTK_BOX(page), "End size (px)",
-				    "Жёсткий размер картинки", hbx);
+				    _("Fixed size of the picture"), hbx);
 			}
 			g_object_set_data_full(G_OBJECT(ew), "xs-key",
 			                       g_strdup("end_size_w"), g_free);

@@ -2315,9 +2315,13 @@ static NmGrid *nm_grid_new(void)
     return g;
 }
 
+/* Подпись поля. Перевод ЗДЕСЬ, а не в вызовах nm_add_*(..., "Label"):
+ * их десятки, и каждый литерал пришлось бы оборачивать вручную.
+ * Аргумент label - видимая подпись; ключи конфигов идут отдельным
+ * параметром key и сюда не попадают. */
 static void nm_grid_add_label(NmGrid *g, const char *label)
 {
-    GtkWidget *l = gtk_label_new(label);
+    GtkWidget *l = gtk_label_new(_(label));
 
     gtk_widget_set_halign(l, GTK_ALIGN_START);
     gtk_grid_attach(GTK_GRID(g->grid), l, 0, g->row, 1, 1);
@@ -2567,9 +2571,11 @@ static void nm_add_inline_text(NmGrid *g, NmDialogContext *ctx,
         nm_bind_keyed_descendants(row, ctx);
 }
 
+/* Заголовок секции переводится здесь, а не в вызовах
+ * nm_section(..., "Appearance"): заголовков десятки. */
 static GtkWidget *nm_section(GtkWidget *page, const char *title)
 {
-    GtkWidget *frame = gtk_frame_new(title);
+    GtkWidget *frame = gtk_frame_new(_(title));
 
     gtk_box_pack_start(GTK_BOX(page), frame, FALSE, FALSE, 4);
     return frame;

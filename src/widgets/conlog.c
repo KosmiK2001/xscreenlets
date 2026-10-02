@@ -1348,9 +1348,12 @@ static GtkWidget *cl_color(ConlogCtx *ctx, const char *key, const gdouble rgba[4
     return cb;
 }
 
+/* Перевод подписи здесь: у cl_row десятки вызовов с литералами, и
+ * оборачивать каждый вручную бессмысленно. Ключи конфигов идут через
+ * cl_keyed_*(), а не через label, поэтому конфиги не затрагиваются. */
 static void cl_row(GtkWidget *grid, int row, const char *label, GtkWidget *w)
 {
-    GtkWidget *l = gtk_label_new(label);
+    GtkWidget *l = gtk_label_new(_(label));
 
     gtk_widget_set_halign(l, GTK_ALIGN_START);
     gtk_grid_attach(GTK_GRID(grid), l, 0, row, 1, 1);
@@ -1397,7 +1400,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_box_pack_start(GTK_BOX(page), scroller, TRUE, TRUE, 0);
 
     /* --- Команда --- */
-    frame = gtk_frame_new("Команда");
+    frame = gtk_frame_new(_("Command"));
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_start(box, 8);
     gtk_widget_set_margin_end(box, 8);
@@ -1428,7 +1431,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
                        cl_entry(ctx, "title", priv->title), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box),
                        cl_entry(ctx, "command", priv->command), FALSE, FALSE, 0);
-    btn = gtk_button_new_with_label("Очистить вывод");
+    btn = gtk_button_new_with_label(_("Clear output"));
     g_signal_connect(btn, "clicked", G_CALLBACK(cl_clear_clicked), ctx);
     gtk_box_pack_start(GTK_BOX(box), btn, FALSE, FALSE, 0);
     gtk_container_add(GTK_CONTAINER(frame), box);
@@ -1438,7 +1441,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
      * Шрифт, цвет и смещения метки задаются отдельно от строк журнала:
      * заголовок обычно крупнее или жирнее, и двигать его вправо нужно
      * независимо от текста. */
-    frame = gtk_frame_new("Вид: метка окна");
+    frame = gtk_frame_new(_("Appearance: window label"));
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_start(box, 8);
     gtk_widget_set_margin_end(box, 8);
@@ -1453,14 +1456,14 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
         g_object_set_data_full(G_OBJECT(fb), "xs-key",
                                g_strdup("title_font"), g_free);
         g_signal_connect(fb, "font-set", G_CALLBACK(cl_font_set), ctx);
-        cl_row(grid, 0, "Шрифт метки", fb);
+        cl_row(grid, 0, "Label font", fb);
     }
-    cl_row(grid, 1, "Цвет метки", cl_color(ctx, "title_color", priv->title_color));
+    cl_row(grid, 1, "Label colour", cl_color(ctx, "title_color", priv->title_color));
     /* Диапазоны совпадают с CLAMP в cl_init(), иначе значение из
      * конфига обрезалось бы самим spin-кнопкой. */
-    cl_row(grid, 2, "Смещение по X",
+    cl_row(grid, 2, "Offset X",
            cl_spin(ctx, "title_dx", priv->title_dx, -400, 400));
-    cl_row(grid, 3, "Смещение по Y",
+    cl_row(grid, 3, "Offset Y",
            cl_spin(ctx, "title_dy", priv->title_dy, -60, 60));
     {
         GtkWidget *hint = gtk_label_new(_("Y offset: a negative value pulls the label up."));
@@ -1472,7 +1475,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Поведение --- */
-    frame = gtk_frame_new("Поведение");
+    frame = gtk_frame_new(_("Behaviour"));
     grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
@@ -1484,14 +1487,14 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
         GtkWidget *cb;
 
         cb = cl_check(ctx, "strip_ansi", priv->strip_ansi);
-        cl_row(grid, row++, "Вырезать цвета (ANSI)", cb);
+        cl_row(grid, row++, "Strip colours (ANSI)", cb);
         cb = cl_check(ctx, "keep_ansi", priv->keep_ansi);
-        cl_row(grid, row++, "Сохранять цвета вывода", cb);
+        cl_row(grid, row++, "Keep output colours", cb);
         cb = cl_check(ctx, "colorize", priv->colorize);
-        cl_row(grid, row++, "Цвета по уровню", cb);
+        cl_row(grid, row++, "Per-level colours", cb);
         cb = cl_check(ctx, "autoscroll", priv->autoscroll);
-        cl_row(grid, row++, "Следовать за хвостом", cb);
-        cl_row(grid, row++, "Строк в буфере",
+        cl_row(grid, row++, "Follow the tail", cb);
+        cl_row(grid, row++, "Lines in buffer",
                cl_spin(ctx, "max_lines", (int) conlog_max_lines(priv->buf),
                        10, CONLOG_MAX_LINES));
     }
@@ -1499,7 +1502,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Окно --- */
-    frame = gtk_frame_new("Окно");
+    frame = gtk_frame_new(_("Window"));
     grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
@@ -1507,23 +1510,23 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_widget_set_margin_end(grid, 8);
     gtk_widget_set_margin_top(grid, 8);
     gtk_widget_set_margin_bottom(grid, 8);
-    cl_row(grid, row++, "Ширина",
+    cl_row(grid, row++, "Width",
            cl_spin(ctx, "window_width", priv->width, CONLOG_MIN_WIDTH, 1600));
-    cl_row(grid, row++, "Высота",
+    cl_row(grid, row++, "Height",
            cl_spin(ctx, "window_height", priv->height, CONLOG_MIN_HEIGHT, 1200));
-    cl_row(grid, row++, "Скругление",
+    cl_row(grid, row++, "Corner rounding",
            cl_spin(ctx, "corner_radius", priv->corner_radius, 0, 40));
-    cl_row(grid, row++, "Отступ первой строки",
+    cl_row(grid, row++, "First-line indent",
            cl_spin(ctx, "first_row_y", priv->first_row_y, 0, 60));
-    cl_row(grid, row++, "Фон",
+    cl_row(grid, row++, "Background",
            cl_color(ctx, "background_color", priv->background_color));
-    cl_row(grid, row++, "Рамка",
+    cl_row(grid, row++, "Border",
            cl_color(ctx, "border_color", priv->border_color));
     gtk_container_add(GTK_CONTAINER(frame), grid);
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Цвета уровней --- */
-    frame = gtk_frame_new("Цвета уровней");
+    frame = gtk_frame_new(_("Level colours"));
     grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 6);

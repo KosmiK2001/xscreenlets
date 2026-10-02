@@ -1426,9 +1426,11 @@ static void sen_grid_new(SenGrid *g)
 /* Одна строка на одну настройку. Хелпер, привязывающий к жёсткой строке
  * 0, складывает все контролы секции В ОДИН ряд, и читаемыми остаются
  * два поля из девяти — видно только на скриншоте. */
+/* Перевод в хелпере: подписи передаются литералами в десятках вызовов,
+ * ключи конфигов сюда не попадают (они идут в sen_keyed_*). */
 static void sen_row(SenGrid *g, const char *label, GtkWidget *widget)
 {
-    GtkWidget *l = gtk_label_new(label);
+    GtkWidget *l = gtk_label_new(_(label));
 
     gtk_widget_set_halign(l, GTK_ALIGN_START);
     gtk_grid_attach(GTK_GRID(g->grid), l, 0, g->row, 1, 1);
@@ -2106,7 +2108,7 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_box_pack_start(GTK_BOX(page), scroller, TRUE, TRUE, 0);
 
     /* --- Сенсоры --- */
-    frame = gtk_frame_new("Показывать");
+    frame = gtk_frame_new(_("Show"));
     {
         GtkWidget *list = sen_sensor_list(ctx);
 
@@ -2121,13 +2123,13 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Вид --- общие настройки для меток и чисел, без исключений */
-    frame = gtk_frame_new("Вид");
+    frame = gtk_frame_new(_("Appearance"));
     sen_grid_new(&g);
-    sen_row(&g, "Метка", sen_font_button("label_font", priv->label_font));
-    sen_row(&g, "Цвет метки",
+    sen_row(&g, "Label", sen_font_button("label_font", priv->label_font));
+    sen_row(&g, "Label colour",
             sen_color_button("label_color", priv->label_color));
-    sen_row(&g, "Число", sen_font_button("value_font", priv->value_font));
-    sen_row(&g, "Цвет числа",
+    sen_row(&g, "Value", sen_font_button("value_font", priv->value_font));
+    sen_row(&g, "Value colour",
             sen_color_button("value_color", priv->value_color));
     {
         /* Переключатель, а не флажок: у шкалы две равноправные
@@ -2142,41 +2144,41 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
                                  priv->fahrenheit ? 1 : 0);
         g_object_set_data_full(G_OBJECT(combo), "xs-key",
                                g_strdup("units"), g_free);
-        sen_row(&g, "Единицы", combo);
+        sen_row(&g, "Units", combo);
     }
     gtk_container_add(GTK_CONTAINER(frame), g.grid);
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Раскладка --- */
-    frame = gtk_frame_new("Раскладка");
+    frame = gtk_frame_new(_("Layout"));
     sen_grid_new(&g);
-    sen_row(&g, "Позиция метки", sen_spin("label_x", priv->label_x, 0,
+    sen_row(&g, "Label position", sen_spin("label_x", priv->label_x, 0,
                                          pos_max));
-    sen_row(&g, "Позиция числа", sen_spin("value_x", priv->value_x, 0,
+    sen_row(&g, "Value position", sen_spin("value_x", priv->value_x, 0,
                                          pos_max));
-    sen_row(&g, "Число вправо",
+    sen_row(&g, "Value right-aligned",
             sen_check("value_align_right", priv->value_align_right));
-    sen_row(&g, "Первая строка", sen_spin("first_row_y", priv->first_row_y, 0,
+    sen_row(&g, "First line", sen_spin("first_row_y", priv->first_row_y, 0,
                                           pos_max));
-    sen_row(&g, "Шаг строк", sen_spin("line_step", priv->line_step, 1,
+    sen_row(&g, "Line step", sen_spin("line_step", priv->line_step, 1,
                                      pos_max));
     gtk_container_add(GTK_CONTAINER(frame), g.grid);
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);
 
     /* --- Окно --- */
-    frame = gtk_frame_new("Окно");
+    frame = gtk_frame_new(_("Window"));
     sen_grid_new(&g);
-    sen_row(&g, "Ширина",
+    sen_row(&g, "Width",
             sen_spin("window_width", priv->width, SEN_MIN_WIDTH, 1600));
-    sen_row(&g, "Высота",
+    sen_row(&g, "Height",
             sen_spin("window_height", priv->height, SEN_MIN_HEIGHT, 1200));
-    sen_row(&g, "Скругление", sen_spin("corner_radius", priv->corner_radius,
+    sen_row(&g, "Corner rounding", sen_spin("corner_radius", priv->corner_radius,
                                       0, SEN_MAX_RADIUS));
-    sen_row(&g, "Обновление, мс",
+    sen_row(&g, "Refresh, ms",
             sen_spin("update_ms", priv->update_ms, 200, 60000));
-    sen_row(&g, "Фон",
+    sen_row(&g, "Background",
             sen_color_button("background_color", priv->background_color));
-    sen_row(&g, "Рамка",
+    sen_row(&g, "Border",
             sen_color_button("border_color", priv->border_color));
     gtk_container_add(GTK_CONTAINER(frame), g.grid);
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);

@@ -1059,7 +1059,7 @@ static void clock_menu(XsPlugin *p, GtkMenu *m)
     priv = p->priv;
 
     /* Свой пункт Clock — как в оригинале */
-    mi = gtk_menu_item_new_with_label("Get Clock Skins");
+    mi = gtk_menu_item_new_with_label(_("Get Clock Skins"));
     g_object_set_data_full(G_OBJECT(mi), "xs-cmd", g_strdup("p:get_skins"),
                            g_free);
     g_signal_connect(mi, "activate", G_CALLBACK(xs_core_menu_activate), p);
@@ -1088,7 +1088,7 @@ static void clock_menu(XsPlugin *p, GtkMenu *m)
                              G_CALLBACK(clock_theme_toggled), p);
             gtk_menu_shell_append(GTK_MENU_SHELL(sub), mi);
         }
-        item = gtk_menu_item_new_with_label("Theme");
+        item = gtk_menu_item_new_with_label(_("Theme"));
         gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), sub);
         gtk_menu_shell_append(GTK_MENU_SHELL(m), item);
     }
