@@ -84,7 +84,7 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
     (void)data;
     {
         GtkWidget *dlg = gtk_about_dialog_new();
-        const char *authors[] = { "kosmik2001 (Hermes agents)", NULL };
+        const char *authors[] = { "kosmik2001 <kosmik2001@gmail.com>", NULL };
 
         gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dlg),
                                           "Xscreenlets");
@@ -93,6 +93,8 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
                                       "C/GTK3 replacement for python2 "
                                       "screenlets (daemon + gmodule plugins)");
         gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dlg), authors);
+        gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(dlg),
+                                     "kosmik2001@gmail.com");
         gtk_window_present(GTK_WINDOW(dlg));
         g_signal_connect(dlg, "response", G_CALLBACK(gtk_widget_destroy),
                          NULL);

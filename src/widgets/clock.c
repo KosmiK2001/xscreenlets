@@ -1149,7 +1149,7 @@ static XsPluginDesc desc = {
 	.ops = &ops,
 	.desc = "The Screenlet-version of MacSlow's cairo-clock. "
 	        "A themeable clock with different themes.",
-	.author = "RYX (aka Rico Pfaus)",
+	.author = "kosmik2001 <kosmik2001@gmail.com>",
 	.version = "0.6"
 };
 

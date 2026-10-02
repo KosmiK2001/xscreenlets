@@ -2649,7 +2649,7 @@ static XsPluginDesc rss_desc = {
     .api_version = XS_API_VERSION,
     .ops = &rss_ops,
     .desc = "Screenlet for reading RSS and Atom feeds, with scrolling and opening the selected story.",
-    .author = "Helder Fraga aka Whise; C/GTK3 rewrite for Xscreenlets",
+    .author = "kosmik2001 <kosmik2001@gmail.com>",
     .version = "0.2"
 };
 XsPluginDesc *xs_plugin_desc(void) { return &rss_desc; }

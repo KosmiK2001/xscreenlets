@@ -1411,7 +1411,7 @@ static XsPluginDesc desc = {
 	.desc = "Vista-style frame that hosts other screenlets. Guests are "
 	        "clipped to the frame's content area and always render "
 	        "below the frame. Configure guests via guests_1..N keys.",
-	.author = "kosmik2001",
+	.author = "kosmik2001 <kosmik2001@gmail.com>",
 	.version = "0.1"
 };
 

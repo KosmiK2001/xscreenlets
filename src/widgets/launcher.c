@@ -978,7 +978,7 @@ static XsPluginDesc desc = {
 	        "shell-command when clicked. You can simply drag&drop an icon "
 	        "from your mainmenu or panel on the Launcher's window to "
 	        "initialize it for the given app.",
-	.author = "RYX (aka Rico Pfaus)",
+	.author = "kosmik2001 <kosmik2001@gmail.com>",
 	.version = "0.7"
 };
 

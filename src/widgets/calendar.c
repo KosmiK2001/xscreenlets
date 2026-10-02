@@ -1173,7 +1173,7 @@ static XsPluginDesc cal_desc = {
 	.desc = "A simple multilingual iCalendar Screenlet with month "
 	        "preview, you can scroll through other months too and view "
 	        "monthly events.",
-	.author = "Helder Fraga aka Whise based on calendar Screenlet by "
+	.author = "kosmik2001 <kosmik2001@gmail.com>"
 	          "robgig1088",
 	.version = "0.4"
 };
