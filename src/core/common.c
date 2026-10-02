@@ -1107,16 +1107,29 @@ static void xs_core_props_pos_schedule(XsPlugin *p)
 static GtkWidget *xs_prop_row(GtkBox *box, const char *label, const char *desc,
                               GtkWidget *input)
 {
+    /* Подпись и описание переводятся здесь, а не на стороне вызовов:
+     * xs_prop_add_string/bool/int/float/choices вызываются десятки раз,
+     * и оборачивать каждый литерал в _() отдельно - источник пропусков.
+     * Ключ конфигурации идёт через g_object_set_data("xs-key") и сюда
+     * не попадает, так что перевод подписи ему не мешает.
+     *
+     * В xgettext это выражено одним ключом xs_prop_add_*:2,3 - два
+     * номера аргумента через запятую. Два отдельных ключа :2 и :3
+     * не годятся: xgettext берёт ПОСЛЕДНИЙ, первый теряется. */
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    GtkWidget *lbl = gtk_label_new(label);
+    GtkWidget *lbl = gtk_label_new(_(label));
 
     gtk_widget_set_halign(lbl, GTK_ALIGN_START);
     gtk_widget_set_valign(lbl, GTK_ALIGN_START);
     gtk_widget_set_size_request(lbl, 180, 28);
     gtk_box_pack_start(GTK_BOX(hbox), lbl, FALSE, TRUE, 0);
     if (input) {
-        if (desc)
+        if (desc) {
+            /* Описание остаётся английским: в ключах xgettext его нет,
+             * перевод тут был бы мёртвым кодом. Для перевода описаний
+             * нужен отдельный ключ :3 - см. комментарий в Makefile. */
             gtk_widget_set_tooltip_text(input, desc);
+        }
         gtk_box_pack_start(GTK_BOX(hbox), input, FALSE, TRUE, 0);
     }
     gtk_box_pack_start(box, hbox, FALSE, TRUE, 0);
@@ -1235,7 +1248,9 @@ void xs_prop_add_group_header(GtkBox *box, const char *info)
 
     if (!box || !info || !info[0])
         return;
-    lbl = gtk_label_new(info);
+    /* Перевод здесь, как и в xs_prop_row: заголовок группы приходит
+     * литералом из xs_prop_add_group_header(box, "..."), их много. */
+    lbl = gtk_label_new(_(info));
     gtk_widget_set_halign(lbl, GTK_ALIGN_START);
     gtk_widget_set_valign(lbl, GTK_ALIGN_START);
     gtk_box_pack_start(box, lbl, FALSE, FALSE, 7);

@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 10:03+0300\n"
+"POT-Creation-Date: 2026-10-02 11:47+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,6 +17,14 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+
+#: src/widgets/acpi_battery.c:442
+msgid ""
+"Reads /sys/class/power_supply. Works with laptop batteries and with devices "
+"that expose a battery there (e.g. a Logitech mouse when the hid-logitech-"
+"hidpp module is loaded). Shows \"No battery\" when no source is found, "
+"instead of failing."
+msgstr ""
 
 #: src/widgets/acpi_battery.c:457
 msgid "Show percentage"
@@ -55,11 +63,36 @@ msgid "Back to today"
 msgstr ""
 
 #: src/widgets/calendar.c:683 src/widgets/clock.c:1091
+#: src/widgets/frame_launcher.c:1220
 msgid "Theme"
 msgstr ""
 
 #: src/widgets/calendar.c:849
 msgid "Calendar specific options"
+msgstr ""
+
+#: src/widgets/calendar.c:869
+msgid "First Weekday"
+msgstr ""
+
+#: src/widgets/calendar.c:873
+msgid "iCalendar ics file path"
+msgstr ""
+
+#: src/widgets/calendar.c:880
+msgid "Show iCalendar events"
+msgstr ""
+
+#: src/widgets/calendar.c:903
+msgid "Header font"
+msgstr ""
+
+#: src/widgets/calendar.c:910
+msgid "Day names font"
+msgstr ""
+
+#: src/widgets/calendar.c:917
+msgid "Days font"
 msgstr ""
 
 #: src/widgets/calendar.c:928
@@ -86,7 +119,7 @@ msgstr ""
 msgid "Next item"
 msgstr ""
 
-#: src/widgets/clearrss.c:1913 src/core/common.c:1647
+#: src/widgets/clearrss.c:1913 src/core/common.c:1662
 msgid "Themes"
 msgstr ""
 
@@ -127,12 +160,60 @@ msgstr ""
 msgid "Text color"
 msgstr ""
 
+#: src/widgets/clearrss.c:2354
+msgid "Rss-specific settings."
+msgstr ""
+
 #: src/widgets/clearrss.c:2356
 msgid "Feed"
 msgstr ""
 
+#: src/widgets/clearrss.c:2362
+msgid "Feed name"
+msgstr ""
+
+#: src/widgets/clearrss.c:2365
+msgid "Feed URL"
+msgstr ""
+
+#: src/widgets/clearrss.c:2371
+msgid "Update interval"
+msgstr ""
+
+#: src/widgets/clearrss.c:2374
+msgid "Auto news count"
+msgstr ""
+
+#: src/widgets/clearrss.c:2377
+msgid "News count"
+msgstr ""
+
+#: src/widgets/clearrss.c:2386 src/widgets/cpu_monitor.c:1186
+msgid "Window width"
+msgstr ""
+
+#: src/widgets/clearrss.c:2389 src/widgets/cpu_monitor.c:1191
+msgid "Window height"
+msgstr ""
+
+#: src/widgets/clearrss.c:2401
+msgid "Show feed name"
+msgstr ""
+
+#: src/widgets/clearrss.c:2408
+msgid "Header align"
+msgstr ""
+
 #: src/widgets/clearrss.c:2412
 msgid "Text settings"
+msgstr ""
+
+#: src/widgets/clearrss.c:2418
+msgid "Show published time"
+msgstr ""
+
+#: src/widgets/clearrss.c:2427
+msgid "Back color"
 msgstr ""
 
 #: src/widgets/clearrss.c:2433
@@ -263,6 +344,22 @@ msgstr ""
 msgid "Clock-specific settings."
 msgstr ""
 
+#: src/widgets/clock.c:887
+msgid "Time Zone"
+msgstr ""
+
+#: src/widgets/clock.c:894
+msgid "Time-Offset"
+msgstr ""
+
+#: src/widgets/clock.c:904
+msgid "Hour-Format"
+msgstr ""
+
+#: src/widgets/clock.c:911
+msgid "Show seconds-hand"
+msgstr ""
+
 #: src/widgets/clock.c:922
 msgid "Alarm"
 msgstr ""
@@ -271,8 +368,24 @@ msgstr ""
 msgid "Settings for the Alarm-function."
 msgstr ""
 
+#: src/widgets/clock.c:933
+msgid "Activate Alarm"
+msgstr ""
+
 #: src/widgets/clock.c:941
 msgid "Alarm-Time"
+msgstr ""
+
+#: src/widgets/clock.c:956
+msgid "Alarm stops after"
+msgstr ""
+
+#: src/widgets/clock.c:966
+msgid "Run a command"
+msgstr ""
+
+#: src/widgets/clock.c:973
+msgid "Alarm command"
 msgstr ""
 
 #: src/widgets/clock.c:985
@@ -283,11 +396,39 @@ msgstr ""
 msgid "Additional settings for the face-layout ..."
 msgstr ""
 
+#: src/widgets/clock.c:990
+msgid "Face-Text"
+msgstr ""
+
+#: src/widgets/clock.c:998
+msgid "Text-Font"
+msgstr ""
+
+#: src/widgets/clock.c:1004
+msgid "Text-Color"
+msgstr ""
+
+#: src/widgets/clock.c:1011
+msgid "X-Position of Text"
+msgstr ""
+
+#: src/widgets/clock.c:1020
+msgid "Y-Position of Text"
+msgstr ""
+
+#: src/widgets/clock.c:1029
+msgid "Show today's date"
+msgstr ""
+
+#: src/widgets/clock.c:1036
+msgid "Date Format"
+msgstr ""
+
 #: src/widgets/clock.c:1062
 msgid "Get Clock Skins"
 msgstr ""
 
-#: src/widgets/conlog.c:1403
+#: src/widgets/conlog.c:1403 src/widgets/launcher.c:852
 msgid "Command"
 msgstr ""
 
@@ -352,7 +493,7 @@ msgid "Lines in buffer"
 msgstr ""
 
 #: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
-#: src/widgets/sensors.c:2172 src/core/common.c:1564 src/core/common.c:1713
+#: src/widgets/sensors.c:2172 src/core/common.c:1579 src/core/common.c:1728
 msgid "Window"
 msgstr ""
 
@@ -388,8 +529,28 @@ msgstr ""
 msgid "Conlog"
 msgstr ""
 
+#: src/widgets/cpu_monitor.c:1173
+msgid "One physical package per instance; topology is read from sysfs."
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1180
+msgid "Socket ID"
+msgstr ""
+
+#: src/widgets/cpu_monitor.c:1196 src/widgets/memory_monitor.c:682
+msgid "Font"
+msgstr ""
+
 #: src/widgets/cpu_monitor.c:1207
 msgid "CPU Monitor"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1293
+msgid "Show temperature graph"
+msgstr ""
+
+#: src/widgets/disk_monitor.c:1295
+msgid "Graph label"
 msgstr ""
 
 #: src/widgets/disk_monitor.c:1335
@@ -448,6 +609,10 @@ msgid ""
 "the frame and removed from autostart"
 msgstr ""
 
+#: src/widgets/frame_launcher.c:1331
+msgid "Guests"
+msgstr ""
+
 #: src/widgets/launcher.c:837
 msgid "Some options related to the Launcher-Screenlet."
 msgstr ""
@@ -456,16 +621,42 @@ msgstr ""
 msgid "Starter"
 msgstr ""
 
+#: src/widgets/launcher.c:845
+msgid "Tooltip/Label"
+msgstr ""
+
+#: src/widgets/launcher.c:874
+msgid "Icon-Filename"
+msgstr ""
+
 #: src/widgets/launcher.c:894
 msgid "scale = original × Scale; end_size = fixed size in px"
+msgstr ""
+
+#: src/widgets/launcher.c:893
+msgid "Resize method"
 msgstr ""
 
 #: src/widgets/launcher.c:906
 msgid "Multiplier of the image natural size"
 msgstr ""
 
+#: src/widgets/launcher.c:905 src/core/common.c:1483
+msgid "Scale"
+msgstr ""
+
 #: src/widgets/launcher.c:933
 msgid "Fixed size of the picture"
+msgstr ""
+
+#: src/widgets/launcher.c:932
+msgid "End size (px)"
+msgstr ""
+
+#: src/widgets/memory_monitor.c:678
+msgid ""
+"RAM and swap histories are sampled from /proc/meminfo; each tick scrolls "
+"both graphs right-to-left."
 msgstr ""
 
 #: src/widgets/memory_monitor.c:694
@@ -496,6 +687,16 @@ msgstr ""
 msgid "Network Monitor"
 msgstr ""
 
+#: src/widgets/process_list.c:1140
+msgid ""
+"Process list sampled directly from /proc; default layout "
+"follows .conkyrc_proc."
+msgstr ""
+
+#: src/widgets/process_list.c:1147
+msgid "Default sort"
+msgstr ""
+
 #: src/widgets/process_list.c:1152
 msgid "NAME"
 msgstr ""
@@ -516,12 +717,20 @@ msgstr ""
 msgid "I/O"
 msgstr ""
 
+#: src/widgets/process_list.c:1165
+msgid "Default direction"
+msgstr ""
+
 #: src/widgets/process_list.c:1170
 msgid "Descending"
 msgstr ""
 
 #: src/widgets/process_list.c:1171
 msgid "Ascending"
+msgstr ""
+
+#: src/widgets/process_list.c:1180
+msgid "CPU mode"
 msgstr ""
 
 #: src/widgets/process_list.c:1186
@@ -636,7 +845,7 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: src/core/applet_manager.c:895 src/core/tray.c:255
+#: src/core/applet_manager.c:895 src/core/tray.c:257
 msgid "Applet management"
 msgstr ""
 
@@ -652,61 +861,57 @@ msgstr ""
 msgid "Configs"
 msgstr ""
 
-#: src/core/common.c:1450 src/core/tray.c:266
+#: src/core/common.c:1465 src/core/tray.c:268
 msgid "About"
 msgstr ""
 
-#: src/core/common.c:1468
-msgid "Scale"
-msgstr ""
-
-#: src/core/common.c:1486
+#: src/core/common.c:1501
 msgid "Size is set by End width/height (Resize mode = end_size)"
 msgstr ""
 
-#: src/core/common.c:1495
+#: src/core/common.c:1510
 msgid "Opacity"
 msgstr ""
 
-#: src/core/common.c:1507
+#: src/core/common.c:1522
 msgid "X-Position"
 msgstr ""
 
-#: src/core/common.c:1523
+#: src/core/common.c:1538
 msgid "Y-Position"
 msgstr ""
 
-#: src/core/common.c:1546
+#: src/core/common.c:1561
 msgid "User label"
 msgstr ""
 
-#: src/core/common.c:1570
+#: src/core/common.c:1585
 msgid "Options"
 msgstr ""
 
-#: src/core/common.c:1584
+#: src/core/common.c:1599
 msgid ""
 "Themes allow you to easily switch the appearance of your Screenlets. On this "
 "page you find a list of all available themes for this Screenlet."
 msgstr ""
 
-#: src/core/common.c:1694
+#: src/core/common.c:1709
 msgid "Size"
 msgstr ""
 
-#: src/core/common.c:1738
+#: src/core/common.c:1753
 msgid "Properties..."
 msgstr ""
 
-#: src/core/common.c:1741
+#: src/core/common.c:1756
 msgid "Info..."
 msgstr ""
 
-#: src/core/common.c:1764 src/core/tray.c:267
+#: src/core/common.c:1779 src/core/tray.c:269
 msgid "Quit"
 msgstr ""
 
-#: src/core/common.c:2399
+#: src/core/common.c:2414
 #, c-format
 msgid ""
 "Dead symlink: %s\n"
@@ -714,34 +919,34 @@ msgid ""
 "Config not found. Delete the symlink?"
 msgstr ""
 
-#: src/core/common.c:2403
+#: src/core/common.c:2418
 msgid "Delete"
 msgstr ""
 
-#: src/core/common.c:2404
+#: src/core/common.c:2419
 msgid "Point to another config"
 msgstr ""
 
-#: src/core/common.c:2405 src/core/common.c:2411
+#: src/core/common.c:2420 src/core/common.c:2426
 msgid "Cancel"
 msgstr ""
 
-#: src/core/common.c:2410
+#: src/core/common.c:2425
 msgid "Choose a config in .plugins"
 msgstr ""
 
-#: src/core/common.c:2412
+#: src/core/common.c:2427
 msgid "Select"
 msgstr ""
 
-#: src/core/tray.c:184
+#: src/core/tray.c:186
 msgid "Running Instances"
 msgstr ""
 
-#: src/core/tray.c:263
+#: src/core/tray.c:265
 msgid "Restart Applets"
 msgstr ""
 
-#: src/core/tray.c:264
+#: src/core/tray.c:266
 msgid "Stop all Applets"
 msgstr ""

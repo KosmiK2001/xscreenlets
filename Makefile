@@ -292,6 +292,19 @@ POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 #   ab_bool_prop(box, p, key, label, desc, value)  desc - 5-й
 #   cl_props_group(nb, title, info)               title - 2-й
 #
+# Хелперы Properties: переводимая подпись - 2-й аргумент, поэтому :2.
+#
+# Третий аргумент (описание, из него делается подсказка) в ключи НЕ
+# входит намеренно. При :2,3 xgettext считает второй строковый аргумент
+# формой множественного числа - msgid становится подписью, а msgid_plural
+# описанием. Описание при этом не переводится вовсе, а выглядит как
+# забытый перевод. Проверено на clock.c: msgid "Time Zone" с
+# msgid_plural "The Time Zone to use for this screenlet".
+#
+# Описания остаются английскими намеренно: это справочный текст в
+# подсказке, а не элемент интерфейса. Если понадобится - отдельным ключом
+# :3 и отдельным msgid, но НЕ вперемешку с :2.
+#
 # ab_bool_prop указан только как :5. Два ключа одного имени дают
 # ПОСЛЕДНИЙ (проверено: :4 даёт 2 строки, :5 даёт 2, вместе -
 # снова 2, то есть label теряется). Вызовов ab_bool_prop всего
@@ -303,7 +316,12 @@ XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
                   gtk_combo_box_text_append_text \
                   rss_menu_item:3 cal_menu_item:3 cw_menu_item_add:3 \
                   cw_row:3 dm_series_compact_row:2 ab_bool_prop:5 \
-                  cl_props_group:2
+                  cl_props_group:2 \
+                  xs_prop_add_string:2 xs_prop_add_bool:2 \
+                  xs_prop_add_int:2 xs_prop_add_float:2 \
+                  xs_prop_add_choices:2 xs_prop_add_color:2 \
+                  xs_prop_add_font:2 xs_prop_add_time:2 \
+                  xs_prop_add_row:2 xs_prop_add_group_header:2
 
 # Шаблон: msgid из исходников. Перегенерировать после правки строк:
 #   make po-update
