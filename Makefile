@@ -412,6 +412,16 @@ $(BUILD_DIR)/test_weather_scroll: tests/test_weather_scroll.c src/core/i18n.c \
 test-weather-scroll: $(BUILD_DIR)/test_weather_scroll locale
 	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_weather_scroll
 
+# Проверка переноса пояснения в настройках батареи. Печатает
+# LABEL_WIDTH, WIN_WIDTH, WRAPPED и LABEL_FITS.
+$(BUILD_DIR)/test_battery_wrap: tests/test_battery_wrap.c src/core/i18n.c \
+		include/xs_api.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_battery_wrap.c \
+		src/core/i18n.c $(LDFLAGS_PLUGIN)
+
+test-battery-wrap: $(BUILD_DIR)/test_battery_wrap locale
+	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_battery_wrap
+
 
 install: all locale
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin

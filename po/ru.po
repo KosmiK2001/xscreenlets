@@ -28,6 +28,10 @@ msgid ""
 "hidpp module is loaded). Shows \"No battery\" when no source is found, "
 "instead of failing."
 msgstr ""
+"Читает /sys/class/power_supply. Работает с батареями ноутбуков и с "
+"устройствами, которые предоставляют батарею там (например, мышь "
+"Logitech, если загружен модуль hid-logitech-hidpp). Если источник не "
+"найден, показывает «Батарея отсутствует» вместо ошибки."
 
 #: src/widgets/acpi_battery.c:447 src/widgets/clearrss.c:2386
 #: src/widgets/cpu_monitor.c:1186 src/widgets/disk_monitor.c:1297
@@ -814,6 +818,8 @@ msgid ""
 "RAM and swap histories are sampled from /proc/meminfo; each tick scrolls "
 "both graphs right-to-left."
 msgstr ""
+"RAM и своп берутся из /proc/meminfo; каждый тик сдвигает оба графика "
+"вправо налево."
 
 #: src/widgets/memory_monitor.c:689
 msgid "RAM user/apps"
@@ -921,6 +927,8 @@ msgid ""
 "Process list sampled directly from /proc; default layout "
 "follows .conkyrc_proc."
 msgstr ""
+"Список процессов снимается прямо из /proc; раскладка по умолчанию "
+"соответствует .conkyrc_proc."
 
 #: src/widgets/process_list.c:1143
 msgid "Rows"

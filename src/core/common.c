@@ -1251,6 +1251,17 @@ void xs_prop_add_group_header(GtkBox *box, const char *info)
     /* Перевод здесь, как и в xs_prop_row: заголовок группы приходит
      * литералом из xs_prop_add_group_header(box, "..."), их много. */
     lbl = gtk_label_new(_(info));
+    /* Перенос обязателен. Здесь ставят пояснения в два-три абзаца
+     * (см. acpi_battery.c, frame_launcher.c), а окно Properties
+     * фиксировано 490x450. Без переноса Gtk считает естественную ширину
+     * label равной длине самой длинной строки и растягивает на неё всё
+     * окно, из-за чего нижние поля уезжают за край экрана. */
+    gtk_label_set_line_wrap(GTK_LABEL(lbl), TRUE);
+    gtk_label_set_line_wrap_mode(GTK_LABEL(lbl), PANGO_WRAP_WORD_CHAR);
+    /* Ширина в символах, а не в пикселях: не даёт метке стать шире окна
+     * даже при длинном слове без пробелов (путь, идентификатор). */
+    gtk_label_set_width_chars(GTK_LABEL(lbl), 46);
+    gtk_label_set_max_width_chars(GTK_LABEL(lbl), 46);
     gtk_widget_set_halign(lbl, GTK_ALIGN_START);
     gtk_widget_set_valign(lbl, GTK_ALIGN_START);
     gtk_box_pack_start(box, lbl, FALSE, FALSE, 7);
