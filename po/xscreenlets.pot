@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 09:49+0300\n"
+"POT-Creation-Date: 2026-10-02 10:03+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,8 +18,40 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+#: src/widgets/acpi_battery.c:457
+msgid "Show percentage"
+msgstr ""
+
+#: src/widgets/acpi_battery.c:458
+msgid "Display charge percent"
+msgstr ""
+
 #: src/widgets/acpi_battery.c:459
+msgid "Show remaining time"
+msgstr ""
+
+#: src/widgets/acpi_battery.c:460
+msgid "Display estimated time left"
+msgstr ""
+
+#: src/widgets/acpi_battery.c:462
 msgid "ACPI Battery"
+msgstr ""
+
+#: src/widgets/calendar.c:655
+msgid "View events"
+msgstr ""
+
+#: src/widgets/calendar.c:656
+msgid "Update events"
+msgstr ""
+
+#: src/widgets/calendar.c:657
+msgid "Toggle events"
+msgstr ""
+
+#: src/widgets/calendar.c:658
+msgid "Back to today"
 msgstr ""
 
 #: src/widgets/calendar.c:683 src/widgets/clock.c:1091
@@ -36,6 +68,22 @@ msgstr ""
 
 #: src/widgets/clearrss.c:1897
 msgid "Feeds"
+msgstr ""
+
+#: src/widgets/clearrss.c:1909
+msgid "View this News"
+msgstr ""
+
+#: src/widgets/clearrss.c:1910
+msgid "Refresh"
+msgstr ""
+
+#: src/widgets/clearrss.c:1911
+msgid "Previous item"
+msgstr ""
+
+#: src/widgets/clearrss.c:1912
+msgid "Next item"
 msgstr ""
 
 #: src/widgets/clearrss.c:1913 src/core/common.c:1647
@@ -95,6 +143,118 @@ msgstr ""
 msgid "Weather"
 msgstr ""
 
+#: src/widgets/clearweather.c:3125
+msgid "Город или индекс:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3131
+msgid "Запасное название:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3136
+msgid "Источник:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3141
+msgid "Соединение:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3147
+msgid "Прокси:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3152
+msgid "Единицы:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3157
+msgid "Обновлять, мин:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3162
+msgid "Часов в прогнозе:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3175
+msgid "Вид прогноза:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3192
+msgid "Фон:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3204
+msgid "Цвет подложки (ARGB):"
+msgstr ""
+
+#: src/widgets/clearweather.c:3213
+msgid "Скругление углов, px:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3223
+msgid "Каталог темы:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3229
+msgid "Ширина:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3235
+msgid "Высота:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3237
+msgid "Цвет города:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3239
+msgid "Цвет температуры:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3241
+msgid "Цвет описания:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3243
+msgid "Цвет часов:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3245
+msgid "Цвет фона:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3248
+msgid "Шрифт города:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3250
+msgid "Шрифт температуры:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3252
+msgid "Шрифт описания:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3254
+msgid "Шрифт часов:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3256
+msgid "Шрифт значений у иконки:"
+msgstr ""
+
+#: src/widgets/clearweather.c:3325
+msgid "Обновить сейчас"
+msgstr ""
+
+#: src/widgets/clearweather.c:3326
+msgid "Соединение: напрямую"
+msgstr ""
+
+#: src/widgets/clearweather.c:3327
+msgid "Соединение: через прокси"
+msgstr ""
+
 #: src/widgets/clock.c:883
 msgid "Clock"
 msgstr ""
@@ -151,7 +311,7 @@ msgstr ""
 msgid "Label font"
 msgstr ""
 
-#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2129
+#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2132
 msgid "Label colour"
 msgstr ""
 
@@ -192,19 +352,19 @@ msgid "Lines in buffer"
 msgstr ""
 
 #: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
-#: src/widgets/sensors.c:2169 src/core/common.c:1564 src/core/common.c:1713
+#: src/widgets/sensors.c:2172 src/core/common.c:1564 src/core/common.c:1713
 msgid "Window"
 msgstr ""
 
-#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2171
+#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2174
 msgid "Width"
 msgstr ""
 
-#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2173
+#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2176
 msgid "Height"
 msgstr ""
 
-#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2175
+#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2178
 msgid "Corner rounding"
 msgstr ""
 
@@ -212,11 +372,11 @@ msgstr ""
 msgid "First-line indent"
 msgstr ""
 
-#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2179
+#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2182
 msgid "Background"
 msgstr ""
 
-#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2181
+#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2184
 msgid "Border"
 msgstr ""
 
@@ -242,6 +402,10 @@ msgstr ""
 
 #: src/widgets/disk_monitor_core.c:60
 msgid "Y"
+msgstr ""
+
+#: src/widgets/disk_monitor_core.c:173
+msgid "Position"
 msgstr ""
 
 #: src/widgets/disk_monitor_core.c:200
@@ -316,7 +480,7 @@ msgstr ""
 msgid "Interface"
 msgstr ""
 
-#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2126
+#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2129
 msgid "Appearance"
 msgstr ""
 
@@ -372,67 +536,67 @@ msgstr ""
 msgid "Process List"
 msgstr ""
 
-#: src/widgets/sensors.c:1905
+#: src/widgets/sensors.c:1908
 msgid "No sensors found"
 msgstr ""
 
-#: src/widgets/sensors.c:2111
+#: src/widgets/sensors.c:2114
 msgid "Show"
 msgstr ""
 
-#: src/widgets/sensors.c:2128
+#: src/widgets/sensors.c:2131
 msgid "Label"
 msgstr ""
 
-#: src/widgets/sensors.c:2131
+#: src/widgets/sensors.c:2134
 msgid "Value"
 msgstr ""
 
-#: src/widgets/sensors.c:2132
+#: src/widgets/sensors.c:2135
 msgid "Value colour"
 msgstr ""
 
-#: src/widgets/sensors.c:2141
+#: src/widgets/sensors.c:2144
 msgid "Celsius"
 msgstr ""
 
-#: src/widgets/sensors.c:2142
+#: src/widgets/sensors.c:2145
 msgid "Fahrenheit"
 msgstr ""
 
-#: src/widgets/sensors.c:2147
+#: src/widgets/sensors.c:2150
 msgid "Units"
 msgstr ""
 
-#: src/widgets/sensors.c:2153
+#: src/widgets/sensors.c:2156
 msgid "Layout"
 msgstr ""
 
-#: src/widgets/sensors.c:2155
+#: src/widgets/sensors.c:2158
 msgid "Label position"
 msgstr ""
 
-#: src/widgets/sensors.c:2157
+#: src/widgets/sensors.c:2160
 msgid "Value position"
 msgstr ""
 
-#: src/widgets/sensors.c:2159
+#: src/widgets/sensors.c:2162
 msgid "Value right-aligned"
 msgstr ""
 
-#: src/widgets/sensors.c:2161
+#: src/widgets/sensors.c:2164
 msgid "First line"
 msgstr ""
 
-#: src/widgets/sensors.c:2163
+#: src/widgets/sensors.c:2166
 msgid "Line step"
 msgstr ""
 
-#: src/widgets/sensors.c:2177
+#: src/widgets/sensors.c:2180
 msgid "Refresh, ms"
 msgstr ""
 
-#: src/widgets/sensors.c:2192
+#: src/widgets/sensors.c:2195
 msgid "Sensors"
 msgstr ""
 

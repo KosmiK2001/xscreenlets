@@ -1771,6 +1771,9 @@ static GtkWidget *sen_group_table(SenDialogContext *ctx, const char *group,
                                   GPtrArray *slots, GPtrArray *kinds,
                                   GPtrArray *sources)
 {
+    /* group приходит как item->name - это ИМЯ ГРУППЫ из внутреннего
+     * списка, а не подпись для пользователя. Переводить нельзя:
+     * по нему идёт сопоставление с группой в диалоге. */
     GtkWidget *frame = gtk_frame_new(group);
     GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
     GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);

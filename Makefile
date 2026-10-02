@@ -280,8 +280,30 @@ POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 #
 # В clock.c всего три вызова, поэтому оба аргумента переведены
 # прямо на стороне вызовов - дешевле и без двусмысленности.
+#
+# Хелперы меню и подписей апплетов. Номера аргументов - по факту
+# сигнатур, проверено извлечением:
+#
+#   rss_menu_item(menu, p, label, cmd)            label - 3-й, 4 пункта
+#   cal_menu_item(menu, p, label, cmd)            label - 3-й, 4 пункта
+#   cw_menu_item_add(shell, p, label, cmd)        label - 3-й, 3 пункта
+#   cw_row(grid, r, label, widget)                 label - 3-й, 25 строк
+#   dm_series_compact_row(box, label, control)     label - 2-й
+#   ab_bool_prop(box, p, key, label, desc, value)  desc - 5-й
+#   cl_props_group(nb, title, info)               title - 2-й
+#
+# ab_bool_prop указан только как :5. Два ключа одного имени дают
+# ПОСЛЕДНИЙ (проверено: :4 даёт 2 строки, :5 даёт 2, вместе -
+# снова 2, то есть label теряется). Вызовов ab_bool_prop всего
+# два, поэтому label переведён прямо на стороне вызовов.
+#
+# sen_group_table в список НЕ входит: group там - это item->name, имя
+# группы из внутреннего списка, по которому идёт сопоставление.
 XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
-                  gtk_combo_box_text_append_text
+                  gtk_combo_box_text_append_text \
+                  rss_menu_item:3 cal_menu_item:3 cw_menu_item_add:3 \
+                  cw_row:3 dm_series_compact_row:2 ab_bool_prop:5 \
+                  cl_props_group:2
 
 # Шаблон: msgid из исходников. Перегенерировать после правки строк:
 #   make po-update

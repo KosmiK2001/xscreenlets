@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 09:49+0300\n"
+"POT-Creation-Date: 2026-10-02 10:03+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -21,9 +21,41 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
+#: src/widgets/acpi_battery.c:457
+msgid "Show percentage"
+msgstr "Показывать процент"
+
+#: src/widgets/acpi_battery.c:458
+msgid "Display charge percent"
+msgstr "Показывать заряд в процентах"
+
 #: src/widgets/acpi_battery.c:459
+msgid "Show remaining time"
+msgstr "Показывать оставшееся время"
+
+#: src/widgets/acpi_battery.c:460
+msgid "Display estimated time left"
+msgstr "Показывать оценку оставшегося времени"
+
+#: src/widgets/acpi_battery.c:462
 msgid "ACPI Battery"
 msgstr "Батарея"
+
+#: src/widgets/calendar.c:655
+msgid "View events"
+msgstr "Показать события"
+
+#: src/widgets/calendar.c:656
+msgid "Update events"
+msgstr "Обновить события"
+
+#: src/widgets/calendar.c:657
+msgid "Toggle events"
+msgstr "Переключить события"
+
+#: src/widgets/calendar.c:658
+msgid "Back to today"
+msgstr "Вернуться к сегодняшнему дню"
 
 #: src/widgets/calendar.c:683 src/widgets/clock.c:1091
 msgid "Theme"
@@ -40,6 +72,22 @@ msgstr "iCalendar"
 #: src/widgets/clearrss.c:1897
 msgid "Feeds"
 msgstr "Ленты"
+
+#: src/widgets/clearrss.c:1909
+msgid "View this News"
+msgstr "Показать эту новость"
+
+#: src/widgets/clearrss.c:1910
+msgid "Refresh"
+msgstr "Обновить"
+
+#: src/widgets/clearrss.c:1911
+msgid "Previous item"
+msgstr "Предыдущая запись"
+
+#: src/widgets/clearrss.c:1912
+msgid "Next item"
+msgstr "Следующая запись"
 
 #: src/widgets/clearrss.c:1913 src/core/common.c:1647
 msgid "Themes"
@@ -98,6 +146,118 @@ msgstr "Лента"
 msgid "Weather"
 msgstr "Погода"
 
+#: src/widgets/clearweather.c:3125
+msgid "Город или индекс:"
+msgstr "Город или индекс:"
+
+#: src/widgets/clearweather.c:3131
+msgid "Запасное название:"
+msgstr "Запасное название:"
+
+#: src/widgets/clearweather.c:3136
+msgid "Источник:"
+msgstr "Источник:"
+
+#: src/widgets/clearweather.c:3141
+msgid "Соединение:"
+msgstr "Соединение:"
+
+#: src/widgets/clearweather.c:3147
+msgid "Прокси:"
+msgstr "Прокси:"
+
+#: src/widgets/clearweather.c:3152
+msgid "Единицы:"
+msgstr "Единицы:"
+
+#: src/widgets/clearweather.c:3157
+msgid "Обновлять, мин:"
+msgstr "Обновлять, мин:"
+
+#: src/widgets/clearweather.c:3162
+msgid "Часов в прогнозе:"
+msgstr "Часов в прогнозе:"
+
+#: src/widgets/clearweather.c:3175
+msgid "Вид прогноза:"
+msgstr "Вид прогноза:"
+
+#: src/widgets/clearweather.c:3192
+msgid "Фон:"
+msgstr "Фон:"
+
+#: src/widgets/clearweather.c:3204
+msgid "Цвет подложки (ARGB):"
+msgstr "Цвет подложки (ARGB):"
+
+#: src/widgets/clearweather.c:3213
+msgid "Скругление углов, px:"
+msgstr "Скругление углов, px:"
+
+#: src/widgets/clearweather.c:3223
+msgid "Каталог темы:"
+msgstr "Каталог темы:"
+
+#: src/widgets/clearweather.c:3229
+msgid "Ширина:"
+msgstr "Ширина:"
+
+#: src/widgets/clearweather.c:3235
+msgid "Высота:"
+msgstr "Высота:"
+
+#: src/widgets/clearweather.c:3237
+msgid "Цвет города:"
+msgstr "Цвет города:"
+
+#: src/widgets/clearweather.c:3239
+msgid "Цвет температуры:"
+msgstr "Цвет температуры:"
+
+#: src/widgets/clearweather.c:3241
+msgid "Цвет описания:"
+msgstr "Цвет описания:"
+
+#: src/widgets/clearweather.c:3243
+msgid "Цвет часов:"
+msgstr "Цвет часов:"
+
+#: src/widgets/clearweather.c:3245
+msgid "Цвет фона:"
+msgstr "Цвет фона:"
+
+#: src/widgets/clearweather.c:3248
+msgid "Шрифт города:"
+msgstr "Шрифт города:"
+
+#: src/widgets/clearweather.c:3250
+msgid "Шрифт температуры:"
+msgstr "Шрифт температуры:"
+
+#: src/widgets/clearweather.c:3252
+msgid "Шрифт описания:"
+msgstr "Шрифт описания:"
+
+#: src/widgets/clearweather.c:3254
+msgid "Шрифт часов:"
+msgstr "Шрифт часов:"
+
+#: src/widgets/clearweather.c:3256
+msgid "Шрифт значений у иконки:"
+msgstr "Шрифт значений у иконки:"
+
+#: src/widgets/clearweather.c:3325
+msgid "Обновить сейчас"
+msgstr "Обновить сейчас"
+
+#: src/widgets/clearweather.c:3326
+msgid "Соединение: напрямую"
+msgstr "Соединение: напрямую"
+
+#: src/widgets/clearweather.c:3327
+msgid "Соединение: через прокси"
+msgstr "Соединение: через прокси"
+
 #: src/widgets/clock.c:883
 msgid "Clock"
 msgstr "Часы"
@@ -154,7 +314,7 @@ msgstr "Вид: метка окна"
 msgid "Label font"
 msgstr "Шрифт метки"
 
-#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2129
+#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2132
 msgid "Label colour"
 msgstr "Цвет метки"
 
@@ -195,19 +355,19 @@ msgid "Lines in buffer"
 msgstr "Строк в буфере"
 
 #: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
-#: src/widgets/sensors.c:2169 src/core/common.c:1564 src/core/common.c:1713
+#: src/widgets/sensors.c:2172 src/core/common.c:1564 src/core/common.c:1713
 msgid "Window"
 msgstr "Окно"
 
-#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2171
+#: src/widgets/conlog.c:1513 src/widgets/sensors.c:2174
 msgid "Width"
 msgstr "Ширина"
 
-#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2173
+#: src/widgets/conlog.c:1515 src/widgets/sensors.c:2176
 msgid "Height"
 msgstr "Высота"
 
-#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2175
+#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2178
 msgid "Corner rounding"
 msgstr "Скругление"
 
@@ -215,11 +375,11 @@ msgstr "Скругление"
 msgid "First-line indent"
 msgstr "Отступ первой строки"
 
-#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2179
+#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2182
 msgid "Background"
 msgstr "Фон"
 
-#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2181
+#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2184
 msgid "Border"
 msgstr "Рамка"
 
@@ -247,6 +407,10 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
+#: src/widgets/disk_monitor_core.c:173
+msgid "Position"
+msgstr "Позиция"
+
 #: src/widgets/disk_monitor_core.c:200
 msgid "Disk"
 msgstr "Диск"
@@ -263,6 +427,7 @@ msgstr "Запущенный апплет (main_daemon):"
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
 msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
+"Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 
 #: src/widgets/frame_launcher.c:1182
@@ -327,7 +492,7 @@ msgstr "/"
 msgid "Interface"
 msgstr "Интерфейс"
 
-#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2126
+#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2129
 msgid "Appearance"
 msgstr "Вид"
 
@@ -383,67 +548,67 @@ msgstr "Conky (${top cpu} — 100% = все активные потоки)"
 msgid "Process List"
 msgstr "Список процессов"
 
-#: src/widgets/sensors.c:1905
+#: src/widgets/sensors.c:1908
 msgid "No sensors found"
 msgstr "Сенсоры не найдены"
 
-#: src/widgets/sensors.c:2111
+#: src/widgets/sensors.c:2114
 msgid "Show"
 msgstr "Показывать"
 
-#: src/widgets/sensors.c:2128
+#: src/widgets/sensors.c:2131
 msgid "Label"
 msgstr "Метка"
 
-#: src/widgets/sensors.c:2131
+#: src/widgets/sensors.c:2134
 msgid "Value"
 msgstr "Число"
 
-#: src/widgets/sensors.c:2132
+#: src/widgets/sensors.c:2135
 msgid "Value colour"
 msgstr "Цвет числа"
 
-#: src/widgets/sensors.c:2141
+#: src/widgets/sensors.c:2144
 msgid "Celsius"
 msgstr "Цельсий"
 
-#: src/widgets/sensors.c:2142
+#: src/widgets/sensors.c:2145
 msgid "Fahrenheit"
 msgstr "Фаренгейт"
 
-#: src/widgets/sensors.c:2147
+#: src/widgets/sensors.c:2150
 msgid "Units"
 msgstr "Единицы"
 
-#: src/widgets/sensors.c:2153
+#: src/widgets/sensors.c:2156
 msgid "Layout"
 msgstr "Раскладка"
 
-#: src/widgets/sensors.c:2155
+#: src/widgets/sensors.c:2158
 msgid "Label position"
 msgstr "Позиция метки"
 
-#: src/widgets/sensors.c:2157
+#: src/widgets/sensors.c:2160
 msgid "Value position"
 msgstr "Позиция числа"
 
-#: src/widgets/sensors.c:2159
+#: src/widgets/sensors.c:2162
 msgid "Value right-aligned"
 msgstr "Число вправо"
 
-#: src/widgets/sensors.c:2161
+#: src/widgets/sensors.c:2164
 msgid "First line"
 msgstr "Первая строка"
 
-#: src/widgets/sensors.c:2163
+#: src/widgets/sensors.c:2166
 msgid "Line step"
 msgstr "Шаг строк"
 
-#: src/widgets/sensors.c:2177
+#: src/widgets/sensors.c:2180
 msgid "Refresh, ms"
 msgstr "Обновление, мс"
 
-#: src/widgets/sensors.c:2192
+#: src/widgets/sensors.c:2195
 msgid "Sensors"
 msgstr "Сенсоры"
 

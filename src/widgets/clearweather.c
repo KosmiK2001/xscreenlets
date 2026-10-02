@@ -2735,7 +2735,7 @@ static const char *cw_un_names[]   = { "Метрические", "Имперск
 static GtkWidget *cw_row(GtkWidget *grid, int r, const char *label,
                          GtkWidget *widget)
 {
-    GtkWidget *l = gtk_label_new(label);
+    GtkWidget *l = gtk_label_new(_(label));
 
     gtk_widget_set_halign(l, GTK_ALIGN_START);
     gtk_grid_attach(GTK_GRID(grid), l, 0, r, 1, 1);
@@ -3309,7 +3309,7 @@ static void cw_menu_activate(GtkMenuItem *item, gpointer data)
 static void cw_menu_item_add(GtkMenuShell *m, XsPlugin *p, const char *label,
                              const char *cmd)
 {
-    GtkWidget *item = gtk_menu_item_new_with_label(label);
+    GtkWidget *item = gtk_menu_item_new_with_label(_(label));
     CwMenuAct *act = g_new0(CwMenuAct, 1);
 
     act->plugin = p;

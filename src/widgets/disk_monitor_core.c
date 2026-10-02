@@ -120,7 +120,7 @@ static GtkWidget *dm_series_compact_row(GtkWidget *content,
                                         GtkWidget *control)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *text = gtk_label_new(label);
+    GtkWidget *text = gtk_label_new(_(label));
 
     gtk_widget_set_halign(text, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(row), text, FALSE, TRUE, 0);

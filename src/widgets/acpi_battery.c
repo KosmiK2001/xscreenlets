@@ -414,10 +414,13 @@ static GtkWidget *ab_bool_prop(GtkBox *box, XsPlugin *p, const char *key,
                                const char *label, const char *desc,
                                gboolean value)
 {
-    GtkWidget *cb = gtk_check_button_new_with_label(label);
+    /* Перевод подписи и подсказки здесь: ab_bool_prop вызывается с
+     * литералами, оборачивать каждый на стороне вызова бессмысленно.
+     * Ключ конфига идёт отдельным параметром key и сюда не попадает. */
+    GtkWidget *cb = gtk_check_button_new_with_label(_(label));
 
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cb), value);
-    gtk_widget_set_tooltip_text(cb, desc);
+    gtk_widget_set_tooltip_text(cb, _(desc));
     gtk_box_pack_start(box, cb, FALSE, FALSE, 0);
     g_object_set_data(G_OBJECT(cb), "ab-key", (gpointer)key);
     g_signal_connect(cb, "toggled", G_CALLBACK(ab_bool_changed), p);
@@ -451,9 +454,9 @@ static void ab_properties(XsPlugin *p, GtkNotebook *nb)
                 "Charge percent at or below which the alarm colour is used",
                 st->alarm_threshold, 0, 100);
 
-    ab_bool_prop(GTK_BOX(page), p, "show_percent", "Show percentage",
+    ab_bool_prop(GTK_BOX(page), p, "show_percent", _("Show percentage"),
                  "Display charge percent", st->show_percent);
-    ab_bool_prop(GTK_BOX(page), p, "show_time", "Show remaining time",
+    ab_bool_prop(GTK_BOX(page), p, "show_time", _("Show remaining time"),
                  "Display estimated time left", st->show_time);
 
     gtk_notebook_append_page(nb, page, gtk_label_new(_("ACPI Battery")));

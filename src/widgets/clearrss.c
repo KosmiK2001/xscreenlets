@@ -1861,7 +1861,7 @@ static void rss_menu_cmd(XsPlugin *p, const char *cmd)
 static void rss_menu_item(GtkWidget *menu, XsPlugin *p, const char *label,
                           const char *cmd)
 {
-    GtkWidget *mi = gtk_menu_item_new_with_label(label);
+    GtkWidget *mi = gtk_menu_item_new_with_label(_(label));
     g_object_set_data_full(G_OBJECT(mi), "xs-cmd", g_strdup_printf("p:%s", cmd), g_free);
     g_signal_connect(mi, "activate", G_CALLBACK(xs_core_menu_activate), p);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);

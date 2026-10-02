@@ -23,6 +23,7 @@
  * было, чем чинилось, какие цифры и в каком порядке возвращать.
  */
 #include "xs_api.h"
+#include "i18n.h"
 #include "common.h"
 
 #include <gtk/gtk.h>
@@ -902,7 +903,9 @@ static GtkWidget *cl_props_group(GtkNotebook *nb, const char *title,
 
     gtk_container_set_border_width(GTK_CONTAINER(page), 10);
     if (info && info[0]) {
-        GtkWidget *lbl = gtk_label_new(info);
+        /* Описание и заголовок группы переводятся в хелпере: литералы
+         * приходят из вызовов, их несколько. */
+        GtkWidget *lbl = gtk_label_new(_(info));
         GtkWidget *sep;
 
         gtk_widget_set_halign(lbl, GTK_ALIGN_START);
@@ -910,7 +913,7 @@ static GtkWidget *cl_props_group(GtkNotebook *nb, const char *title,
         sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
         gtk_box_pack_start(GTK_BOX(page), sep, FALSE, FALSE, 5);
     }
-    gtk_notebook_append_page(nb, page, gtk_label_new(title));
+    gtk_notebook_append_page(nb, page, gtk_label_new(_(title)));
     return page;
 }
 

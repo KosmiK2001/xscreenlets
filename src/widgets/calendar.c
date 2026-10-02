@@ -597,7 +597,7 @@ static void cal_theme_toggled(GtkCheckMenuItem *mi, gpointer data);
 static void cal_menu_item(GtkWidget *menu, XsPlugin *p, const char *label,
                           const char *cmd)
 {
-	GtkWidget *mi = gtk_menu_item_new_with_label(label);
+	GtkWidget *mi = gtk_menu_item_new_with_label(_(label));
 
 	g_object_set_data_full(G_OBJECT(mi), "xs-cmd",
 	                       g_strdup_printf("p:%s", cmd), g_free);
