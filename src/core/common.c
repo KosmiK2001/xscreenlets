@@ -1325,8 +1325,13 @@ static void xs_core_themes_render(GtkTreeViewColumn *col, GtkCellRenderer *cell,
     if (!name)
         return;
     if ((!info || !info[0]) && (!author || !author[0])) {
+        /* Переводится вся строка вместе с разметкой: gettext работает
+         * с литералом целиком, и Pango-теги внутри msgid —
+         * обычный текст. Порядок %s сохраняется, поэтому
+         * переводчик не должен двигать спецификатор. */
         mu = g_strdup_printf(
-            "<b><span weight=\"ultrabold\" size=\"large\">%s</span></b> (no info available)",
+            _("<b><span weight=\"ultrabold\" size=\"large\">%s</span></b> "
+              "(no info available)"),
             name);
     } else {
         if (!info)
@@ -1439,11 +1444,13 @@ static void xs_core_show_properties(XsPlugin *p)
     GtkCellRenderer *cell;
     GKeyFile *kf;
     static const struct { const char *label; const char *what; } rows[] = {
-        {"Lock position", "lock"},
-        {"Sticky", "sticky"},
-        {"Widget", "widget"},
-        {"Keep above", "above"},
-        {"Keep below", "below"},
+        /* N_, а не _: это статические данные, перевод в момент
+         * инициализации произошёл бы до bindtextdomain. */
+        {N_("Lock position"), "lock"},
+        {N_("Sticky"), "sticky"},
+        {N_("Widget"), "widget"},
+        {N_("Keep above"), "above"},
+        {N_("Keep below"), "below"},
     };
     size_t i;
     gint row;
@@ -1576,7 +1583,10 @@ static void xs_core_show_properties(XsPlugin *p)
         }
         row++;
         for (i = 0; i < G_N_ELEMENTS(rows); i++) {
-            GtkWidget *cb = gtk_check_button_new_with_label(rows[i].label);
+            /* Переводится только label: what — ключ флага, он же
+             * пишется в xs-what и читается обратно при toggled. */
+            GtkWidget *cb = gtk_check_button_new_with_label(
+                _(rows[i].label));
             gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cb),
                                          xs_core_win_flag_get(state, rows[i].what));
             g_object_set_data_full(G_OBJECT(cb), "xs-what",
@@ -1740,14 +1750,15 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
     sub = gtk_menu_new();
     {
         static const struct { const char *label; const char *what; } wins[] = {
-            {"Lock", "lock"},
-            {"Sticky", "sticky"},
-            {"Widget", "widget"},
-            {"Keep above", "above"},
-            {"Keep below", "below"},
+            {N_("Lock"), "lock"},
+            {N_("Sticky"), "sticky"},
+            {N_("Widget"), "widget"},
+            {N_("Keep above"), "above"},
+            {N_("Keep below"), "below"},
         };
         for (i = 0; i < G_N_ELEMENTS(wins); i++) {
-            mi = gtk_check_menu_item_new_with_label(wins[i].label);
+            /* Как и выше: переводится label, what остаётся ключом. */
+            mi = gtk_check_menu_item_new_with_label(_(wins[i].label));
             gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(mi),
                                            xs_core_win_flag_get(state, wins[i].what));
             g_object_set_data_full(G_OBJECT(mi), "xs-what",
@@ -1768,18 +1779,27 @@ static void xs_core_popup_menu(XsPlugin *p, GdkEventButton *event)
     xs_core_menu_connect_cmd(mi, p, "about");
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
 
-    /* Add one more / Delete this — мультиинстанс (как в оригинале) */
+    /* Add one more / Delete this — мультиинстанс (как в оригинале).
+     *
+     * Переводится ТОЛЬКО форматная часть. %s подставляет type —
+     * внутренний идентификатор апплета ("acpi_battery", "clearweather"),
+     * он не переводится и служит для сопоставления экземпляров.
+     *
+     * Перевод именно на стороне printf, а не готовой строки: gettext
+     * ищет целиком, поэтому _("Add one more %s") должен попасть в
+     * msgid ДО подстановки. Если перевести готовую строку, поиск
+     * не найдёт ничего и английский останется. */
     {
         const char *type = xs_core_plugin_type(p);
         char *lbl;
 
         xs_core_add_separator(menu);
-        lbl = g_strdup_printf("Add one more %s", type);
+        lbl = g_strdup_printf(_("Add one more %s"), type);
         mi = gtk_menu_item_new_with_label(lbl);
         g_free(lbl);
         xs_core_menu_connect_cmd(mi, p, "add:");
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
-        lbl = g_strdup_printf("Delete this %s", type);
+        lbl = g_strdup_printf(_("Delete this %s"), type);
         mi = gtk_menu_item_new_with_label(lbl);
         g_free(lbl);
         xs_core_menu_connect_cmd(mi, p, "delete");

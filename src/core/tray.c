@@ -154,7 +154,10 @@ void xs_tray_add_plugin(XsPlugin *p)
         lab = g_key_file_get_string(kf, p->name, "user_label", NULL);
     if (!lab || !lab[0])
         lab = g_strdup("blank_label");
-    label = g_strdup_printf("%s: %s", name, lab);
+    /* Формат переводится, значения - нет: name это тип апплета,
+     * lab это user_label из конфига, то есть то, что пользователь
+     * сам вписал. Переводить их нельзя. */
+    label = g_strdup_printf(_("%1$s: %2$s"), name, lab);
     g_free(lab);
     GtkCheckMenuItem *mi = GTK_CHECK_MENU_ITEM(
         gtk_check_menu_item_new_with_label(label));
@@ -173,9 +176,14 @@ void xs_tray_add_plugin(XsPlugin *p)
         for (GList *l = children; l; l = l->next) {
             GtkMenuItem *it = l->data;
 
+            /* Сравниваем с ПЕРЕВОДЁННЫМ заголовком: пункт создаётся
+             * как _("Running Instances"), значит и искать надо
+             * _("Running Instances"), а не английский литерал. С
+             * литералом сравнение всегда ложное, и чекбоксы
+             * экземпляров не появлялись бы в меню. */
             if (gtk_menu_item_get_label(it) &&
                 g_strcmp0(gtk_menu_item_get_label(it),
-                          "Running Instances") == 0) {
+                           _("Running Instances")) == 0) {
                 run_mi = GTK_WIDGET(it);
                 break;
             }
@@ -220,7 +228,7 @@ void xs_tray_set_plugin_visibility(XsPlugin *p, gboolean visible)
 
         /* Чекбоксы живут в подменю "Running Instances" с подписью
          * "Plugin: Label" — ищем по подменю, а не по корню. */
-        if (lbl && g_strcmp0(lbl, "Running Instances") == 0) {
+        if (lbl && g_strcmp0(lbl, _("Running Instances")) == 0) {
             GtkWidget *sub = gtk_menu_item_get_submenu(mi);
             GList *schildren;
 

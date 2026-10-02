@@ -321,6 +321,23 @@ POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 # Сами обёртки проксируют в xs_prop_add_*, который переводит, так что
 # в рантайме подписи уже были русскими. Не извлекались они в POT.
 #
+#
+# Подписи в таблицах флагов окна (rows/wins в common.c) лежат в
+# СТРУКТУРНЫХ литералах {label, what}, а не в вызовах GTK, поэтому
+# xgettext их не видит и извлечь их автоматически нечем. Перевод
+# сделан через _() на стороне вызова, а строки добавлены в POT
+# вручную - см. po/xscreenlets.pot. Ключа --flag-table у xgettext
+# нет, такого опция не существует.
+#
+# Второй элемент пары (what) - ключ флага, он не переводится: он же
+# пишется в xs-what и читается обратно при toggled.
+#
+# N_ (gettext_noop) - макрос из i18n.h. Он НЕ переводит, а только
+# помечает строку, поэтому перевод выполняется позже, при показе:
+# перевод в момент статической инициализации произошёл бы до
+# bindtextdomain и вернул бы английский навсегда. Применяется к
+# таблицам {подпись, ключ} в common.c.
+#
 # Описания остаются английскими намеренно: это справочный текст в
 # подсказке, а не элемент интерфейса. Если понадобится - отдельным ключом
 # :3 и отдельным msgid, но НЕ вперемешку с :2.
@@ -345,6 +362,7 @@ XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
                   xs_prop_add_choices:2 xs_prop_add_color:2 \
                   xs_prop_add_font:2 xs_prop_add_time:2 \
                   xs_prop_add_row:2 xs_prop_add_group_header:2 \
+                  N_ \
                   cal_add_color:3 cm_add_color:3 pl_add_color:3 \
                   pl_add_font:3 pl_add_int:3 \
                   ab_int_prop:4 dm_add_color:4 dm_add_int:4 \
@@ -421,6 +439,18 @@ $(BUILD_DIR)/test_battery_wrap: tests/test_battery_wrap.c src/core/i18n.c \
 
 test-battery-wrap: $(BUILD_DIR)/test_battery_wrap locale
 	@XSCREENLETS_LOCALEDIR=$(BUILD_DIR)/locale $(BUILD_DIR)/test_battery_wrap
+
+# Переводы правого клика и оконных флагов. Проверяет форматные
+# строки "Add one more %s" и таблицы {label, what} с N_().
+$(BUILD_DIR)/test_i18n_context: tests/test_i18n_context.c src/core/i18n.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o $@ tests/test_i18n_context.c \
+		src/core/i18n.c $(LDFLAGS_PLUGIN)
+
+# Путь к каталогу передаётся АРГУМЕНТОМ: тест сам вызывает
+# bindtextdomain(argv[1]) и не зовёт xs_i18n_init(), поэтому
+# переменная окружения на него не действует.
+test-i18n-context: $(BUILD_DIR)/test_i18n_context locale
+	@LANGUAGE=ru $(BUILD_DIR)/test_i18n_context $(BUILD_DIR)/locale
 
 
 install: all locale
