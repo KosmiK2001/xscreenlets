@@ -1227,8 +1227,8 @@ static void fl_properties(XsPlugin *p, GtkNotebook *nb)
 	/* Кнопки добавления гостей */
 	{
 		GtkWidget *hb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-		GtkWidget *b1 = gtk_button_new_with_label("Add Applet");
-		GtkWidget *b2 = gtk_button_new_with_label("Add Running");
+		GtkWidget *b1 = gtk_button_new_with_label(_("Add Applet"));
+		GtkWidget *b2 = gtk_button_new_with_label(_("Add Running"));
 
 		g_signal_connect(b1, "clicked",
 		                 G_CALLBACK(fl_add_applet_clicked), p);

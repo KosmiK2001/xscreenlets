@@ -880,8 +880,8 @@ static void clock_properties(XsPlugin *p, GtkNotebook *nb)
 
     /* --- Clock --- */
     {
-        GtkWidget *page = clock_props_group(nb, "Clock",
-                                            "Clock-specific settings.");
+        GtkWidget *page = clock_props_group(nb, _("Clock"),
+                                            _("Clock-specific settings."));
         GtkWidget *w;
 
         w = xs_prop_add_string(GTK_BOX(page), "Time Zone",
@@ -919,8 +919,8 @@ static void clock_properties(XsPlugin *p, GtkNotebook *nb)
 
     /* --- Alarm --- */
     {
-        GtkWidget *page = clock_props_group(nb, "Alarm",
-                                            "Settings for the Alarm-function.");
+        GtkWidget *page = clock_props_group(nb, _("Alarm"),
+                                            _("Settings for the Alarm-function."));
         GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
         GtkWidget *w;
         static const struct { const char *key; int val; int max; } parts[3] = {
@@ -982,9 +982,9 @@ static void clock_properties(XsPlugin *p, GtkNotebook *nb)
 
     /* --- Face --- */
     {
-        GtkWidget *page = clock_props_group(nb, "Face",
-                                            "Additional settings for the "
-                                            "face-layout ...");
+        GtkWidget *page = clock_props_group(nb, _("Face"),
+                                            _("Additional settings for the "
+                                              "face-layout ..."));
         GtkWidget *w;
 
         w = xs_prop_add_string(GTK_BOX(page), "Face-Text",

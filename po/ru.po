@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 08:50+0300\n"
+"POT-Creation-Date: 2026-10-02 09:49+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -98,9 +98,33 @@ msgstr "Лента"
 msgid "Weather"
 msgstr "Погода"
 
+#: src/widgets/clock.c:883
+msgid "Clock"
+msgstr "Часы"
+
+#: src/widgets/clock.c:884
+msgid "Clock-specific settings."
+msgstr "Настройки часов"
+
+#: src/widgets/clock.c:922
+msgid "Alarm"
+msgstr "Будильник"
+
+#: src/widgets/clock.c:923
+msgid "Settings for the Alarm-function."
+msgstr "Настройки будильника."
+
 #: src/widgets/clock.c:941
 msgid "Alarm-Time"
 msgstr "Время будильника"
+
+#: src/widgets/clock.c:985
+msgid "Face"
+msgstr "Циферблат"
+
+#: src/widgets/clock.c:986
+msgid "Additional settings for the face-layout ..."
+msgstr "Дополнительные настройки циферблата..."
 
 #: src/widgets/clock.c:1062
 msgid "Get Clock Skins"
@@ -237,13 +261,21 @@ msgstr "Запущенный апплет (main_daemon):"
 
 #: src/widgets/frame_launcher.c:1175
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
-msgstr ""
+msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 
 #: src/widgets/frame_launcher.c:1182
 msgid "Frame"
 msgstr "Рамка"
+
+#: src/widgets/frame_launcher.c:1230
+msgid "Add Applet"
+msgstr "Добавить апплет"
+
+#: src/widgets/frame_launcher.c:1231
+msgid "Add Running"
+msgstr "Добавить запущенный"
 
 #: src/widgets/frame_launcher.c:1238
 msgid ""
@@ -311,6 +343,42 @@ msgstr "IP"
 msgid "Network Monitor"
 msgstr "Сетевой монитор"
 
+#: src/widgets/process_list.c:1152
+msgid "NAME"
+msgstr "ИМЯ"
+
+#: src/widgets/process_list.c:1153
+msgid "PID"
+msgstr "PID"
+
+#: src/widgets/process_list.c:1154
+msgid "CPU"
+msgstr "ЦП"
+
+#: src/widgets/process_list.c:1155
+msgid "MEM"
+msgstr "ПАМЯТЬ"
+
+#: src/widgets/process_list.c:1156
+msgid "I/O"
+msgstr "ВВОД/ВЫВОД"
+
+#: src/widgets/process_list.c:1170
+msgid "Descending"
+msgstr "По убыванию"
+
+#: src/widgets/process_list.c:1171
+msgid "Ascending"
+msgstr "По возрастанию"
+
+#: src/widgets/process_list.c:1186
+msgid "Per core (100% = one thread)"
+msgstr "По ядрам (100% = один поток)"
+
+#: src/widgets/process_list.c:1188
+msgid "Conky (${top cpu} — 100% = all online threads)"
+msgstr "Conky (${top cpu} — 100% = все активные потоки)"
+
 #: src/widgets/process_list.c:1206
 msgid "Process List"
 msgstr "Список процессов"
@@ -334,6 +402,14 @@ msgstr "Число"
 #: src/widgets/sensors.c:2132
 msgid "Value colour"
 msgstr "Цвет числа"
+
+#: src/widgets/sensors.c:2141
+msgid "Celsius"
+msgstr "Цельсий"
+
+#: src/widgets/sensors.c:2142
+msgid "Fahrenheit"
+msgstr "Фаренгейт"
 
 #: src/widgets/sensors.c:2147
 msgid "Units"
@@ -410,6 +486,10 @@ msgstr "Удалить конфиг"
 #: src/core/applet_manager.c:842
 msgid "Edit"
 msgstr "Редактировать"
+
+#: src/core/applet_manager.c:895 src/core/tray.c:255
+msgid "Applet management"
+msgstr "Управление апплетами"
 
 #: src/core/applet_manager.c:904
 msgid "Applets"
@@ -513,10 +593,6 @@ msgstr "Выбрать"
 #: src/core/tray.c:184
 msgid "Running Instances"
 msgstr "Запущенные апплеты"
-
-#: src/core/tray.c:255
-msgid "Applet management"
-msgstr "Управление апплетами"
 
 #: src/core/tray.c:263
 msgid "Restart Applets"

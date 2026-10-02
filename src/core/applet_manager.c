@@ -892,7 +892,7 @@ void xs_applet_manager_show(void)
     }
     am_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(am_window),
-                         "Applet management");
+                         _("Applet management"));
     gtk_window_set_default_size(GTK_WINDOW(am_window), 820, 500);
     g_signal_connect(am_window, "destroy",
                      G_CALLBACK(am_window_destroy), NULL);

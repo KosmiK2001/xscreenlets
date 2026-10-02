@@ -1149,11 +1149,11 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
             combo);
 
         (void)row;
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "NAME");
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "PID");
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "CPU");
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "MEM");
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "I/O");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("NAME"));
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("PID"));
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("CPU"));
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("MEM"));
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("I/O"));
         gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
                                  priv->sorting.default_sort);
         g_signal_connect(combo, "changed",
@@ -1167,8 +1167,8 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
             combo);
 
         (void)row;
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "Descending");
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "Ascending");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("Descending"));
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("Ascending"));
         gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
                                  priv->sorting.default_descending ? 0 : 1);
         g_signal_connect(combo, "changed",
@@ -1183,9 +1183,9 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
 
         (void)row;
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
-                                      "Per core (100% = one thread)");
+                                      _("Per core (100% = one thread)"));
         gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo),
-                                      "Conky (${top cpu} — 100% = all online threads)");
+                                      _("Conky (${top cpu} — 100% = all online threads)"));
         gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
                                  priv->cpu_basis ? 1 : 0);
         g_signal_connect(combo, "changed",

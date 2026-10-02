@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 08:50+0300\n"
+"POT-Creation-Date: 2026-10-02 09:49+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -95,8 +95,32 @@ msgstr ""
 msgid "Weather"
 msgstr ""
 
+#: src/widgets/clock.c:883
+msgid "Clock"
+msgstr ""
+
+#: src/widgets/clock.c:884
+msgid "Clock-specific settings."
+msgstr ""
+
+#: src/widgets/clock.c:922
+msgid "Alarm"
+msgstr ""
+
+#: src/widgets/clock.c:923
+msgid "Settings for the Alarm-function."
+msgstr ""
+
 #: src/widgets/clock.c:941
 msgid "Alarm-Time"
+msgstr ""
+
+#: src/widgets/clock.c:985
+msgid "Face"
+msgstr ""
+
+#: src/widgets/clock.c:986
+msgid "Additional settings for the face-layout ..."
 msgstr ""
 
 #: src/widgets/clock.c:1062
@@ -240,6 +264,14 @@ msgstr ""
 msgid "Frame"
 msgstr ""
 
+#: src/widgets/frame_launcher.c:1230
+msgid "Add Applet"
+msgstr ""
+
+#: src/widgets/frame_launcher.c:1231
+msgid "Add Running"
+msgstr ""
+
 #: src/widgets/frame_launcher.c:1238
 msgid ""
 "Create a NEW applet of the selected type right inside the frame (it is not "
@@ -300,6 +332,42 @@ msgstr ""
 msgid "Network Monitor"
 msgstr ""
 
+#: src/widgets/process_list.c:1152
+msgid "NAME"
+msgstr ""
+
+#: src/widgets/process_list.c:1153
+msgid "PID"
+msgstr ""
+
+#: src/widgets/process_list.c:1154
+msgid "CPU"
+msgstr ""
+
+#: src/widgets/process_list.c:1155
+msgid "MEM"
+msgstr ""
+
+#: src/widgets/process_list.c:1156
+msgid "I/O"
+msgstr ""
+
+#: src/widgets/process_list.c:1170
+msgid "Descending"
+msgstr ""
+
+#: src/widgets/process_list.c:1171
+msgid "Ascending"
+msgstr ""
+
+#: src/widgets/process_list.c:1186
+msgid "Per core (100% = one thread)"
+msgstr ""
+
+#: src/widgets/process_list.c:1188
+msgid "Conky (${top cpu} — 100% = all online threads)"
+msgstr ""
+
 #: src/widgets/process_list.c:1206
 msgid "Process List"
 msgstr ""
@@ -322,6 +390,14 @@ msgstr ""
 
 #: src/widgets/sensors.c:2132
 msgid "Value colour"
+msgstr ""
+
+#: src/widgets/sensors.c:2141
+msgid "Celsius"
+msgstr ""
+
+#: src/widgets/sensors.c:2142
+msgid "Fahrenheit"
 msgstr ""
 
 #: src/widgets/sensors.c:2147
@@ -394,6 +470,10 @@ msgstr ""
 
 #: src/core/applet_manager.c:842
 msgid "Edit"
+msgstr ""
+
+#: src/core/applet_manager.c:895 src/core/tray.c:255
+msgid "Applet management"
 msgstr ""
 
 #: src/core/applet_manager.c:904
@@ -492,10 +572,6 @@ msgstr ""
 
 #: src/core/tray.c:184
 msgid "Running Instances"
-msgstr ""
-
-#: src/core/tray.c:255
-msgid "Applet management"
 msgstr ""
 
 #: src/core/tray.c:263

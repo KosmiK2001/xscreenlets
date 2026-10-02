@@ -2138,8 +2138,8 @@ static void sen_properties(XsPlugin *p, GtkNotebook *notebook)
          * тоже идёт перевод. Флажок не может выразить выбор. */
         GtkWidget *combo = gtk_combo_box_text_new();
 
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "Celsius");
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), "Fahrenheit");
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("Celsius"));
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo), _("Fahrenheit"));
         gtk_combo_box_set_active(GTK_COMBO_BOX(combo),
                                  priv->fahrenheit ? 1 : 0);
         g_object_set_data_full(G_OBJECT(combo), "xs-key",

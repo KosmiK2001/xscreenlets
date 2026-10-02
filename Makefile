@@ -272,11 +272,25 @@ POTFILES := $(shell sed -e '/^#/d' -e '/^$$/d' po/POTFILES.in)
 #
 # Плюс nm_* : первый аргумент - ключ конфига, но он не переводится
 # (не находит msgstr и остаётся как есть), так что в POT попадает и он.
-XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2
+# clock_props_group сюда НЕ входит: у него два строковых аргумента
+# (title и info), а при двух ключах одного имени xgettext берёт
+# ПОСЛЕДНИЙ - второй потерял бы первый молча. Проверено:
+#
+#   --keyword=f:2 --keyword=f:3  -> извлекается только 3-й
+#
+# В clock.c всего три вызова, поэтому оба аргумента переведены
+# прямо на стороне вызовов - дешевле и без двусмысленности.
+XGETTEXT_KEYWORDS = _ cl_row:3 sen_row:2 nm_grid_add_label:2 nm_section:2 \
+                  gtk_combo_box_text_append_text
 
 # Шаблон: msgid из исходников. Перегенерировать после правки строк:
 #   make po-update
-$(BUILD_DIR)/po/xscreenlets.pot: $(POTFILES)
+#
+# Зависимость только от POTFILES, поэтому правка Makefile (например
+# списка --keyword) НЕ пересобирает .pot: цель считается up-to-date и
+# po-update молча копирует старый шаблон. Из-за этого не extraction, а
+# устаревший timestamp. Правится принудительным удалением build/po.
+$(BUILD_DIR)/po/xscreenlets.pot: $(POTFILES) Makefile
 	xgettext --from-code=UTF-8 --language=C \
 		$(foreach k,$(XGETTEXT_KEYWORDS),--keyword=$(k)) \
 		--add-comments=Translators --package-name=xscreenlets \
