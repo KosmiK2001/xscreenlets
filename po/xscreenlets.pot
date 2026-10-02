@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 12:00+0300\n"
+"POT-Creation-Date: 2026-10-02 12:10+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -156,7 +156,7 @@ msgstr ""
 msgid "Text font and size"
 msgstr ""
 
-#: src/widgets/clearrss.c:2338
+#: src/widgets/clearrss.c:2338 src/widgets/conlog_min.c:989
 msgid "Text color"
 msgstr ""
 
@@ -225,115 +225,115 @@ msgid "Weather"
 msgstr ""
 
 #: src/widgets/clearweather.c:3125
-msgid "Город или индекс:"
+msgid "City or index:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3131
-msgid "Запасное название:"
+msgid "Alternate name:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3136
-msgid "Источник:"
+msgid "Source:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3141
-msgid "Соединение:"
+msgid "Connection:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3147
-msgid "Прокси:"
+msgid "Proxy:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3152
-msgid "Единицы:"
+msgid "Units:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3157
-msgid "Обновлять, мин:"
+msgid "Update, min:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3162
-msgid "Часов в прогнозе:"
+msgid "Forecast hours:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3175
-msgid "Вид прогноза:"
+msgid "Forecast type:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3192
-msgid "Фон:"
+msgid "Background:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3204
-msgid "Цвет подложки (ARGB):"
+msgid "Underlay colour (ARGB):"
 msgstr ""
 
 #: src/widgets/clearweather.c:3213
-msgid "Скругление углов, px:"
+msgid "Corner rounding, px:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3223
-msgid "Каталог темы:"
+msgid "Theme directory:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3229
-msgid "Ширина:"
+msgid "Width:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3235
-msgid "Высота:"
+msgid "Height:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3237
-msgid "Цвет города:"
+msgid "City colour:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3239
-msgid "Цвет температуры:"
+msgid "Temperature colour:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3241
-msgid "Цвет описания:"
+msgid "Description colour:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3243
-msgid "Цвет часов:"
+msgid "Clock colour:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3245
-msgid "Цвет фона:"
+msgid "Background colour:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3248
-msgid "Шрифт города:"
+msgid "City font:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3250
-msgid "Шрифт температуры:"
+msgid "Temperature font:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3252
-msgid "Шрифт описания:"
+msgid "Description font:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3254
-msgid "Шрифт часов:"
+msgid "Clock font:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3256
-msgid "Шрифт значений у иконки:"
+msgid "Value font on icon:"
 msgstr ""
 
 #: src/widgets/clearweather.c:3325
-msgid "Обновить сейчас"
+msgid "Refresh now"
 msgstr ""
 
 #: src/widgets/clearweather.c:3326
-msgid "Соединение: напрямую"
+msgid "Connection: direct"
 msgstr ""
 
 #: src/widgets/clearweather.c:3327
-msgid "Соединение: через прокси"
+msgid "Connection: via proxy"
 msgstr ""
 
 #: src/widgets/clock.c:883
@@ -428,7 +428,8 @@ msgstr ""
 msgid "Get Clock Skins"
 msgstr ""
 
-#: src/widgets/conlog.c:1403 src/widgets/launcher.c:852
+#: src/widgets/conlog.c:1403 src/widgets/conlog_min.c:928
+#: src/widgets/conlog_min.c:933 src/widgets/launcher.c:852
 msgid "Command"
 msgstr ""
 
@@ -497,13 +498,13 @@ msgstr ""
 msgid "Window"
 msgstr ""
 
-#: src/widgets/conlog.c:1513 src/widgets/network_monitor.c:2844
-#: src/widgets/sensors.c:2174
+#: src/widgets/conlog.c:1513 src/widgets/conlog_min.c:1014
+#: src/widgets/network_monitor.c:2844 src/widgets/sensors.c:2174
 msgid "Width"
 msgstr ""
 
-#: src/widgets/conlog.c:1515 src/widgets/network_monitor.c:2846
-#: src/widgets/sensors.c:2176
+#: src/widgets/conlog.c:1515 src/widgets/conlog_min.c:1020
+#: src/widgets/network_monitor.c:2846 src/widgets/sensors.c:2176
 msgid "Height"
 msgstr ""
 
@@ -515,7 +516,8 @@ msgstr ""
 msgid "First-line indent"
 msgstr ""
 
-#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2182
+#: src/widgets/conlog.c:1521 src/widgets/conlog_min.c:996
+#: src/widgets/sensors.c:2182
 msgid "Background"
 msgstr ""
 
@@ -527,8 +529,68 @@ msgstr ""
 msgid "Level colours"
 msgstr ""
 
-#: src/widgets/conlog.c:1556
+#: src/widgets/conlog.c:1547
+msgid "Normal"
+msgstr ""
+
+#: src/widgets/conlog.c:1549
+msgid "Warning"
+msgstr ""
+
+#: src/widgets/conlog.c:1551
+msgid "Error"
+msgstr ""
+
+#: src/widgets/conlog.c:1553
+msgid "Information"
+msgstr ""
+
+#: src/widgets/conlog.c:1555
+msgid "Debug"
+msgstr ""
+
+#: src/widgets/conlog.c:1564
 msgid "Conlog"
+msgstr ""
+
+#: src/widgets/conlog_min.c:943
+msgid "Title"
+msgstr ""
+
+#: src/widgets/conlog_min.c:950
+msgid "Buffer and layout"
+msgstr ""
+
+#: src/widgets/conlog_min.c:952
+msgid "Max lines"
+msgstr ""
+
+#: src/widgets/conlog_min.c:961
+msgid "Line height"
+msgstr ""
+
+#: src/widgets/conlog_min.c:968
+msgid "First row offset"
+msgstr ""
+
+#: src/widgets/conlog_min.c:975
+msgid "Fonts and colours"
+msgstr ""
+
+#: src/widgets/conlog_min.c:977
+msgid "Text font"
+msgstr ""
+
+#: src/widgets/conlog_min.c:983
+msgid "Title font"
+msgstr ""
+
+#: src/widgets/conlog_min.c:1004
+msgid "Title color"
+msgstr ""
+
+#: src/widgets/conlog_min.c:1012
+msgid "Window size"
 msgstr ""
 
 #: src/widgets/cpu_monitor.c:1173

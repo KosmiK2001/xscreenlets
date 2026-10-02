@@ -10,7 +10,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 12:00+0300\n"
+"POT-Creation-Date: 2026-10-02 12:10+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -159,7 +159,7 @@ msgstr "Текст"
 msgid "Text font and size"
 msgstr "Шрифт и размер текста"
 
-#: src/widgets/clearrss.c:2338
+#: src/widgets/clearrss.c:2338 src/widgets/conlog_min.c:989
 msgid "Text color"
 msgstr "Цвет текста"
 
@@ -228,115 +228,115 @@ msgid "Weather"
 msgstr "Погода"
 
 #: src/widgets/clearweather.c:3125
-msgid "Город или индекс:"
+msgid "City or index:"
 msgstr "Город или индекс:"
 
 #: src/widgets/clearweather.c:3131
-msgid "Запасное название:"
+msgid "Alternate name:"
 msgstr "Запасное название:"
 
 #: src/widgets/clearweather.c:3136
-msgid "Источник:"
+msgid "Source:"
 msgstr "Источник:"
 
 #: src/widgets/clearweather.c:3141
-msgid "Соединение:"
+msgid "Connection:"
 msgstr "Соединение:"
 
 #: src/widgets/clearweather.c:3147
-msgid "Прокси:"
+msgid "Proxy:"
 msgstr "Прокси:"
 
 #: src/widgets/clearweather.c:3152
-msgid "Единицы:"
+msgid "Units:"
 msgstr "Единицы:"
 
 #: src/widgets/clearweather.c:3157
-msgid "Обновлять, мин:"
+msgid "Update, min:"
 msgstr "Обновлять, мин:"
 
 #: src/widgets/clearweather.c:3162
-msgid "Часов в прогнозе:"
+msgid "Forecast hours:"
 msgstr "Часов в прогнозе:"
 
 #: src/widgets/clearweather.c:3175
-msgid "Вид прогноза:"
+msgid "Forecast type:"
 msgstr "Вид прогноза:"
 
 #: src/widgets/clearweather.c:3192
-msgid "Фон:"
+msgid "Background:"
 msgstr "Фон:"
 
 #: src/widgets/clearweather.c:3204
-msgid "Цвет подложки (ARGB):"
+msgid "Underlay colour (ARGB):"
 msgstr "Цвет подложки (ARGB):"
 
 #: src/widgets/clearweather.c:3213
-msgid "Скругление углов, px:"
+msgid "Corner rounding, px:"
 msgstr "Скругление углов, px:"
 
 #: src/widgets/clearweather.c:3223
-msgid "Каталог темы:"
+msgid "Theme directory:"
 msgstr "Каталог темы:"
 
 #: src/widgets/clearweather.c:3229
-msgid "Ширина:"
+msgid "Width:"
 msgstr "Ширина:"
 
 #: src/widgets/clearweather.c:3235
-msgid "Высота:"
+msgid "Height:"
 msgstr "Высота:"
 
 #: src/widgets/clearweather.c:3237
-msgid "Цвет города:"
+msgid "City colour:"
 msgstr "Цвет города:"
 
 #: src/widgets/clearweather.c:3239
-msgid "Цвет температуры:"
+msgid "Temperature colour:"
 msgstr "Цвет температуры:"
 
 #: src/widgets/clearweather.c:3241
-msgid "Цвет описания:"
+msgid "Description colour:"
 msgstr "Цвет описания:"
 
 #: src/widgets/clearweather.c:3243
-msgid "Цвет часов:"
+msgid "Clock colour:"
 msgstr "Цвет часов:"
 
 #: src/widgets/clearweather.c:3245
-msgid "Цвет фона:"
+msgid "Background colour:"
 msgstr "Цвет фона:"
 
 #: src/widgets/clearweather.c:3248
-msgid "Шрифт города:"
+msgid "City font:"
 msgstr "Шрифт города:"
 
 #: src/widgets/clearweather.c:3250
-msgid "Шрифт температуры:"
+msgid "Temperature font:"
 msgstr "Шрифт температуры:"
 
 #: src/widgets/clearweather.c:3252
-msgid "Шрифт описания:"
+msgid "Description font:"
 msgstr "Шрифт описания:"
 
 #: src/widgets/clearweather.c:3254
-msgid "Шрифт часов:"
+msgid "Clock font:"
 msgstr "Шрифт часов:"
 
 #: src/widgets/clearweather.c:3256
-msgid "Шрифт значений у иконки:"
+msgid "Value font on icon:"
 msgstr "Шрифт значений у иконки:"
 
 #: src/widgets/clearweather.c:3325
-msgid "Обновить сейчас"
+msgid "Refresh now"
 msgstr "Обновить сейчас"
 
 #: src/widgets/clearweather.c:3326
-msgid "Соединение: напрямую"
+msgid "Connection: direct"
 msgstr "Соединение: напрямую"
 
 #: src/widgets/clearweather.c:3327
-msgid "Соединение: через прокси"
+msgid "Connection: via proxy"
 msgstr "Соединение: через прокси"
 
 #: src/widgets/clock.c:883
@@ -431,7 +431,8 @@ msgstr "Формат даты"
 msgid "Get Clock Skins"
 msgstr "Получить скины часов"
 
-#: src/widgets/conlog.c:1403 src/widgets/launcher.c:852
+#: src/widgets/conlog.c:1403 src/widgets/conlog_min.c:928
+#: src/widgets/conlog_min.c:933 src/widgets/launcher.c:852
 msgid "Command"
 msgstr "Команда"
 
@@ -500,13 +501,13 @@ msgstr "Строк в буфере"
 msgid "Window"
 msgstr "Окно"
 
-#: src/widgets/conlog.c:1513 src/widgets/network_monitor.c:2844
-#: src/widgets/sensors.c:2174
+#: src/widgets/conlog.c:1513 src/widgets/conlog_min.c:1014
+#: src/widgets/network_monitor.c:2844 src/widgets/sensors.c:2174
 msgid "Width"
 msgstr "Ширина"
 
-#: src/widgets/conlog.c:1515 src/widgets/network_monitor.c:2846
-#: src/widgets/sensors.c:2176
+#: src/widgets/conlog.c:1515 src/widgets/conlog_min.c:1020
+#: src/widgets/network_monitor.c:2846 src/widgets/sensors.c:2176
 msgid "Height"
 msgstr "Высота"
 
@@ -518,7 +519,8 @@ msgstr "Скругление"
 msgid "First-line indent"
 msgstr "Отступ первой строки"
 
-#: src/widgets/conlog.c:1521 src/widgets/sensors.c:2182
+#: src/widgets/conlog.c:1521 src/widgets/conlog_min.c:996
+#: src/widgets/sensors.c:2182
 msgid "Background"
 msgstr "Фон"
 
@@ -530,9 +532,69 @@ msgstr "Рамка"
 msgid "Level colours"
 msgstr "Цвета уровней"
 
-#: src/widgets/conlog.c:1556
+#: src/widgets/conlog.c:1547
+msgid "Normal"
+msgstr "Обычный"
+
+#: src/widgets/conlog.c:1549
+msgid "Warning"
+msgstr "Предупреждение"
+
+#: src/widgets/conlog.c:1551
+msgid "Error"
+msgstr "Ошибка"
+
+#: src/widgets/conlog.c:1553
+msgid "Information"
+msgstr "Информация"
+
+#: src/widgets/conlog.c:1555
+msgid "Debug"
+msgstr "Отладка"
+
+#: src/widgets/conlog.c:1564
 msgid "Conlog"
 msgstr "Conlog"
+
+#: src/widgets/conlog_min.c:943
+msgid "Title"
+msgstr "Заголовок"
+
+#: src/widgets/conlog_min.c:950
+msgid "Buffer and layout"
+msgstr "Буфер и разметка"
+
+#: src/widgets/conlog_min.c:952
+msgid "Max lines"
+msgstr "Строк в буфере"
+
+#: src/widgets/conlog_min.c:961
+msgid "Line height"
+msgstr "Высота строки"
+
+#: src/widgets/conlog_min.c:968
+msgid "First row offset"
+msgstr "Отступ первой строки"
+
+#: src/widgets/conlog_min.c:975
+msgid "Fonts and colours"
+msgstr "Шрифты и цвета"
+
+#: src/widgets/conlog_min.c:977
+msgid "Text font"
+msgstr "Шрифт текста"
+
+#: src/widgets/conlog_min.c:983
+msgid "Title font"
+msgstr "Шрифт заголовка"
+
+#: src/widgets/conlog_min.c:1004
+msgid "Title color"
+msgstr "Цвет заголовка"
+
+#: src/widgets/conlog_min.c:1012
+msgid "Window size"
+msgstr "Размер окна"
 
 #: src/widgets/cpu_monitor.c:1173
 msgid "One physical package per instance; topology is read from sysfs."
@@ -591,6 +653,8 @@ msgstr "Запущенный апплет (main_daemon):"
 msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
 msgstr "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar)."
 "Frame Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
+"Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
+"Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
 "Launcher: рамка-хост для других апплетов (в стиле Vista Sidebar).Frame "
@@ -1032,3 +1096,87 @@ msgstr "Перезапустить апплеты"
 #: src/core/tray.c:266
 msgid "Stop all Applets"
 msgstr "Остановить все апплеты"
+
+#~ msgid "Город или индекс:"
+#~ msgstr "Город или индекс:"
+
+#~ msgid "Запасное название:"
+#~ msgstr "Запасное название:"
+
+#~ msgid "Источник:"
+#~ msgstr "Источник:"
+
+#~ msgid "Соединение:"
+#~ msgstr "Соединение:"
+
+#~ msgid "Прокси:"
+#~ msgstr "Прокси:"
+
+#~ msgid "Единицы:"
+#~ msgstr "Единицы:"
+
+#~ msgid "Обновлять, мин:"
+#~ msgstr "Обновлять, мин:"
+
+#~ msgid "Часов в прогнозе:"
+#~ msgstr "Часов в прогнозе:"
+
+#~ msgid "Вид прогноза:"
+#~ msgstr "Вид прогноза:"
+
+#~ msgid "Фон:"
+#~ msgstr "Фон:"
+
+#~ msgid "Цвет подложки (ARGB):"
+#~ msgstr "Цвет подложки (ARGB):"
+
+#~ msgid "Скругление углов, px:"
+#~ msgstr "Скругление углов, px:"
+
+#~ msgid "Каталог темы:"
+#~ msgstr "Каталог темы:"
+
+#~ msgid "Ширина:"
+#~ msgstr "Ширина:"
+
+#~ msgid "Высота:"
+#~ msgstr "Высота:"
+
+#~ msgid "Цвет города:"
+#~ msgstr "Цвет города:"
+
+#~ msgid "Цвет температуры:"
+#~ msgstr "Цвет температуры:"
+
+#~ msgid "Цвет описания:"
+#~ msgstr "Цвет описания:"
+
+#~ msgid "Цвет часов:"
+#~ msgstr "Цвет часов:"
+
+#~ msgid "Цвет фона:"
+#~ msgstr "Цвет фона:"
+
+#~ msgid "Шрифт города:"
+#~ msgstr "Шрифт города:"
+
+#~ msgid "Шрифт температуры:"
+#~ msgstr "Шрифт температуры:"
+
+#~ msgid "Шрифт описания:"
+#~ msgstr "Шрифт описания:"
+
+#~ msgid "Шрифт часов:"
+#~ msgstr "Шрифт часов:"
+
+#~ msgid "Шрифт значений у иконки:"
+#~ msgstr "Шрифт значений у иконки:"
+
+#~ msgid "Обновить сейчас"
+#~ msgstr "Обновить сейчас"
+
+#~ msgid "Соединение: напрямую"
+#~ msgstr "Соединение: напрямую"
+
+#~ msgid "Соединение: через прокси"
+#~ msgstr "Соединение: через прокси"

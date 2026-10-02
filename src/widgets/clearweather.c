@@ -3122,44 +3122,44 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
     g_signal_connect(entry, "activate", G_CALLBACK(cw_on_city), p);
     g_signal_connect(entry, "focus-out-event",
                      G_CALLBACK(cw_on_city_focus), p);
-    cw_row(grid, r++, "Город или индекс:", entry);
+    cw_row(grid, r++, "City or index:", entry);
 
     entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(entry), priv->city_alt ? priv->city_alt : "");
     cw_tag(entry, "city_alt");
     g_signal_connect(entry, "activate", G_CALLBACK(cw_on_city_alt), p);
-    cw_row(grid, r++, "Запасное название:", entry);
+    cw_row(grid, r++, "Alternate name:", entry);
 
     cb = cw_combo(cw_src_names, G_N_ELEMENTS(cw_src_names), priv->source);
     cw_tag(cb, "source");
     g_signal_connect(cb, "changed", G_CALLBACK(cw_on_combo), p);
-    cw_row(grid, r++, "Источник:", cb);
+    cw_row(grid, r++, "Source:", cb);
 
     cb = cw_combo(cw_pm_names, G_N_ELEMENTS(cw_pm_names), priv->proxy_mode);
     cw_tag(cb, "proxy_mode");
     g_signal_connect(cb, "changed", G_CALLBACK(cw_on_combo), p);
-    cw_row(grid, r++, "Соединение:", cb);
+    cw_row(grid, r++, "Connection:", cb);
 
     entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(entry), priv->proxy_url ? priv->proxy_url : "");
     cw_tag(entry, "proxy_url");
     g_signal_connect(entry, "activate", G_CALLBACK(cw_on_proxy), p);
-    cw_row(grid, r++, "Прокси:", entry);
+    cw_row(grid, r++, "Proxy:", entry);
 
     cb = cw_combo(cw_un_names, G_N_ELEMENTS(cw_un_names), priv->units);
     cw_tag(cb, "units");
     g_signal_connect(cb, "changed", G_CALLBACK(cw_on_combo), p);
-    cw_row(grid, r++, "Единицы:", cb);
+    cw_row(grid, r++, "Units:", cb);
 
     spin = gtk_spin_button_new_with_range(5, 180, 5);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), priv->refresh_min);
     g_signal_connect(spin, "value-changed", G_CALLBACK(cw_on_refresh), p);
-    cw_row(grid, r++, "Обновлять, мин:", spin);
+    cw_row(grid, r++, "Update, min:", spin);
 
     spin = gtk_spin_button_new_with_range(3, 12, 1);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), priv->hours_shown);
     g_signal_connect(spin, "value-changed", G_CALLBACK(cw_on_hours), p);
-    cw_row(grid, r++, "Часов в прогнозе:", spin);
+    cw_row(grid, r++, "Forecast hours:", spin);
 
     {
         static const char *views[] = {"6 дней (как в родном)",
@@ -3172,7 +3172,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_combo_box_set_active(GTK_COMBO_BOX(cb), priv->view);
         cw_tag(cb, "view");
         g_signal_connect(cb, "changed", G_CALLBACK(cw_on_view), p);
-        cw_row(grid, r++, "Вид прогноза:", cb);
+        cw_row(grid, r++, "Forecast type:", cb);
     }
 
     {
@@ -3189,7 +3189,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_combo_box_set_active(GTK_COMBO_BOX(cb), priv->use_bg);
         cw_tag(cb, "use_bg");
         g_signal_connect(cb, "changed", G_CALLBACK(cw_on_use_bg), p);
-        cw_row(grid, r++, "Фон:", cb);
+        cw_row(grid, r++, "Background:", cb);
     }
     {
         /* Цвет подложки с альфой — ARGB. Ключ обязан быть "bg_color":
@@ -3201,7 +3201,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
 
         priv->bg_color_btn = b;
         gtk_widget_set_sensitive(b, priv->use_bg != 1);
-        cw_row(grid, r++, "Цвет подложки (ARGB):", b);
+        cw_row(grid, r++, "Underlay colour (ARGB):", b);
     }
     {
         /* Скругление окна: радиус в пикселях, 0 — прямые углы */
@@ -3210,7 +3210,7 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
         gtk_spin_button_set_value(GTK_SPIN_BUTTON(sc), priv->round_corner);
         cw_tag(sc, "round_corner");
         g_signal_connect(sc, "value-changed", G_CALLBACK(cw_on_round_corner), p);
-        cw_row(grid, r++, "Скругление углов, px:", sc);
+        cw_row(grid, r++, "Corner rounding, px:", sc);
     }
 
     entry = gtk_entry_new();
@@ -3220,40 +3220,40 @@ static void cw_properties(XsPlugin *p, GtkNotebook *nb)
                                    "каталог темы (пусто = искать самим)");
     cw_tag(entry, "theme_dir");
     g_signal_connect(entry, "activate", G_CALLBACK(cw_on_theme_dir), p);
-    cw_row(grid, r++, "Каталог темы:", entry);
+    cw_row(grid, r++, "Theme directory:", entry);
 
     spin = gtk_spin_button_new_with_range(160, 800, 10);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), priv->width);
     cw_tag(spin, "w");
     g_signal_connect(spin, "value-changed", G_CALLBACK(cw_on_size), p);
-    cw_row(grid, r++, "Ширина:", spin);
+    cw_row(grid, r++, "Width:", spin);
 
     spin = gtk_spin_button_new_with_range(120, 600, 10);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), priv->height);
     cw_tag(spin, "h");
     g_signal_connect(spin, "value-changed", G_CALLBACK(cw_on_size), p);
-    cw_row(grid, r++, "Высота:", spin);
+    cw_row(grid, r++, "Height:", spin);
 
-    cw_row(grid, r++, "Цвет города:", cw_color_button(&priv->city_color,
+    cw_row(grid, r++, "City colour:", cw_color_button(&priv->city_color,
                                                       "city_color"));
-    cw_row(grid, r++, "Цвет температуры:",
+    cw_row(grid, r++, "Temperature colour:",
            cw_color_button(&priv->temp_color, "temp_color"));
-    cw_row(grid, r++, "Цвет описания:",
+    cw_row(grid, r++, "Description colour:",
            cw_color_button(&priv->desc_color, "desc_color"));
-    cw_row(grid, r++, "Цвет часов:", cw_color_button(&priv->hour_color,
+    cw_row(grid, r++, "Clock colour:", cw_color_button(&priv->hour_color,
                                                     "hour_color"));
-    cw_row(grid, r++, "Цвет фона:", cw_color_button(&priv->bg_color,
+    cw_row(grid, r++, "Background colour:", cw_color_button(&priv->bg_color,
                                                    "bg_color"));
 
-    cw_row(grid, r++, "Шрифт города:", cw_font_button(priv->city_font,
+    cw_row(grid, r++, "City font:", cw_font_button(priv->city_font,
                                                      "city_font"));
-    cw_row(grid, r++, "Шрифт температуры:",
+    cw_row(grid, r++, "Temperature font:",
            cw_font_button(priv->temp_font, "temp_font"));
-    cw_row(grid, r++, "Шрифт описания:", cw_font_button(priv->desc_font,
+    cw_row(grid, r++, "Description font:", cw_font_button(priv->desc_font,
                                                         "desc_font"));
-    cw_row(grid, r++, "Шрифт часов:", cw_font_button(priv->hour_font,
+    cw_row(grid, r++, "Clock font:", cw_font_button(priv->hour_font,
                                                      "hour_font"));
-    cw_row(grid, r++, "Шрифт значений у иконки:",
+    cw_row(grid, r++, "Value font on icon:",
            cw_font_button(priv->stat_font, "stat_font"));
 }
 
@@ -3322,9 +3322,9 @@ static void cw_menu(XsPlugin *p, GtkMenu *m)
 {
     GtkMenuShell *sh = GTK_MENU_SHELL(m);
 
-    cw_menu_item_add(sh, p, "Обновить сейчас", "refresh");
-    cw_menu_item_add(sh, p, "Соединение: напрямую", "direct");
-    cw_menu_item_add(sh, p, "Соединение: через прокси", "proxy");
+    cw_menu_item_add(sh, p, "Refresh now", "refresh");
+    cw_menu_item_add(sh, p, "Connection: direct", "direct");
+    cw_menu_item_add(sh, p, "Connection: via proxy", "proxy");
 }
 /* ------------------------------------------------------------------ */
 /* точки входа                                                         */

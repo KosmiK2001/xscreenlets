@@ -947,7 +947,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *nb)
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("title"), g_free);
     g_signal_connect(w, "changed", G_CALLBACK(cl_entry_changed), p);
 
-    xs_prop_add_group_header(box, "Буфер и разметка");
+    xs_prop_add_group_header(box, _("Buffer and layout"));
 
     w = xs_prop_add_int(box, "Max lines",
                         "Сколько строк хранить. Более старые вытесняются. "
@@ -972,7 +972,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *nb)
                            g_free);
     g_signal_connect(w, "value-changed", G_CALLBACK(cl_spin_changed), p);
 
-    xs_prop_add_group_header(box, "Шрифты и цвета");
+    xs_prop_add_group_header(box, _("Fonts and colours"));
 
     w = xs_prop_add_font(box, "Text font", "Шрифт строк вывода.",
                          priv->row_font);
@@ -1009,7 +1009,7 @@ static void cl_properties(XsPlugin *p, GtkNotebook *nb)
                            g_free);
     g_signal_connect(w, "color-set", G_CALLBACK(cl_color_set), p);
 
-    xs_prop_add_group_header(box, "Размер окна");
+    xs_prop_add_group_header(box, _("Window size"));
 
     w = xs_prop_add_int(box, "Width", "Ширина окна в пикселях.",
                         priv->width, 120, 2000, 10);

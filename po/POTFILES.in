@@ -4,6 +4,7 @@ src/widgets/clearrss.c
 src/widgets/clearweather.c
 src/widgets/clock.c
 src/widgets/conlog.c
+src/widgets/conlog_min.c
 src/widgets/cpu_monitor.c
 src/widgets/disk_monitor.c
 src/widgets/disk_monitor_core.c

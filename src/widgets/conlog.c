@@ -1535,17 +1535,25 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
     gtk_widget_set_margin_top(grid, 8);
     gtk_widget_set_margin_bottom(grid, 8);
     {
-        static const char *names[5] = {
-            "Обычный", "Предупреждение", "Ошибка", "Информация", "Отладка"
-        };
+        /* Подписи уровней идут литералами прямо в вызовы cl_row.
+         * Через массив names[] было удобнее, но xgettext массивы не
+         * разбирает: ключ cl_row:3 видит только вызовы с литералом,
+         * и пять строк в POT просто не появлялись. */
         static const char *keys[5] = {
             "color_normal", "color_warn", "color_error",
             "color_info", "color_debug"
         };
 
-        for (int i = 0; i < 5; i++)
-            cl_row(grid, i, names[i],
-                   cl_color(ctx, keys[i], priv->level_colors[i]));
+        cl_row(grid, 0, _("Normal"),
+               cl_color(ctx, keys[0], priv->level_colors[0]));
+        cl_row(grid, 1, _("Warning"),
+               cl_color(ctx, keys[1], priv->level_colors[1]));
+        cl_row(grid, 2, _("Error"),
+               cl_color(ctx, keys[2], priv->level_colors[2]));
+        cl_row(grid, 3, _("Information"),
+               cl_color(ctx, keys[3], priv->level_colors[3]));
+        cl_row(grid, 4, _("Debug"),
+               cl_color(ctx, keys[4], priv->level_colors[4]));
     }
     gtk_container_add(GTK_CONTAINER(frame), grid);
     gtk_box_pack_start(GTK_BOX(inner), frame, FALSE, FALSE, 0);

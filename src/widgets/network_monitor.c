@@ -2674,7 +2674,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_inline_text(g, ctx, "Label", k_lbl, priv->series_label[i],
                            k_lblf, priv->series_label_font[i], k_lblc,
                            priv->series_label_color[i],
-                           "Цвет подписи «Down:» / «Up:»");
+                           "Colour of the «Down:» / «Up:» label");
         ly = nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->series_label_x[i],
                        priv->series_label_y[i],
                        MAX(priv->design_width, priv->design_height) - 1);
@@ -2692,7 +2692,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         nm_add_inline_text(g, ctx, "Value", NULL, NULL, k_valf,
                            priv->series_value_font[i], k_valc,
                            priv->series_value_color[i],
-                           "Цвет числа скорости");
+                           "Colour of the speed value");
         g_snprintf(kx, sizeof(kx), "series%d_x", i);
         g_snprintf(ky, sizeof(ky), "series%d_y", i);
         vy = nm_add_xy(g, ctx, "Value X/Y", kx, ky, priv->series_x[i],
@@ -2807,7 +2807,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_snprintf(k_lblc, sizeof(k_lblc), "total%u_color", i);
         nm_add_inline_text(g, ctx, "Label", k_lbl, priv->total_label[i],
                            k_lblf, priv->total_label_font[i], k_lblc,
-                           priv->total_color[i], "Цвет подписи сводки");
+                           priv->total_color[i], "Colour of the summary label");
         ly = nm_add_xy(g, ctx, "Label X/Y", kx, ky, priv->total_x[i],
                        priv->total_y[i],
                        MAX(priv->design_width, priv->design_height) - 1);
@@ -2824,7 +2824,7 @@ static void nm_properties(XsPlugin *p, GtkNotebook *notebook)
         g_snprintf(k_valc, sizeof(k_valc), "total%u_value_color", i);
         nm_add_inline_text(g, ctx, "Value", k_val, priv->total_value[i],
                            k_valf, priv->total_value_font[i], k_valc,
-                           priv->total_value_color[i], "Цвет числа сводки");
+                           priv->total_value_color[i], "Colour of the summary value");
         g_snprintf(kx, sizeof(kx), "total%u_value_x", i);
         g_snprintf(ky, sizeof(ky), "total%u_value_y", i);
         nm_add_xy(g, ctx, "Value X/Y", kx, ky, priv->total_value_x[i],
