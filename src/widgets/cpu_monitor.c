@@ -864,6 +864,25 @@ static void cm_rounded_rect_path(cairo_t *cr, double w, double h, double r)
     cairo_close_path(cr);
 }
 
+/* Есть ли у ядра Hyper Threading, то есть два логических процессора
+ * на одном физическом.
+ *
+ * Без этой проверки раскладка молча оставалась HT-вариантом: два
+ * графика, частота и температура между ними. На процессоре без HT
+ * второй sibling просто не существует, нижний график рисовался по
+ * thread_load[1], который никто не заполнял, - то есть оставался
+ * нулевым и выглядел как мёртвая полоса в половину ячейки. */
+static gboolean cm_core_has_ht(const CoreData *core)
+{
+    return core->siblings && core->siblings->len >= 2;
+}
+
+/* Один логический процессор на ядро: верхний график занимает всю
+ * ячейку, частота и температура идут под ним. Пропорция 0.62 - не
+ * точная константа, а подгонка под CM_TEXT_HEIGHT: при ней полосы
+ * графика остаётся достаточно, а текст не наезжает на нижний край. */
+#define CM_SINGLE_GRAPH_RATIO 0.62
+
 static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 {
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
@@ -944,7 +963,20 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 
         pango_layout_set_text(layout, "0", -1);
         pango_layout_get_pixel_size(layout, NULL, &text_height);
-        {
+        if (!cm_core_has_ht(core)) {
+            /* Без Hyper Threading: один график на всю ширину, частота и
+             * температура - под ним, в той же рамке ядра. Второй график
+             * не рисуем намеренно: thread_load[1] для одноядерного
+             * sibling никогда не заполняется. */
+            double graph_h = MAX(1.0, content_h * CM_SINGLE_GRAPH_RATIO);
+
+            cm_draw_history(cr, x, y, block_w, graph_h, core, 0,
+                            core->history_points, priv->history_head,
+                            priv->history_count, priv->load_colors,
+                            priv->background_color, width, height,
+                            priv->corner_radius);
+            text_y = y + graph_h;
+        } else {
             double middle_h = MIN(content_h * 0.50,
                                   text_height + 2.0 * CM_TEXT_PADDING);
             double block_h = MAX(1.0, (content_h - middle_h) / 2.0);
@@ -955,6 +987,7 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
                             priv->background_color, width, height,
                             priv->corner_radius);
             text_y = y + block_h;
+        }
         text = isfinite(core->frequency_mhz) ?
                g_strdup_printf("%.2fG", core->frequency_mhz / 1000.0) : g_strdup("---");
         pango_layout_set_text(layout, text, -1);
@@ -980,11 +1013,17 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
         pango_cairo_show_layout(cr, layout);
         g_free(text);
 
-        cm_draw_history(cr, x, text_y + middle_h, block_w, block_h,
-                        core, 1, core->history_points, priv->history_head,
-                        priv->history_count, priv->load_colors,
-                        priv->background_color, width, height,
-                        priv->corner_radius);
+        /* Второй график рисуется только при HT. */
+        if (cm_core_has_ht(core)) {
+            double middle_h = MIN(content_h * 0.50,
+                                  text_height + 2.0 * CM_TEXT_PADDING);
+            double block_h = MAX(1.0, (content_h - middle_h) / 2.0);
+
+            cm_draw_history(cr, x, text_y + middle_h, block_w, block_h,
+                            core, 1, core->history_points, priv->history_head,
+                            priv->history_count, priv->load_colors,
+                            priv->background_color, width, height,
+                            priv->corner_radius);
         }
     }
     /* Рамка по внешнему контуру окна, поверх содержимого - так же
