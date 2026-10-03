@@ -34,6 +34,7 @@ void sensor_reading_free(gpointer data)
     g_free(r->chip);
     g_free(r->label);
     g_free(r->device);
+    g_free(r->input_path);
     g_free(r);
 }
 
@@ -269,6 +270,42 @@ static GPtrArray *read_chip_channels(const char *hwmon_dir,
     g_dir_close(dir);
     g_ptr_array_sort(out, sensor_reading_cmp);
     return out;
+}
+
+/* Обновить значение одного канала по запомненному пути.
+ *
+ * Состав датчиков при этом не переизобретается: открывается только сам
+ * tempN_input. Именно это и было узким местом — апплет пересобирал весь
+ * список сенсоров на каждом тике ради одного числа на датчик. */
+static void sensor_reading_refresh_value(SensorReading *r)
+{
+    glong milli = 0;
+    SenReadResult rr;
+
+    if (!r || !r->input_path)
+        return;
+
+    rr = read_long(r->input_path, &milli);
+    r->celsius = (gdouble) milli / 1000.0;
+    r->valid = (rr == SEN_READ_OK) && (milli != SENSOR_INVALID_MILLI);
+    r->read_error = (rr != SEN_READ_OK);
+}
+
+void sensor_list_refresh_values(SensorList *list)
+{
+    guint i, c;
+
+    if (!list || !list->chips)
+        return;
+
+    for (i = 0; i < list->chips->len; i++) {
+        SensorChip *chip = g_ptr_array_index(list->chips, i);
+
+        if (!chip || !chip->readings)
+            continue;
+        for (c = 0; c < chip->readings->len; c++)
+            sensor_reading_refresh_value(g_ptr_array_index(chip->readings, c));
+    }
 }
 
 static gint chip_cmp(gconstpointer a, gconstpointer b)

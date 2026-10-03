@@ -35,6 +35,10 @@ static char *sen_source_key(const char *chip, const char *device,
 
 /* ------------------------------------------------------------- размеры */
 
+/* Как часто переизобретать список датчиков. Состав hwmon
+ * стабилен: датчики не появляются и не исчезают на ходу. */
+#define SEN_LIST_REBUILD_US (60 * G_USEC_PER_SEC)
+
 #define SEN_DEFAULT_WIDTH   200
 #define SEN_DEFAULT_HEIGHT  100
 #define SEN_MIN_WIDTH       80
@@ -101,6 +105,19 @@ typedef struct {
      * либо NULL, если канала нет */
     GPtrArray *values;     /* char* на каждый rows->len */
     gboolean values_valid;
+    /* Кэш обнаружения сенсоров.
+     *
+     * Состав датчиков (чипы, каналы, подписи) меняется только если
+     * датчик появился или исчез, а переизобретать его на каждом тике было
+     * чистым расходом: sen_read_values() звал sensor_list_read(), то есть
+     * обход /sys/class/hwmon с чтением name, device, tempN_type и
+     * tempN_label для каждого канала. По замерам strace это около 750
+     * openat в секунду на один апплет.
+     *
+     * Теперь список строится раз в SEN_LIST_REBUILD_US, а значения
+     * обновляются каждый тик дешёвым sensor_list_refresh_values(). */
+    SensorList *cached_list;
+    gint64 cached_list_us;
 } SenPriv;
 
 /* Совпадает ли подпись строки с формой «имя группы · канал»?
@@ -426,7 +443,27 @@ static void sen_read_values(SenPriv *priv)
     while (priv->values->len < priv->rows->len)
         g_ptr_array_add(priv->values, NULL);
 
-    list = sensor_list_read("/sys/class/hwmon");
+    /* Список датчиков переизобретается редко (SEN_LIST_REBUILD_US), а на
+     * каждом тике обновляются только значения по уже запомненным путям.
+     * Состав hwmon стабилен, а пересборка списка стоила обхода всех
+     * каталогов sysfs на каждом тике. */
+    {
+        gint64 sn_now = g_get_monotonic_time();
+
+        if (priv->cached_list == NULL ||
+            sn_now - priv->cached_list_us >= SEN_LIST_REBUILD_US) {
+            SensorList *fresh = sensor_list_read("/sys/class/hwmon");
+
+            if (fresh) {
+                sensor_list_free(priv->cached_list);
+                priv->cached_list = fresh;
+                priv->cached_list_us = sn_now;
+            }
+        }
+    }
+    list = priv->cached_list;
+    if (list)
+        sensor_list_refresh_values(list);
     if (!list) {
         /* Каталог sysfs недоступен целиком: показываем прочерки, а не
          * пустоту — иначе апплет выглядит сломанным, хотя это просто
@@ -495,7 +532,6 @@ static void sen_read_values(SenPriv *priv)
         if (text)
             sensor_array_replace(priv->values, i, text);
     }
-    sensor_list_free(list);
     priv->values_valid = TRUE;
 }
 
