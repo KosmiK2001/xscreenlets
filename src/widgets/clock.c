@@ -230,10 +230,15 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 	g_free(theme_dir);
 
 	if (xs_core_is_debug()) {
-		const char *search_dirs[] = {
-			g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", p->type ? p->type : p->name, NULL),
-			"/usr/share/screenlets/Clock/themes"
-		};
+		/* Те же два места, что и в меню: пользовательские, затем
+		 * системные темы пакета. Каталога screenlets (python2) здесь
+		 * больше нет - перечислять его было вводящим в заблуждение:
+		 * список показывал темы, которых в системе нет. */
+		const char *td = xs_core_themedir();
+		char *user_dir_dbg = g_build_filename(g_get_user_config_dir(),
+			"xscreenlets", "themes", p->type ? p->type : p->name, NULL);
+		char *sys_dir_dbg = td ? g_build_filename(td, p->type ? p->type : p->name, NULL) : NULL;
+		const char *search_dirs[] = { user_dir_dbg, sys_dir_dbg };
 		g_printerr("clock: available themes:\n");
 		for (gsize i = 0; i < G_N_ELEMENTS(search_dirs); i++) {
 			const char *dir_path = search_dirs[i];
@@ -254,10 +259,9 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 				g_free(entry_path);
 			}
 			closedir(dir);
-			if (i == 0) {
-				g_free((gpointer)dir_path);
-			}
 		}
+		g_free(user_dir_dbg);
+		g_free(sys_dir_dbg);
 	}
 
 	if (!loaded) {
@@ -799,14 +803,18 @@ static void clock_theme_conf_field(const char *dir, const char *field,
 
 static void clock_fill_themes(XsPlugin *p, GtkListStore *store)
 {
-    static const char *search_dirs[2] = {NULL, "/usr/share/screenlets/Clock/themes"};
+    /* Пользовательские темы, затем темы пакета. Каталога
+     * /usr/share/screenlets (python2) здесь больше нет. */
+    const char *td = xs_core_themedir();
+    char *user_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets",
+                                      "themes", p->type ? p->type : p->name, NULL);
+    char *sys_dir = td ? g_build_filename(td, p->type ? p->type : p->name, NULL) : NULL;
+    char *search_dirs[2] = { user_dir, sys_dir };
     GtkTreeIter it;
     size_t di;
 
     if (!p || !p->priv || !store)
         return;
-    search_dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-                                      "themes", p->type ? p->type : p->name, NULL);;
     for (di = 0; di < G_N_ELEMENTS(search_dirs); di++) {
         GDir *d = g_dir_open(search_dirs[di], 0, NULL);
         const char *fn;
@@ -839,7 +847,8 @@ static void clock_fill_themes(XsPlugin *p, GtkListStore *store)
         }
         g_dir_close(d);
     }
-    g_free((gpointer)search_dirs[0]);
+    g_free(user_dir);
+    g_free(sys_dir);
 }
 
 /* --- вкладка Options: три группы, как в ClockScreenlet.py --- */
@@ -1071,7 +1080,11 @@ static void clock_menu(XsPlugin *p, GtkMenu *m)
                                 "themes", p->type ? p->type : p->name, NULL);;
     names = g_ptr_array_new_with_free_func(g_free);
     clock_menu_add_themes(user_dir, names);
-    clock_menu_add_themes("/usr/share/screenlets/Clock/themes", names);
+    /* Системные темы пакета: /usr/share/xscreenlets/<апплет>/<тема> */
+    const char *td = xs_core_themedir();
+    char *sys_dir = td ? g_build_filename(td, p->type ? p->type : p->name, NULL) : NULL;
+    clock_menu_add_themes(sys_dir, names);
+    g_free(sys_dir);
     g_free(user_dir);
     if (names->len > 0) {
         g_ptr_array_sort(names, clock_cmp_names);
