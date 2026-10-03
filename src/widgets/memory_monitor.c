@@ -44,6 +44,13 @@ typedef struct {
     int cache_width;
     int cache_height;
     MemorySample sample;
+    /* Скругление углов окна. shape_* - кэш применённой маски X-сервера:
+     * форма пересобирается только когда реально изменился радиус или
+     * размер, а не на каждом кадре. */
+    int corner_radius;
+    int shape_radius;
+    int shape_w;
+    int shape_h;
 } PrivData;
 
 static const gdouble mm_default_background[4] = {0.098, 0.098, 0.098, 0.75};
@@ -220,6 +227,135 @@ static void mm_draw_stippled_hr(cairo_t *cr, double x, double y, double width,
         cairo_rectangle(cr, sx, y, 1.0, 1.0);
     }
     cairo_fill(cr);
+}
+
+/* Радиус углов из конфига.
+ *
+ * Всё, что не положительное, трактуется как «без скругления»: отрицательное
+ * значение в конфиге не должно превращаться в ошибку shape-маски. */
+static double mm_corner_radius_value(int value)
+{
+    return value > 0 ? (double)value : 0.0;
+}
+
+static gboolean mm_corner_radius_is_rounded(double radius)
+{
+    return radius > 0.5;
+}
+
+/* Регион со скруглёнными углами для shape-маски X-окна.
+ *
+ * Формула скопирована из process_list, а НЕ берётся оттуда линковкой.
+ * Причина найдена на живом applet: плагины собираются изолированно,
+ * memory_monitor.so линкуется только из своих object-файлов, поэтому
+ * символ из process_list в него просто не попадает, и applet перестаёт
+ * грузиться целиком:
+ *
+ *   memory_monitor.so: undefined symbol: ...
+ *
+ * без единой строчки в логе об ошибке, кроме undefined symbol.
+ *
+ * Дублирование формулы здесь не опционально, но расплата за него
+ * известна: построения надо держать идентичными соседним апплетам (тот
+ * же floor() - никогда не срезает глубже настоящей дуги - и та же
+ * разбивка по строкам). */
+static cairo_region_t *mm_rounded_region(int width, int height, int radius)
+{
+    const double r = mm_corner_radius_value(radius);
+    cairo_region_t *region;
+    cairo_rectangle_int_t box;
+    int scaled;
+
+    if (width <= 0 || height <= 0)
+        return NULL;
+    if (!mm_corner_radius_is_rounded(r))
+        return NULL;
+
+    scaled = (int)MIN(r, MIN(width, height) / 2.0);
+    region = cairo_region_create();
+    if (!region)
+        return NULL;
+
+    /* cairo_region хранит только целочисленные прямоугольники, поэтому
+     * скруглённый контур приближается одним столбцом на строку. */
+    for (int y = 0; y < height; y++) {
+        int cut = 0;
+        double dy;
+
+        if (y < scaled)
+            dy = scaled - y;
+        else if (y >= height - scaled)
+            dy = (double)(y - (height - scaled));
+        else
+            dy = 0.0;
+
+        if (dy > 0.0) {
+            double t = scaled * scaled - dy * dy;
+
+            if (t < 0.0)
+                t = 0.0;
+            cut = (int)floor(scaled - sqrt(t));
+        }
+        box.x = cut;
+        box.y = y;
+        box.width = width - 2 * cut;
+        box.height = 1;
+        if (box.width > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+    return region;
+}
+
+/* Контур скруглённого окна как путь, для clip в render.
+ *
+ * Отступ внутрь на пиксель обязателен: маска режет по краю окна, поэтому
+ * контур, проведённый по самому краю, терял бы половину дуги под срез и
+ * угол выходил бы рваным. */
+static void mm_rounded_path(cairo_t *cr, int width, int height, int radius)
+{
+    const double inset = 1.0;
+    double w = width - 2 * inset, h = height - 2 * inset;
+    double r = mm_corner_radius_value(radius);
+
+    if (!mm_corner_radius_is_rounded(r)) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    r = MIN(r, MIN(w, h) / 2.0);
+    if (r <= 0.0) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+    cairo_close_path(cr);
+}
+
+/* Применить форму X-окна. Вызывается из render, где известны фактические
+ * размеры окна. */
+static void mm_apply_shape(PrivData *priv, XsPlugin *p, int w, int h)
+{
+    GdkWindow *window;
+    cairo_region_t *region;
+
+    if (!priv || !p || !p->win || w <= 0 || h <= 0)
+        return;
+    if (priv->shape_radius == priv->corner_radius &&
+        priv->shape_w == w && priv->shape_h == h)
+        return;
+    window = gtk_widget_get_window(p->win);
+    if (!window)
+        return;
+    region = mm_rounded_region(w, h, priv->corner_radius);
+    gdk_window_shape_combine_region(window, region, 0, 0);
+    if (region)
+        cairo_region_destroy(region);
+    priv->shape_radius = priv->corner_radius;
+    priv->shape_w = w;
+    priv->shape_h = h;
 }
 
 static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
@@ -418,6 +554,9 @@ done:
     g_free(swap_section);
     g_free(ram_section);
     g_object_unref(layout);
+    /* Закрываем clip, открытый в начале render. Без restore контекст уедет
+     * с балансом save/restore, и следующий draw начнётся с лишним уровнем. */
+    cairo_restore(cr);
     cairo_destroy(cr);
     cairo_surface_mark_dirty(surface);
     return surface;
@@ -452,6 +591,8 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     priv->window_height = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                         "window_height", MM_DEFAULT_WINDOW_HEIGHT),
                                 100, 1200);
+    priv->corner_radius = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                       "corner_radius", 0), 0, 200);
     priv->font = xs_host_api()->conf_str(kf, p->name, "font", MM_DEFAULT_FONT);
     g_key_file_remove_key(priv->kf, p->name, "ram_graph_height", NULL);
     g_key_file_remove_key(priv->kf, p->name, "swap_graph_height", NULL);
@@ -469,6 +610,7 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     g_key_file_set_integer(kf, p->name, "update_ms", priv->update_ms);
     g_key_file_set_integer(kf, p->name, "window_width", priv->window_width);
     g_key_file_set_integer(kf, p->name, "window_height", priv->window_height);
+    g_key_file_set_integer(kf, p->name, "corner_radius", priv->corner_radius);
     if (!g_key_file_has_key(kf, p->name, "font", NULL))
         g_key_file_set_string(kf, p->name, "font", priv->font);
     xs_core_plugin_conf_flush(p->name);
@@ -572,6 +714,21 @@ static void mm_int_changed(GtkSpinButton *spin, gpointer data)
         priv->window_width = CLAMP(value, 100, 1600);
     else if (strcmp(key, "window_height") == 0)
         priv->window_height = CLAMP(value, 100, 1200);
+    else if (strcmp(key, "corner_radius") == 0) {
+        priv->corner_radius = CLAMP(value, 0, 200);
+        /* Сбрасываем кэш формы, иначе mm_apply_shape увидит прежний
+         * shape_radius и решит, что маску пересобирать не нужно. Размер
+         * окна при этом не меняется, поэтому resize здесь лишний - форма
+         * зависит только от радиуса и габаритов. */
+        priv->shape_radius = -1;
+        priv->shape_w = 0;
+        priv->shape_h = 0;
+        g_key_file_set_integer(priv->kf, p->name, key, priv->corner_radius);
+        mm_rebuild_cache(priv);
+        xs_core_plugin_conf_flush(p->name);
+        gtk_widget_queue_draw(p->win);
+        return;
+    }
     g_key_file_set_integer(priv->kf, p->name, key, value);
     xs_host_api()->resize(p, priv->window_width, priv->window_height);
     priv->cache_width = priv->window_width;
@@ -679,6 +836,7 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
     mm_add_int(page, p, "update_ms", "Update (ms)", priv->update_ms, 100, 60000);
     mm_add_int(page, p, "window_width", "Window width", priv->window_width, 100, 1600);
     mm_add_int(page, p, "window_height", "Window height", priv->window_height, 100, 1200);
+    mm_add_int(page, p, "corner_radius", "Corner radius", priv->corner_radius, 0, 200);
     font = xs_prop_add_font(GTK_BOX(page), "Font", "Monitor text font", priv->font);
     g_signal_connect(font, "font-set", G_CALLBACK(mm_font_set), p);
     mm_add_color(page, p, "background_color", "Background", priv->background_color);
