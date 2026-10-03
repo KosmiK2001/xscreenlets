@@ -127,6 +127,10 @@ typedef struct {
      * отдельной галочкой: «только батарейка» - это свойство самой темы,
      * и переключение темы должно менять и его. */
     gboolean     no_text;
+    /* Имя темы из конфига. Хранится отдельно от элементов темы: при смене
+     * темы из Properties его надо знать, чтобы перечитать маркер no-text и
+     * перерисовать. */
+    char        *theme;
 
     /* Третья строка: состояние сети и имя источника.
      *
@@ -519,6 +523,71 @@ static void ab_menu_cmd(XsPlugin *p, const char *cmd)
         gtk_widget_queue_draw(p->win);
 }
 
+
+/* Загрузить тему по имени (NULL = взять из конфига).
+ *
+ * Вынесено из init(), потому что тему теперь можно переключить из
+ * Properties, и там нужен ровно тот же путь: xs_core_find_theme(), затем
+ * theme_load(), затем проверка маркера no-text. Если бы этот код остался
+ * в init(), смена темы молча ничего не делала бы - маркер no-text
+ * прочитался бы только при старте демона, и тема minimal после
+ * переключения рисовала бы цифры.
+ *
+ * Имя темы запоминается в st->theme, иначе обработчик combo не знал бы,
+ * что переключать обратно.
+ *
+ * Имя темы берём из конфига (по умолчанию "default"). Раньше строка
+ * "default" стояла здесь жёстко, и выбрать другую тему было нечем - тема
+ * green из референса просто не подхватывалась, хотя лежала рядом на
+ * диске. */
+static void ab_load_theme(XsPlugin *p, AbState *st, const char *name)
+{
+    XsHostApi *api = p->host;
+    const char *theme_name;
+    char *theme_dir;
+
+    if (!st)
+        return;
+
+    if (name && *name) {
+        g_free(st->theme);
+        st->theme = g_strdup(name);
+        theme_name = st->theme;
+    } else {
+        GKeyFile *kf = xs_core_plugin_conf(p->name);
+
+        theme_name = api->conf_str(kf, p->name, "theme", "default");
+        g_free(st->theme);
+        st->theme = g_strdup(theme_name ? theme_name : "default");
+        theme_name = st->theme;
+    }
+
+    theme_dir = xs_core_find_theme(p->type ? p->type : p->name, theme_name);
+    if (theme_dir && api->theme_load(p, theme_dir)) {
+        /* Файл-маркер no-text в каталоге темы означает «не рисовать
+         * числа». Именно файл, а не имя темы: тогда любой applet,
+         * которому нужна та же тема без цифр, работает без правок кода,
+         * и тема не тащит за собой список исключений. */
+        char *marker = g_build_filename(theme_dir, "no-text", NULL);
+
+        st->no_text = g_file_test(marker, G_FILE_TEST_EXISTS);
+        g_free(marker);
+        if (xs_core_is_debug())
+            api->log("acpi_battery: theme loaded from %s%s",
+                     theme_dir, st->no_text ? " (no-text)" : "");
+    } else if (xs_core_is_debug()) {
+        api->log("acpi_battery: theme '%s' not found, text only", theme_name);
+    }
+    g_free(theme_dir);
+
+    /* Минимумы размера зависят от темы: у minimal нет блока текста, и её
+     * минимум намного меньше. Без сброса окно осталось бы прежней
+     * ширины, и батарейка стояла бы в пустом поле. */
+    st->min_width = 0;
+    st->min_height = 0;
+}
+
+
 static int ab_init(XsPlugin *p, GKeyFile *kf)
 {
     AbState *st;
@@ -570,34 +639,7 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
      *
      * Остальные апплеты (clock, calendar, clearrss, frame_launcher) с
      * самого начала вызывали find_theme() первым. */
-    {
-        /* Имя темы берём из конфига (по умолчанию "default"). Раньше
-         * строка "default" стояла здесь жёстко, и выбрать другую тему
-         * было нечем - тема green из референса просто не подхватывалась,
-         * хотя лежала рядом на диске. */
-        char *theme_name = api->conf_str(kf, p->name, "theme", "default");
-        char *theme_dir = xs_core_find_theme(p->type ? p->type : p->name,
-                                             theme_name);
-
-        if (theme_dir && api->theme_load(p, theme_dir)) {
-            /* Файл-маркер no-text в каталоге темы означает «не рисовать
-             * числа». Именно файл, а не имя темы: тогда любой applet,
-             * которому нужна та же тема без цифр, работает без правок
-             * кода, и тема не тащит за собой список исключений. */
-            char *marker = g_build_filename(theme_dir, "no-text", NULL);
-
-            st->no_text = g_file_test(marker, G_FILE_TEST_EXISTS);
-            g_free(marker);
-            if (xs_core_is_debug())
-                api->log("acpi_battery: theme loaded from %s%s",
-                         theme_dir, st->no_text ? " (no-text)" : "");
-        } else if (xs_core_is_debug()) {
-            api->log("acpi_battery: theme '%s' not found, text only",
-                     theme_name);
-        }
-        g_free(theme_name);
-        g_free(theme_dir);
-    }
+    ab_load_theme(p, st, NULL);
 
     st->widget = p->win;
     /* Подгоняем окно под scale после make_window: на этом шаге p->win
@@ -1200,6 +1242,7 @@ static void ab_shutdown(XsPlugin *p)
     g_free(st->percent_text);
     g_free(st->source_text);
     g_free(st->font);
+    g_free(st->theme);
     g_free(st);
     p->priv = NULL;
 }
@@ -1316,6 +1359,141 @@ static GtkWidget *ab_bool_prop(GtkBox *box, XsPlugin *p, const char *key,
  * обрабатываются как целые числа, а здесь строка. Клавиатурный фокус
  * выставляется на виджет - иначе после выбора шрифта Properties теряет
  * клавиатуру и следующий Tab уходит в никуда (то же в memory_monitor). */
+/* Список доступных тем для выпадающего списка.
+ *
+ * Сканируются два места: пользовательские темы и системные темы пакета
+ * (xs_core_themedir()). Пользовательские идут первыми и дубликаты
+ * отбрасываются, поэтому тема с тем же именем в обоих местах не
+ * показывается дважды. Сделано по образцу fl_list_themes() из
+ * frame_launcher - тот же обход, тот же приоритет. */
+static char **ab_list_themes(void)
+{
+    const char *dirs[2];
+    const char *tdirs;
+    char **out;
+    int n = 0, d;
+
+    dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
+                               "themes", "acpi_battery", NULL);
+    tdirs = xs_core_themedir();
+    dirs[1] = tdirs ? g_build_filename(tdirs, "acpi_battery", NULL) : NULL;
+    out = g_new0(char *, 1);
+
+    for (d = 0; d < 2; d++) {
+        GDir *dir = g_dir_open(dirs[d], 0, NULL);
+        const char *fn;
+
+        if (!dir)
+            continue;
+        while ((fn = g_dir_read_name(dir)) != NULL) {
+            char *full = g_build_filename(dirs[d], fn, NULL);
+            gboolean dup = FALSE;
+            int i;
+
+            if (!g_file_test(full, G_FILE_TEST_IS_DIR)) {
+                g_free(full);
+                continue;
+            }
+            g_free(full);
+            for (i = 0; out[i]; i++) {
+                if (strcmp(out[i], fn) == 0) {
+                    dup = TRUE;
+                    break;
+                }
+            }
+            if (!dup) {
+                out = g_realloc(out, (n + 2) * sizeof(char *));
+                out[n++] = g_strdup(fn);
+                out[n] = NULL;
+            }
+        }
+        g_dir_close(dir);
+    }
+    g_free((char *)dirs[0]);
+    g_free((char *)dirs[1]);
+    return out;
+}
+
+/* Смена темы из Properties.
+ *
+ * Тему грузим ЖИВЫМ циклом (ab_load_theme), а не по перезапуску демона:
+ * перезапуск ради выбора темы - плохое требование к пользователю, и в
+ * applet_manager это ломает позиционирование всех апплетов.
+ *
+ * min_width/min_height сбрасываются внутри ab_load_theme: у темы minimal
+ * блока текста нет, и её минимум намного меньше. Без сброса окно
+ * осталось бы прежней ширины.
+ *
+ * Ширину окна НЕ трогаем: она пол, и пользователь выставил её сам.
+ * Если тема сменилась на minimal, а ширина осталась от green, батарейка
+ * встанет в угол пустого поля - это ровно то поведение, о котором
+ * написано в подписи ползунка. */
+static void ab_theme_changed(GtkComboBox *combo, gpointer data)
+{
+    XsPlugin *p = data;
+    AbState *st = p ? p->priv : NULL;
+    char *sel;
+
+    if (!st)
+        return;
+    sel = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo));
+    if (!sel || !sel[0]) {
+        g_free(sel);
+        return;
+    }
+
+    ab_load_theme(p, st, sel);
+    g_free(sel);
+
+    {
+        GKeyFile *kf = xs_core_plugin_conf(p->name);
+
+        xs_host_api()->conf_set_str(kf, p->name, "theme", st->theme);
+        xs_core_plugin_conf_flush(p->name);
+    }
+    gtk_widget_queue_draw(p->win);
+}
+
+/* Список тем в Properties. Текущая помечена как "(current)": обновлять
+ * список нечем - он строится один раз при открытии, как и у соседних
+ * апплетов. */
+static void ab_theme_prop(GtkBox *box, XsPlugin *p)
+{
+    AbState *st = p->priv;
+    GtkWidget *lbl = gtk_label_new(_("Theme"));
+    GtkWidget *cb = gtk_combo_box_text_new();
+    char **themes = ab_list_themes();
+    int i;
+    gboolean found = FALSE;
+
+    for (i = 0; themes[i]; i++) {
+        if (st->theme && strcmp(st->theme, themes[i]) == 0)
+            found = TRUE;
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb), themes[i]);
+        if (st->theme && strcmp(st->theme, themes[i]) == 0)
+            gtk_combo_box_set_active(GTK_COMBO_BOX(cb), i);
+    }
+    /* Имя темы в конфиге может отсутствовать в списке (файл удалили).
+     * Тогда добавляем его строкой, иначе combo показывал бы первую тему
+     * в списке, а applet продолжал бы рисовать старую - расхождение
+     * выглядело бы как «переключатель не работает». */
+    if (!found && st->theme) {
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb), st->theme);
+        gtk_combo_box_set_active(GTK_COMBO_BOX(cb), i);
+    }
+    g_strfreev(themes);
+
+    g_signal_connect(cb, "changed", G_CALLBACK(ab_theme_changed), p);
+
+    /* Подпись слева, список справа. Строка собирается здесь же, а не
+     * общим помощником: xs_prop_add_* добавляет виджет в переданный
+     * бокс сам, а своей функции для «метка + произвольный виджет» в API
+     * нет. */
+    gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+    gtk_box_pack_start(box, lbl, FALSE, FALSE, 0);
+    gtk_box_pack_start(box, cb, FALSE, FALSE, 0);
+}
+
 static void ab_font_set(GtkFontButton *button, gpointer data)
 {
     XsPlugin *p = data;
@@ -1392,6 +1570,11 @@ static void ab_properties(XsPlugin *p, GtkNotebook *nb)
     ab_int_prop(GTK_BOX(page), p, "alarm_threshold", "Low battery threshold (%)",
                 "Charge percent at or below which the alarm colour is used",
                 st->alarm_threshold, 0, 100);
+    /* Тема: список строится из пользовательского и системного каталогов.
+     * Идёт перед шрифтом, потому что тема определяет, есть ли вообще
+     * блок текста - у minimal его нет. */
+    ab_theme_prop(GTK_BOX(page), p);
+
     /* Шрифт текста: процент, время, третья строка. Кегль из настройки
      * домножается на scale, поэтому Size -> N % продолжает работать и
      * увеличивает текст вместе с картинкой. Пустое значение = шрифт темы
