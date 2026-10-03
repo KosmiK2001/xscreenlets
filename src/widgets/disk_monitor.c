@@ -323,9 +323,17 @@ static void dm_sample(PrivData *priv)
         g_clear_pointer(&device->temp_path, g_free);
         g_clear_pointer(&device->temp_path_secondary, g_free);
         device->secondary_milli = G_MININT;
-        temp_path = device->temp_path = dm_find_hwmon_temp(DM_BLOCK_CLASS_ROOT,
-                                                          device->device_name,
-                                                          &device->temp_path_secondary);
+        /* Поиск не каждый тик: у диска без датчика он всегда возвращает
+         * «не найдено», и повторный обход /sys на тике был чистым расходом.
+         * DM_HWMON_RETRY_US — редкая перепроверка на случай, если датчик
+         * появился позже (подключили, подгрузился модуль). */
+        if (device->last_hwmon_lookup_us == 0 ||
+            now - device->last_hwmon_lookup_us >= DM_HWMON_RETRY_US) {
+            device->last_hwmon_lookup_us = now;
+            temp_path = device->temp_path =
+                dm_find_hwmon_temp(DM_BLOCK_CLASS_ROOT, device->device_name,
+                                   &device->temp_path_secondary);
+        }
     }
     if (temp_path && g_file_get_contents(temp_path, &text, NULL, NULL)) {
         device->sample.temperature_milli = dm_parse_temperature(text);

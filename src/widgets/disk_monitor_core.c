@@ -1282,8 +1282,7 @@ guint dm_history_columns(int width, guint available)
  * to the same flat attribute directory. */
 char *dm_find_hwmon_temp(const char *block_root, const char *device_name,
                          char **secondary)
-{
-    GDir *dir;
+{    GDir *dir;
     const char *entry;
     char *device_dir, *best = NULL, *second = NULL;
     int best_driver = 9, best_label = 9;

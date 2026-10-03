@@ -10,6 +10,11 @@ typedef struct _GtkWidget GtkWidget;
 #define DM_HISTORY_MAX 4096U
 /* Root of the sysfs block class; injected so the hwmon walk is testable. */
 #define DM_BLOCK_CLASS_ROOT "/sys/class/block"
+
+/* Как часто перепроверять hwmon-датчик температуры диска, если его нет.
+ * 60 секунд: датчик не появляется на каждый чих, но если пользователь
+ * подгрузит модуль или подключит диск, апплет подхватит его в минуту. */
+#define DM_HWMON_RETRY_US (60 * G_USEC_PER_SEC)
 #define DM_DEFAULT_HEIGHT 220
 /* Smallest usable applet. Below ~60 px of height the two temperature lines
  * overlap each other, and below ~80 px of width the graph has no room left for
@@ -65,6 +70,15 @@ typedef struct {
     DiskSample sample;
     DmHistoryState history;
     gint64 last_hddtemp_attempt_us;
+    /* Когда последний раз искали hwmon-датчик температуры диска.
+     *
+     * Без этого диск БЕЗ датчика заставлял обходить /sys/devices/system/block
+     * на каждом тике: поиск возвращал «не найдено», путь оставался NULL, и
+     * следующий тик повторял то же самое. strace показывал десятки
+     * открытий "name" в секунду ради результата, который заведомо не
+     * изменился. Сенсор не появляется и не исчезает сам по себе, поэтому
+     * повторный поиск нужен редко. */
+    gint64 last_hwmon_lookup_us;
     gint cached_hddtemp_milli;
     gboolean cached_hddtemp_valid;
     gint64 last_resolve_attempt_us;

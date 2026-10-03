@@ -24,6 +24,10 @@
 #include "../core/i18n.h"
 #define CM_SYS_CPU_DIR "/sys/devices/system/cpu"
 #define CM_HWMON_DIR "/sys/class/hwmon"
+
+/* Как часто перечитывать scaling_cur_freq. Частота меняется медленно,
+ * 3 секунды — с большим запасом для графика. */
+#define CM_FREQ_RETRY_US (3 * G_USEC_PER_SEC)
 #define CM_MAX_CPUS 4096
 #define CM_DEFAULT_FONT "Ubuntu 7"
 #define CM_COLUMNS_DEFAULT 4
@@ -79,6 +83,18 @@ typedef struct {
     GKeyFile *kf;
     gint socket_id;
     guint update_ms;
+    /* Когда последний раз читалась частота ядер (scaling_cur_freq).
+     *
+     * Частота процессора меняется медленно: сенсор обновляется раз в
+     * десятки миллисекунд, а тик апплета — раз в секунду, так что между
+     * тиками апплет успевал перечитать тот же самый файл. На 32
+     * логических процессора это 48 открытий файлов в секунду ради
+     * практически неизменного числа.
+     *
+     * Теперь частота перечитывается раз в CM_FREQ_RETRY_US, между
+     * отсчётами апплет показывает последнее прочитанное значение, то
+     * есть картинка та же, а файлов не 48 в секунду, а около 0,3. */
+    gint64 last_freq_sample_us;
     gint columns;
     gint rows;
     int window_width;
@@ -654,6 +670,15 @@ static gboolean cm_sample_cpu(PrivData *priv)
 {
     CpuTimes current[CM_MAX_CPUS];
     guint c;
+    gint64 now_us = g_get_monotonic_time();
+    gboolean read_freq;
+
+    /* Первый отсчёт обязан прочитать частоту, иначе на графике первое
+     * значение было бы NaN и линия начиналась бы со второго тика. */
+    read_freq = (priv->last_freq_sample_us == 0 ||
+                 now_us - priv->last_freq_sample_us >= CM_FREQ_RETRY_US);
+    if (read_freq)
+        priv->last_freq_sample_us = now_us;
 
     memset(current, 0, sizeof(current));
     if (!cm_read_proc_stat(current))
@@ -693,20 +718,28 @@ static gboolean cm_sample_cpu(PrivData *priv)
             for (k = 0; k < 4; k++)
                 core->load[k] = (double)d[k] / (double)total;
         }
-        for (k = 0; k < core->siblings->len; k++) {
-            gint cpu = g_array_index(core->siblings, gint, k);
-            char *cpu_name = g_strdup_printf("cpu%d", cpu);
-            char *cpufreq = g_build_filename(CM_SYS_CPU_DIR, cpu_name,
-                                             "cpufreq", NULL);
-            char *path = g_build_filename(cpufreq, "scaling_cur_freq", NULL);
-            gint64 frequency = cm_read_frequency_khz(path);
-            if (frequency > best_freq)
-                best_freq = frequency;
-            g_free(path);
-            g_free(cpufreq);
-            g_free(cpu_name);
+        /* Частота перечитывается не каждый тик: между отсчётами остаётся
+         * предыдущее значение core->frequency_mhz, то есть на экране то
+         * же самое, а файлов не по одному на логический процессор каждый
+         * тик. */
+        if (read_freq) {
+            for (k = 0; k < core->siblings->len; k++) {
+                gint cpu = g_array_index(core->siblings, gint, k);
+                char *cpu_name = g_strdup_printf("cpu%d", cpu);
+                char *cpufreq = g_build_filename(CM_SYS_CPU_DIR, cpu_name,
+                                                 "cpufreq", NULL);
+                char *path = g_build_filename(cpufreq, "scaling_cur_freq",
+                                              NULL);
+                gint64 frequency = cm_read_frequency_khz(path);
+                if (frequency > best_freq)
+                    best_freq = frequency;
+                g_free(path);
+                g_free(cpufreq);
+                g_free(cpu_name);
+            }
+            if (best_freq > 0)
+                core->frequency_mhz = best_freq / 1000.0;
         }
-        core->frequency_mhz = best_freq > 0 ? best_freq / 1000.0 : NAN;
         if (c < priv->hwmon_temps->len)
             temperature = cm_read_temperature(g_ptr_array_index(priv->hwmon_temps, c));
         core->temperature = temperature;
