@@ -836,10 +836,60 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     g->text_w = 0;
     desc = ab_font_scaled(st, g->scale);
     {
-        /* Строки, которые точно рисуются. */
+        /* Ширина блока = максимум по строкам, которые РЕАЛЬНО могут быть
+         * нарисованы в этой конфигурации.
+         *
+         * Здесь важен порядок истории. Сначала samples содержали и
+         * "   hidpp_battery_0", и text_w брался по нему: блок
+         * прижимался вправо по невидимой строке, и справа после текста
+         * зияла пустота в 80 px при ширине блока 109 px и рисуемых 30 px.
+         * Потом need_w перевели на этот же text_w, и пустота переехала в
+         * середину - между батарейкой и текстом, потому что окно не могло
+         * сузиться до реального содержимого.
+         *
+         * Теперь обе величины считаются по одному и тому же text_w, то
+         * есть сколько блок занимает на самом деле, такой и минимум у
+         * окна. Лишнего места не остаётся нигде.
+         *
+         * Длинное имя источника (hidpp_battery_0) в samples не входит
+         * намеренно: блок от него не прыгает, потому что третья строка
+         * добавляется отдельно и по факту (см. ниже). Прыгнуть может
+         * только размер окна, и только в момент смены источника.
+         *
+         * Строки-примеры ДОЛЖНЫ совпадать с тем, что рисует draw():
+         * везде ведущий пробел - " Full", " No", " battery", процент и
+         * таймер приходят из acpi_battery_format_minutes() как
+         * "%d%%"/"%02d:%02d". Раньше здесь стоял "Full" без пробела и
+         * "3:59", которых в выводе не бывает. */
         const char *samples[] = { "100%", " 90%", " 80%", " No",
                                   " battery", " Full", "00:00", "99:59",
                                   NULL };
+        int i;
+
+        for (i = 0; samples[i]; i++) {
+            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
+                                                            samples[i]);
+            int pw = 0;
+
+            pango_layout_set_font_description(l, desc);
+            pango_layout_get_pixel_size(l, &pw, NULL);
+            g_object_unref(l);
+            if (pw > g->text_w)
+                g->text_w = pw;
+        }
+        /* Третья строка добавляется по факту: её имя источника известно
+         * только в рантайме, в статическом списке его быть не может. */
+        if (st->source_text && *st->source_text) {
+            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
+                                                            st->source_text);
+            int pw = 0;
+
+            pango_layout_set_font_description(l, desc);
+            pango_layout_get_pixel_size(l, &pw, NULL);
+            g_object_unref(l);
+            if (pw > g->text_w)
+                g->text_w = pw;
+        }
     }
     pango_font_description_free(desc);
 
