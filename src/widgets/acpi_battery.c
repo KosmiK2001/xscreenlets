@@ -341,19 +341,19 @@ static void ab_apply_scale(XsPlugin *p)
         s = 10.0;
     st->scale = s;
 
-    want_w = (int)(AB_DEFAULT_WIDTH * s + 0.5);
-    want_h = (int)(AB_DEFAULT_HEIGHT * s + 0.5);
-
-    if (p->win) {
-        int cur_w = 0, cur_h = 0;
-
-        gtk_window_get_size(GTK_WINDOW(p->win), &cur_w, &cur_h);
-        if (cur_w != want_w || cur_h != want_h)
-            p->host->resize(p, want_w, want_h);
-    } else {
-        st->window_width  = want_w;
-        st->window_height = want_h;
-    }
+    /* Размер здесь НЕ задаётся. Раньше стояла формула
+     * want = AB_DEFAULT_WIDTH * s, но она не совпадает с тем, что
+     * считает ab_layout() по метрикам шрифта: apply_scale ужимал окно,
+     * следующий draw() растил его до need_w, и на каждом тике размер
+     * скакал туда-обратно - апплет дёргался. Теперь единственный
+     * источник размера - need_w/need_h из ab_layout(), и применяется
+     * он в draw() сразу перед отрисовкой.
+     *
+     * Окно не трогаем и st->window_*, пока p->win нет: первый размер
+     * поставит первый же draw. */
+    st->scale = s;
+    (void)want_w;
+    (void)want_h;
 }
 
 /* Обработка штатной команды ядра "scale-applied".
@@ -560,8 +560,17 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     g->text_w = 0;
     desc = ab_font_scaled(g->widget, g->scale);
     {
-        const char *samples[] = { "100%", " 90%", "00:00", "3:59",
-                                  "Full", " battery", NULL };
+        /* Строки-примеры ДОЛЖНЫ совпадать с тем, что реально рисуется в
+         * draw(): там везде ведущий пробел - " Full", " No",
+         * " battery", а процент и таймер приходят из
+         * acpi_battery_format_minutes() как "%d%%"/"%02d:%02d".
+         * Раньше здесь стоял "Full" без пробела и "3:59", которых в
+         * выводе не бывает: измеренная ширина оказывалась меньше
+         * фактической, правый блок обрезался рамкой ("Full" съедало
+         * почти целиком). */
+        const char *samples[] = { "100%", " 90%", " 80%", " No",
+                                  " battery", " Full", "00:00", "99:59",
+                                  NULL };
         int i;
 
         for (i = 0; samples[i]; i++) {
