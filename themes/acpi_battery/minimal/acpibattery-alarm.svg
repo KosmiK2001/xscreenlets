@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- minimal theme, индикатор низкого заряда. Красный, чтобы аларм
+     читался на тёмном корпусе: в теме green ради этого приходилось
+     рисовать желобку вчетверо темнее. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="18"
+     viewBox="0 0 60 18">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF9A8B"/>
+      <stop offset="1" stop-color="#E04A33"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="#1A0D0A"/>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="url(#g)"/>
+</svg>

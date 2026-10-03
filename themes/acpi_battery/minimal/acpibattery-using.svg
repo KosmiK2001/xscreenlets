@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- minimal theme, индикатор разряда.
+     Рисуется на всю ширину 60 (= 76 - 2*AB_IND_INSET_X) СПЕЦИАЛЬНО:
+     acpi_battery.c обрезает его клипом по реальному проценту.
+
+     Тёмная желобка под заливкой обязательна: корпус батарейки тёмный
+     (#2A2E33), и светлая заливка на нём без подложки не читалась бы. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="18"
+     viewBox="0 0 60 18">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8FD9FF"/>
+      <stop offset="1" stop-color="#3FA9E8"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="#10151A"/>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="url(#g)"/>
+</svg>

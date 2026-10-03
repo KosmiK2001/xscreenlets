@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- minimal theme, индикатор зарядки. Ширина во всю 60 px: длину задаёт
+     клип в acpi_battery.c по проценту. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="18"
+     viewBox="0 0 60 18">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B7E98F"/>
+      <stop offset="1" stop-color="#6FBF47"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="#10150D"/>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="url(#g)"/>
+</svg>

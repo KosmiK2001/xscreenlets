@@ -122,6 +122,11 @@ typedef struct {
      * раньше). Задаётся в Properties, хранится в конфиге ключом "font",
      * тем же способом, что в memory_monitor/cpu_monitor. */
     char        *font;
+    /* Тема объявила, что числовые строки не нужны (тема minimal).
+     * Ставится по файлу-маркеру no-text в каталоге темы, а не
+     * отдельной галочкой: «только батарейка» - это свойство самой темы,
+     * и переключение темы должно менять и его. */
+    gboolean     no_text;
 
     /* Третья строка: состояние сети и имя источника.
      *
@@ -575,8 +580,17 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
                                              theme_name);
 
         if (theme_dir && api->theme_load(p, theme_dir)) {
+            /* Файл-маркер no-text в каталоге темы означает «не рисовать
+             * числа». Именно файл, а не имя темы: тогда любой applet,
+             * которому нужна та же тема без цифр, работает без правок
+             * кода, и тема не тащит за собой список исключений. */
+            char *marker = g_build_filename(theme_dir, "no-text", NULL);
+
+            st->no_text = g_file_test(marker, G_FILE_TEST_EXISTS);
+            g_free(marker);
             if (xs_core_is_debug())
-                api->log("acpi_battery: theme loaded from %s", theme_dir);
+                api->log("acpi_battery: theme loaded from %s%s",
+                         theme_dir, st->no_text ? " (no-text)" : "");
         } else if (xs_core_is_debug()) {
             api->log("acpi_battery: theme '%s' not found, text only",
                      theme_name);
@@ -915,8 +929,10 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     /* Сколько строк реально рисуется - от этого зависит и нужная высота,
      * и вертикальное выравнивание. */
     rows = 0;
-    if (st->show_percent) rows++;
-    if (st->show_time)    rows++;
+    if (!st->no_text) {
+        if (st->show_percent) rows++;
+        if (st->show_time)    rows++;
+    }
     /* Третья строка считается, только если в ней есть что показать.
      * Пустую строку не резервируем: иначе applet без сети (сервер)
      * получил бы лишнюю высоту с пустым местом внизу. */
@@ -945,9 +961,17 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
      * подрастёт ОДИН раз. Это лучше, чем постоянная дыра: блок при
      * каждом тике не прыгает, растёт только окно и только в момент
      * смены источника. */
-    g->need_w = pad + content_gap + g->body_w + gap + g->text_w + pad;
+    /* Без текста (тема minimal) блока не существует: ширина окна - это
+     * только корпус с полями. Иначе окно осталось бы прежней ширины и
+     * батарейка стояла бы слева в пустом поле, то есть ровно то, от чего
+     * тема minimal и избавляет. */
+    g->need_w = st->no_text
+                    ? pad + content_gap + g->body_w + pad
+                    : pad + content_gap + g->body_w + gap + g->text_w + pad;
     g->need_h = 2 * pad +
                 MAX(g->body_h, rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP);
+    /* Без текста блок текста не резервирует высоту: нужна ровно высота
+     * корпуса, иначе окно было бы выше батарейки пустым полем. */
 
     /* Ниже минимума раскладка считается от минимума: иначе текст уехал бы
      * в отрицательные координации и пропал совсем. */
@@ -1116,7 +1140,13 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 
     /* ascent передаётся в ab_text: тот сдвигает baseline от верха строки,
      * иначе текст уезжает вниз и строки слипаются. */
-    if (no_battery) {
+    if (st->no_text) {
+        /* Тема minimal: только батарейка, без чисел. Ни одна строка не
+         * рисуется - ни процент, ни время, ни имя источника, ни "No
+         * battery". Состояние всё равно читается и индикатор по
+         * проценту обрезается, то есть applet остаётся информативным
+         * ровно настолько, насколько позволяет сама картинка. */
+    } else if (no_battery) {
         ab_text(st, cr, "No", g.text_x, g.text_y_percent, FALSE,
                 g.ascent, g.scale);
         ab_text(st, cr, "battery", g.text_x, g.text_y_time, FALSE,
