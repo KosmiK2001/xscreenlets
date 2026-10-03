@@ -281,11 +281,17 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     const char *indicator = NULL;
     gboolean no_battery;
 
-    /* Порядок как в оригинале: фон, корпус, индикатор, текст. */
+    /* Порядок как в оригинале: фон, корпус, индикатор, текст.
+     *
+     * Именно theme_draw_full, а НЕ theme_draw: theme_draw подставляет
+     * высоту, равную ширине, то есть для окна 100x50 просит тему
+     * нарисовать в квадрате 100x100. Тема натурального размера
+     * 98x50 растягивалась вдвое по вертикали, и нижняя половина
+     * батарейки уезжала за край окна и обрезалась. */
     if (xs_core_theme_has(p, "acpibattery-bg"))
-        api->theme_draw(p, cr, "acpibattery-bg", 0, 0, w);
+        api->theme_draw_full(p, cr, "acpibattery-bg", 0, 0, w, h);
     if (xs_core_theme_has(p, "acpibattery-battery"))
-        api->theme_draw(p, cr, "acpibattery-battery", 0, 0, w);
+        api->theme_draw_full(p, cr, "acpibattery-battery", 0, 0, w, h);
 
     no_battery = (!st->battery ||
                   st->battery->state == ACPI_BATTERY_NOT_PRESENT);
@@ -305,13 +311,25 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         indicator = "acpibattery-using";
     }
     if (indicator && xs_core_theme_has(p, indicator))
-        api->theme_draw(p, cr, indicator, 0, 0, w);
+        api->theme_draw_full(p, cr, indicator, 0, 0, w, h);
 
     /* Клип по окну: при крупном шрифте текст вылезет за рамку, а окно
      * непрозрачное, и текст зарисуется поверх соседних апплетов. */
     cairo_save(cr);
     cairo_rectangle(cr, 0, 0, w, h);
     cairo_clip(cr);
+
+    /* Блик "acpibattery-glass" рисуется ПОСЛЕ текста - так в оригинале
+     * (ACPIBatteryScreenlet.py: "draw glass (if theme available)" в
+     * конце on_draw). Пропускали мы его, поэтому батарейка выглядела
+     * плоской: оставался только серый корпус с полоской индикатора.
+     *
+     * Рисуем прямо в cr, клип по окну выше уже установлен - так элемент
+     * попадает в ту же поверхность, что и всё остальное. Создавать
+     * cairo_create(cr) нельзя: cairo_create() принимает ПОВЕРХНОСТЬ,
+     * а не контекст, и такая попытка не компилируется. */
+    if (xs_core_theme_has(p, "acpibattery-glass"))
+        api->theme_draw_full(p, cr, "acpibattery-glass", 0, 0, w, h);
 
     if (no_battery) {
         ab_text(st, cr, " No", AB_TEXT_X, AB_TEXT_Y_PERCENT, FALSE);
