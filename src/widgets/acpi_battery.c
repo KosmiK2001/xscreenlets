@@ -118,6 +118,10 @@ typedef struct {
     char        *percent_text;
     gboolean low;            /* заряд ниже порога */
     GtkWidget   *widget;         /* окно для gtk_widget_create_pango_layout */
+    /* Описание шрифта текста (NULL = брать из контекста виджета, как
+     * раньше). Задаётся в Properties, хранится в конфиге ключом "font",
+     * тем же способом, что в memory_monitor/cpu_monitor. */
+    char        *font;
 
     /* Третья строка: состояние сети и имя источника.
      *
@@ -302,14 +306,33 @@ static void ab_poll(AbState *st)
  * Берём описание шрифта из контекста виджета и умножаем кегль, а не
  * задаём свой шрифт целиком: описание виджета уже содержит семейство,
  * начертание и язык, и подмена испортила бы внешний вид. */
-static PangoFontDescription *ab_font_scaled(GtkWidget *w, double scale)
+static PangoFontDescription *ab_font_scaled(AbState *st, double scale)
 {
-    PangoContext *pc = gtk_widget_get_pango_context(w);
+    PangoContext *pc;
     PangoFontDescription *base, *out;
     gint size;
 
+    if (!st || !st->widget)
+        return pango_font_description_from_string("Sans 10");
+    pc = gtk_widget_get_pango_context(st->widget);
     if (!pc)
         return pango_font_description_from_string("Sans 10");
+
+    /* Заданный в настройках шрифт имеет приоритет над системным.
+     * Отступать к контексту виджета нельзя: семейство и начертание из
+     * настроек должны сохраняться, а не подменяться темой рабочего
+     * стола. NULL означает "настройки нет" - это исходное поведение. */
+    if (st->font) {
+        out = pango_font_description_from_string(st->font);
+        if (out && pango_font_description_get_size(out) > 0) {
+            size = pango_font_description_get_size(out);
+            pango_font_description_set_size(out,
+                                           (gint)(size * scale));
+            return out;
+        }
+        if (out)
+            pango_font_description_free(out);
+    }
 
     base = pango_context_get_font_description(pc);
     out = pango_font_description_copy(base);
@@ -327,9 +350,10 @@ static PangoFontDescription *ab_font_scaled(GtkWidget *w, double scale)
  * cairo_move_to() ВЕРХ строки, а pango_cairo_show_layout()
  * позиционирует от BASELINE. Текст уезжал вниз на ascent, и строки
  * наезжали друг на друга - это и было «странное» позиционирование. */
-static int ab_text_metrics(GtkWidget *w, double scale, int *out_ascent)
+static int ab_text_metrics(AbState *st, double scale, int *out_ascent)
 {
-    PangoContext *pc = gtk_widget_get_pango_context(w);
+    PangoContext *pc = (st && st->widget)
+                         ? gtk_widget_get_pango_context(st->widget) : NULL;
     PangoFontDescription *desc;
     PangoFontMetrics *fm;
     int h, ascent;
@@ -337,7 +361,7 @@ static int ab_text_metrics(GtkWidget *w, double scale, int *out_ascent)
     if (!pc)
         pc = pango_cairo_create_context(NULL);
 
-    desc = ab_font_scaled(w, scale);
+    desc = ab_font_scaled(st, scale);
     fm = pango_context_get_metrics(pc, desc, pango_language_get_default());
     ascent = pango_font_metrics_get_ascent(fm) / PANGO_SCALE;
     h = (pango_font_metrics_get_ascent(fm) +
@@ -377,7 +401,7 @@ static void ab_text(AbState *st, cairo_t *cr, const char *text,
         return;
 
     layout = gtk_widget_create_pango_layout(st->widget, text);
-    desc = ab_font_scaled(st->widget, scale);
+    desc = ab_font_scaled(st, scale);
     pango_layout_set_font_description(layout, desc);
 
     /* ink.y — где Pango хочет верх глифов относительно текущей точки
@@ -494,6 +518,10 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
     /* 0 по умолчанию, как в disk_monitor: скругление срезает углы окна,
      * поэтому включать его всем без запроса нельзя. */
     st->corner_radius    = CLAMP(api->conf_int(kf, p->name, "corner_radius", 0), 0, 200);
+    /* Шрифт текста. conf_str возвращает строку, которой нужно владеть:
+     * core не копирует результат. NULL - настройки нет, тогда шрифт берётся
+     * из контекста виджета, как и до появления этого пункта. */
+    st->font = api->conf_str(kf, p->name, "font", NULL);
     ab_clamp(st);
 
     /* scale читаем ДО make_window: окно должно создаться уже нужного
@@ -764,7 +792,7 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     PangoFontDescription *desc;
 
     g->scale = (st->scale > 0.0) ? st->scale : 1.0;
-    g->line_h = ab_text_metrics(g->widget, g->scale, &g->ascent);
+    g->line_h = ab_text_metrics(st, g->scale, &g->ascent);
 
     /* Все размеры темы умножаем на scale. Считаем в макросах (натуральный
      * размер темы green) и округляем, но НЕ обрезаем в ноль: при scale
@@ -784,7 +812,7 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
      * " 90%" ширина разная, и правый край был бы то на месте, то нет.
      * Ширины берём у того же масштабированного шрифта, которым рисуем. */
     g->text_w = 0;
-    desc = ab_font_scaled(g->widget, g->scale);
+    desc = ab_font_scaled(st, g->scale);
     {
         /* Строки-примеры ДОЛЖНЫ совпадать с тем, что реально рисуется в
          * draw(): там везде ведущий пробел - " Full", " No",
@@ -1060,6 +1088,7 @@ static void ab_shutdown(XsPlugin *p)
     g_free(st->time_text);
     g_free(st->percent_text);
     g_free(st->source_text);
+    g_free(st->font);
     g_free(st);
     p->priv = NULL;
 }
@@ -1170,6 +1199,46 @@ static GtkWidget *ab_bool_prop(GtkBox *box, XsPlugin *p, const char *key,
     return cb;
 }
 
+/* Выбор шрифта из Properties.
+ *
+ * Шрифт пишется прямо в конфиг, минуя ab_config_changed: там ключи
+ * обрабатываются как целые числа, а здесь строка. Клавиатурный фокус
+ * выставляется на виджет - иначе после выбора шрифта Properties теряет
+ * клавиатуру и следующий Tab уходит в никуда (то же в memory_monitor). */
+static void ab_font_set(GtkFontButton *button, gpointer data)
+{
+    XsPlugin *p = data;
+    AbState *st = p ? p->priv : NULL;
+    GKeyFile *kf;
+    const char *value;
+
+    if (!st)
+        return;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    value = gtk_font_button_get_font_name(button);
+#pragma GCC diagnostic pop
+
+    g_free(st->font);
+    st->font = g_strdup(value);
+
+    /* Метрики текста зависят от шрифта, поэтому пересчитываем минимум
+     * окна: с новым кеглем содержимое может стать шире, и без пересчёта
+     * applet остался бы со старым размером и обрезанным текстом. */
+    st->min_width  = 0;
+    st->min_height = 0;
+
+    kf = xs_core_plugin_conf(p->name);
+    if (kf) {
+        if (value)
+            g_key_file_set_string(kf, p->name, "font", value);
+        else
+            g_key_file_remove_key(kf, p->name, "font", NULL);
+        xs_core_plugin_conf_flush(p->name);
+    }
+    gtk_widget_queue_draw(p->win);
+}
+
 static void ab_properties(XsPlugin *p, GtkNotebook *nb)
 {
     AbState *st = p->priv;
@@ -1212,6 +1281,19 @@ static void ab_properties(XsPlugin *p, GtkNotebook *nb)
     ab_int_prop(GTK_BOX(page), p, "alarm_threshold", "Low battery threshold (%)",
                 "Charge percent at or below which the alarm colour is used",
                 st->alarm_threshold, 0, 100);
+    /* Шрифт текста: процент, время, третья строка. Кегль из настройки
+     * домножается на scale, поэтому Size -> N % продолжает работать и
+     * увеличивает текст вместе с картинкой. Пустое значение = шрифт темы
+     * рабочего стола, это поведение по умолчанию. */
+    {
+        GtkWidget *fw = xs_prop_add_font(GTK_BOX(page), "Text font",
+                                         "Font of percentage, time and "
+                                         "source line. Empty means the "
+                                         "desktop theme font.",
+                                         st->font);
+        g_signal_connect(fw, "font-set", G_CALLBACK(ab_font_set), p);
+    }
+
     /* Радиус углов окна в пикселях, 0 = прямые углы. Влияет только на форму
      * окна, тема (acpibattery-bg) продолжает рисовать рамку как умеет. */
     ab_int_prop(GTK_BOX(page), p, "corner_radius", "Corner radius",
