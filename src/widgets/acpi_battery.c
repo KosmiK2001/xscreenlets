@@ -29,6 +29,7 @@
 #include <gtk/gtk.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "xs_api.h"
 #include "common.h"
@@ -120,6 +121,20 @@ typedef struct {
      * ab_apply_scale): Properties и Size-меню пишут scale туда напрямую,
      * минуя нас, поэтому значение перечитывается на каждом тике. */
     double scale;
+
+    /* Скругление углов окна. Скругление - это не элемент темы, а свойство
+     * окна, поэтому его нет ни в одном ассете acpi_battery-*: рамку рисует
+     * тема (acpibattery-bg), а форму окна задаём здесь.
+     *
+     * По умолчанию 0, как в disk_monitor: ставить скругление всем по
+     * умлению нельзя, потому что углы непрозрачного окна срезаются по
+     * shape-маске и часть окна просто перестаёт существовать.
+     *
+     * shape_* - последнее (радиус,w,h), отправленное X-серверу. Вызов
+     * shape не бесплатный, поэтому при неизменных значениях его повторять
+     * не надо. */
+    int corner_radius;
+    int shape_radius, shape_w, shape_h;
 } AbState;
 
 static void ab_set_text(char **dst, char *value)
@@ -416,6 +431,9 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
     st->alarm_threshold = api->conf_int(kf, p->name, "alarm_threshold", AB_DEFAULT_ALARM);
     st->show_percent    = api->conf_int(kf, p->name, "show_percent", 1) != 0;
     st->show_time       = api->conf_int(kf, p->name, "show_time", 1) != 0;
+    /* 0 по умолчанию, как в disk_monitor: скругление срезает углы окна,
+     * поэтому включать его всем без запроса нельзя. */
+    st->corner_radius    = CLAMP(api->conf_int(kf, p->name, "corner_radius", 0), 0, 200);
     ab_clamp(st);
 
     /* scale читаем ДО make_window: окно должно создаться уже нужного
@@ -552,6 +570,134 @@ static void ab_draw_indicator(XsPlugin *p, cairo_t *cr, const char *element,
  *
  * Ширина блока = AB_BODY_W + AB_GAP + текст; берётся по вписыванию в
  * окно, при нехватке места батарейка сжимается. */
+/* Радиус скругления из конфига: отрицательное значение в конфиге не должно
+ * превращаться в ошибку shape-маски, поэтому всё, что не положительное,
+ * трактуется как «без скругления». */
+static double ab_corner_radius_value(int value)
+{
+    return value > 0 ? (double)value : 0.0;
+}
+
+static gboolean ab_corner_radius_is_rounded(double radius)
+{
+    return radius > 0.5;
+}
+
+/* Регион со скруглёнными углами для shape-маски окна.
+ *
+ * Считается по той же формуле, что dm_rounded_region() в disk_monitor и
+ * sensor_rounded_region() в sensors, - дуги срезаются построчно через
+ * floor(). Совпадение с соседними апплетами нужно по двум причинам:
+ * одинаковый corner_radius обязан давать одинаковый на вид срез, иначе
+ * рядом стоящие апплеты будут выглядеть по-разному.
+ *
+ * floor() здесь принципиален: он никогда не срезает глубже настоящей
+ * дуги, поэтому в углу остаётся пиксель, а не дырка до фона. */
+static cairo_region_t *ab_rounded_region(int width, int height, int radius)
+{
+    const double r = ab_corner_radius_value(radius);
+    cairo_region_t *region;
+    cairo_rectangle_int_t box;
+    int scaled;
+
+    if (width <= 0 || height <= 0)
+        return NULL;
+    if (!ab_corner_radius_is_rounded(r))
+        return NULL;
+
+    scaled = (int)MIN(r, MIN(width, height) / 2.0);
+    region = cairo_region_create();
+    if (!region)
+        return NULL;
+
+    /* Идём по строкам и срезаем четыре угла. floor() принципиален: он не
+     * срезает глубже настоящей дуги, поэтому в углу остаётся пиксель. */
+    for (int y = 0; y < height; y++) {
+        int cut = 0;
+        double dy;
+
+        if (y < scaled)
+            dy = scaled - y;
+        else if (y >= height - scaled)
+            dy = (double)(y - (height - scaled));
+        else
+            dy = 0.0;
+
+        if (dy > 0.0) {
+            double t = scaled * scaled - dy * dy;
+            if (t < 0.0)
+                t = 0.0;
+            cut = (int)floor(scaled - sqrt(t));
+        }
+        box.x = cut;
+        box.y = y;
+        box.width = width - 2 * cut;
+        box.height = 1;
+        if (box.width > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+    return region;
+}
+
+/* Контур скруглённого окна в cr как путь (не заливка).
+ *
+ * Это НЕ то же, что shape-маска: маска вырезает углы у X-окна, а этот путь
+ * нужен, чтобы содержимое не рисовалось под срез. Без него текст и корпус
+ * батарейки остаются в углах, которые маска уже съела, и выглядит это как
+ * обрывок картинки на прозрачном фоне. */
+static void ab_rounded_path(cairo_t *cr, int width, int height, int radius)
+{
+    /* В отступ на пиксель: маска режет ровно по краю окна, поэтому контур,
+     * проведённый ПО краю, теряет половину обводки под срез. */
+    const double inset = 1.0;
+    double w = width - 2 * inset, h = height - 2 * inset;
+    double r = ab_corner_radius_value(radius);
+
+    if (w <= 0 || h <= 0) {
+        cairo_rectangle(cr, 0, 0, width, height);
+        return;
+    }
+    if (!ab_corner_radius_is_rounded(r)) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    r = MIN(r, MIN(w, h) / 2.0);
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+    cairo_close_path(cr);
+}
+
+/* Применить форму окна к X-серверу.
+ *
+ * Именно gdk_window_shape_combine_region(), а не его близнец
+ * input_shape_: input-форма влияет только на то, какие пиксели считаются
+ * кликабельными, но продолжает рисоваться. Нужна shape, чтобы угловые
+ * пиксели реально перестали существовать. */
+static void ab_apply_shape(AbState *st, XsPlugin *p, int w, int h)
+{
+    GdkWindow *window;
+    cairo_region_t *region;
+
+    if (!st || !p || !p->win || w <= 0 || h <= 0)
+        return;
+    if (st->shape_radius == st->corner_radius &&
+        st->shape_w == w && st->shape_h == h)
+        return;
+    window = gtk_widget_get_window(p->win);
+    if (!window)
+        return;
+    region = ab_rounded_region(w, h, st->corner_radius);
+    gdk_window_shape_combine_region(window, region, 0, 0);
+    if (region)
+        cairo_region_destroy(region);
+    st->shape_radius = st->corner_radius;
+    st->shape_w = w;
+    st->shape_h = h;
+}
+
 static void ab_layout(AbState *st, int w, int h, AbGeom *g)
 {
     int rows, pad, gap;
@@ -701,6 +847,8 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         ab_layout(st, w, h, &g);
     }
 
+    ab_apply_shape(st, p, w, h);
+
     /* Порядок как в оригинале: фон, корпус, индикатор, блик, текст.
      *
      * Именно theme_draw_full, а НЕ theme_draw: theme_draw подставляет
@@ -738,8 +886,17 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     /* Клип по окну: при крупном шрифте текст вылезет за рамку, а окно
      * непрозрачное, и текст зарисуется поверх соседних апплетов. */
     cairo_save(cr);
-    cairo_rectangle(cr, 0, 0, w, h);
-    cairo_clip(cr);
+    if (ab_corner_radius_is_rounded(ab_corner_radius_value(st->corner_radius))) {
+        /* Клип по дуге, а не по прямоугольнику: маска уже срезала углы у
+         * окна, но содержимое продолжает рисоваться по всему прямоугольнику
+         * и вылезает под срез. Контур по дуге держит текст и корпус внутри
+         * видимой области. */
+        ab_rounded_path(cr, w, h, st->corner_radius);
+        cairo_clip(cr);
+    } else {
+        cairo_rectangle(cr, 0, 0, w, h);
+        cairo_clip(cr);
+    }
 
     /* Блик ложится на корпус батарейки, поэтому рисуется по её
      * координатам, а не на всё окно. В оригинале он рисовался
@@ -851,6 +1008,15 @@ static void ab_int_changed(GtkSpinButton *sb, gpointer data)
         gtk_widget_queue_draw(p->win);
         return;
     }
+    if (!strcmp(key, "corner_radius")) {
+        st->corner_radius = v;
+        /* shape_* сбрасываем, иначе ab_apply_shape() решит, что форма не
+         * менялась, и не отправит новую маску в X. */
+        st->shape_radius = -1;
+        ab_save_int(p, key, v);
+        gtk_widget_queue_draw(p->win);
+        return;
+    }
     ab_save_int(p, key, v);
 }
 
@@ -930,6 +1096,11 @@ static void ab_properties(XsPlugin *p, GtkNotebook *nb)
     ab_int_prop(GTK_BOX(page), p, "alarm_threshold", "Low battery threshold (%)",
                 "Charge percent at or below which the alarm colour is used",
                 st->alarm_threshold, 0, 100);
+    /* Радиус углов окна в пикселях, 0 = прямые углы. Влияет только на форму
+     * окна, тема (acpibattery-bg) продолжает рисовать рамку как умеет. */
+    ab_int_prop(GTK_BOX(page), p, "corner_radius", "Corner radius",
+                "Corner rounding in pixels; 0 keeps square corners",
+                st->corner_radius, 0, 200);
 
     ab_bool_prop(GTK_BOX(page), p, "show_percent", _("Show percentage"),
                  "Display charge percent", st->show_percent);
