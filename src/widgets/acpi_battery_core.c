@@ -166,8 +166,35 @@ static void apply_battery_quirks(AcpiBattery *bat)
 
     /* «Заряжена» определяем по порогу, а не по status: батареи очень часто
      * пишут discharging даже при полном заряде (зарядка отключилась по
-     * порогу заряда в BIOS), и UPower принудительно показывает Full. */
-    full_charge_claimed = (bat->percent >= ACPI_BATTERY_FULLY_CHARGED_PCT);
+     * порогу заряда в BIOS), и UPower принудительно показывает Full.
+     *
+     * НО порог 90 % нельзя применять при разряде. Раньше здесь стояло
+     * просто percent >= 90, и ноутбук на 90 % показывал "Full" вместо
+     * времени: батарея отключена от сетки, status=Discharging, заряд
+     * тает - а applet писал, что батарея полная. Порог означает «вот
+     * скоро полностью», а не «заряда нет».
+     *
+     * Поэтому: 100 % - всегда Full, а 90..99 % - только когда разряда
+     * фактически нет. Ток > 0 означает, что батарея отдаёт энергию, и
+     * время до разряда полезнее, чем слово Full. */
+    if (bat->percent >= 100) {
+        bat->state = ACPI_BATTERY_FULL;
+        return;
+    }
+    if (bat->percent < ACPI_BATTERY_FULLY_CHARGED_PCT)
+        return;
+
+    /* Разряда фактически нет в двух случаях: батарея не пишет
+     * Discharging, либо ток не положительный. Второе условие важно для
+     * батарей без файла current_now: там current_now == -1 со
+     * смыслом "файла нет" (см. battery_read), и это НЕ повод объявлять
+     * разряд - иначе applet начал бы считать время у батареи, которая
+     * на самом деле стоит на зарядке.
+     *
+     * Что отсекается: status=Discharging при current_now > 0. Это ровно
+     * тот случай, где 90 % означало "Full" вместо времени. */
+    full_charge_claimed = (bat->state != ACPI_BATTERY_DISCHARGING ||
+                           bat->current_now <= 0);
     if (full_charge_claimed)
         bat->state = ACPI_BATTERY_FULL;
 }

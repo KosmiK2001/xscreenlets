@@ -77,11 +77,30 @@ printf 'Battery\n'      > "$F/q7/BAT0/type"
 printf 'Unknown\n'      > "$F/q7/BAT0/status"
 printf 'no\n'           > "$F/q7/BAT0/present"
 
-# q8: Unknown при 92 % — по UPower это заряжена
+# q8: Unknown при 100 % и нулевом токе — заряжена
 mkdir -p "$F/q8/BAT0"
 printf 'Battery\n'      > "$F/q8/BAT0/type"
 printf 'Unknown\n'      > "$F/q8/BAT0/status"
-printf '92\n'           > "$F/q8/BAT0/capacity"
+printf '100\n'          > "$F/q8/BAT0/capacity"
+printf '0\n'            > "$F/q8/BAT0/current_now"
+
+# q9: 90 % при разряде. Регресс: порог 90 % раньше объявлял батарею
+# полной, и applet писал "Full" вместо времени на отключённой от сетки
+# батарее. Здесь status=Discharging и ток > 0 — идёт разряд, значит
+# время до разряда полезнее, чем слово Full.
+mkdir -p "$F/q9/BAT0"
+printf 'Battery\n'      > "$F/q9/BAT0/type"
+printf 'Discharging\n'  > "$F/q9/BAT0/status"
+printf '90\n'           > "$F/q9/BAT0/capacity"
+printf '1500000\n'      > "$F/q9/BAT0/current_now"
+
+# q10: 90 % на зарядке при нулевом токе — зарядка упёрлась в порог BIOS,
+# разряда нет, Full оправдан (регресс на прежнее поведение q8).
+mkdir -p "$F/q10/BAT0"
+printf 'Battery\n'      > "$F/q10/BAT0/type"
+printf 'Full\n'         > "$F/q10/BAT0/status"
+printf '90\n'           > "$F/q10/BAT0/capacity"
+printf '0\n'            > "$F/q10/BAT0/current_now"
 
 gcc -O0 -g3 -Wall -Wextra -I"$B/src/widgets" $(pkg-config --cflags glib-2.0) \
     "$B/tests/test_acpi_battery.c" "$B/src/widgets/acpi_battery_core.c" \

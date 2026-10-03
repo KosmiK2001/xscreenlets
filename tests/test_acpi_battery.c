@@ -238,8 +238,7 @@ int main(int argc, char **argv)
         acpi_battery_list_free(list); g_free(root);
     }
 
-    /* Q8: Unknown при 92 % -> заряжена. Батарея под 100 % и не пишет
-     * ничего внятное: UPower считает это полной. */
+    /* Q8: Unknown при 100 % -> заряжена. */
     {
         char *root = g_build_filename(root_base, "q8", NULL);
         list = acpi_battery_list_read(root);
@@ -247,6 +246,35 @@ int main(int argc, char **argv)
         if (!bat) { printf("  FAIL q8 не прочитан\n"); failed++; }
         else {
             check_state("q8 -> заряжена", bat->state, ACPI_BATTERY_FULL);
+        }
+        acpi_battery_list_free(list); g_free(root);
+    }
+
+    /* Q9: 90 % при разряде -> НЕ заряжена. Регресс на "Full" вместо
+     * времени: 90 % это порог "скоро полностью", а не "заряда нет".
+     * При status=Discharging и токе > 0 идёт разряд, значит applet
+     * обязан показывать время до разряда. */
+    {
+        char *root = g_build_filename(root_base, "q9", NULL);
+        list = acpi_battery_list_read(root);
+        bat = only(list);
+        if (!bat) { printf("  FAIL q9 не прочитан\n"); failed++; }
+        else {
+            check_state("q9 -> разряд, не Full", bat->state,
+                        ACPI_BATTERY_DISCHARGING);
+        }
+        acpi_battery_list_free(list); g_free(root);
+    }
+
+    /* Q10: 90 % на зарядке при нулевом токе -> заряжена. Зарядка упёрлась
+     * в порог BIOS, разряда нет: Full оправдан. */
+    {
+        char *root = g_build_filename(root_base, "q10", NULL);
+        list = acpi_battery_list_read(root);
+        bat = only(list);
+        if (!bat) { printf("  FAIL q10 не прочитан\n"); failed++; }
+        else {
+            check_state("q10 -> заряжена", bat->state, ACPI_BATTERY_FULL);
         }
         acpi_battery_list_free(list); g_free(root);
     }
