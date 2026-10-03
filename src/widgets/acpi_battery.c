@@ -99,6 +99,10 @@ typedef struct {
     /* Текст прижат по ПРАВОМУ краю: text_x считается от w - ширина. */
     int text_x, text_y_percent, text_y_time, text_y_source, text_y_only;
     int line_h, ascent, text_w;
+    /* Ширина блока по ПОЛНОМУ списку строк. Влияет только на
+     * need_w (размер окна), в отличие от text_w, по которому
+     * блок прижимается вправо. */
+    int text_w_full;
     /* Сколько места нужно окну, чтобы всё влезло без обрезания. */
     int need_w, need_h;
 } AbGeom;
@@ -810,25 +814,42 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     /* Ширина текста меряется по САМОЙ ДЛИННОЙ из возможных строк, а не
      * по текущей. Иначе прижатый вправо текст прыгал бы: у "Full" и
      * " 90%" ширина разная, и правый край был бы то на месте, то нет.
-     * Ширины берём у того же масштабированного шрифта, которым рисуем. */
+     * Ширины берём у того же масштабированного шрифта, которым рисуем.
+     *
+     * ВАЖНО: text_w - это ширина блока для прижатия вправо, а need_w
+     * ниже считается по ПОЛНОМУ списку строк, включая длинные имена
+     * вроде hidpp_battery_0. Это два разных числа, и путать их нельзя.
+     *
+     * Раньше в samples стоял и "   hidpp_battery_0", и из него брался
+     * text_w. На ноутбуке рисуется " AC BAT0" - 30 px, а текст
+     * прижимался вправо по невидимой строке в 109 px. Измерением на
+     * ноуте: окно 261, текст кончался на x=180, справа 80 px пустоты.
+     * Правило раскладки ("правый блок прижат вправо") при этом
+     * соблюдалось формально, а выглядело как дыра в апплете.
+     *
+     * Теперь text_w берётся по реально возможным строкам ЭТОЙ
+     * конфигурации, а длинное имя мыши влияет только на need_w, то есть
+     * на размер окна. Прыгает при смене источника не блок, а окно, и
+     * это заметно меньше, чем дыра под каждой строкой.
+     *
+     * Строки-примеры ДОЛЖНЫ совпадать с тем, что реально рисуется в
+     * draw(): там везде ведущий пробел - " Full", " No", " battery", а
+     * процент и таймер приходят из acpi_battery_format_minutes() как
+     * "%d%%"/"%02d:%02d". Раньше здесь стоял "Full" без пробела и
+     * "3:59", которых в выводе не бывает. */
     g->text_w = 0;
+    g->text_w_full = 0;
     desc = ab_font_scaled(st, g->scale);
     {
-        /* Строки-примеры ДОЛЖНЫ совпадать с тем, что реально рисуется в
-         * draw(): там везде ведущий пробел - " Full", " No",
-         * " battery", а процент и таймер приходят из
-         * acpi_battery_format_minutes() как "%d%%"/"%02d:%02d".
-         * Раньше здесь стоял "Full" без пробела и "3:59", которых в
-         * выводе не бывает: измеренная ширина оказывалась меньше
-         * фактической, правый блок обрезался рамкой ("Full" съедало
-         * почти целиком). */
-        /* " AC BAT0" - реальный вид третьей строки. Ширина берётся по
-         * САМОЙ ДЛИННОЙ строке всех трёх, иначе блок прыгает: при
-         * hidpp_battery_0 в имени больше символов, чем в BAT0. */
+        /* Строки, которые точно рисуются. */
         const char *samples[] = { "100%", " 90%", " 80%", " No",
                                   " battery", " Full", "00:00", "99:59",
-                                  " AC BAT0", "   hidpp_battery_0",
                                   NULL };
+        /* Полный список: он шире samples и влияет только на need_w. */
+        const char *samples_full[] = { "100%", " 90%", " 80%", " No",
+                                       " battery", " Full", "00:00", "99:59",
+                                       " AC BAT0", "   hidpp_battery_0",
+                                       NULL };
         int i;
 
         for (i = 0; samples[i]; i++) {
@@ -841,6 +862,41 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
             g_object_unref(l);
             if (pw > g->text_w)
                 g->text_w = pw;
+        }
+        /* Третья строка добавляется по факту: её имя источника известно
+         * только сейчас, и в samples его быть не может. */
+        if (st->source_text && *st->source_text) {
+            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
+                                                            st->source_text);
+            int pw = 0;
+
+            pango_layout_set_font_description(l, desc);
+            pango_layout_get_pixel_size(l, &pw, NULL);
+            g_object_unref(l);
+            if (pw > g->text_w)
+                g->text_w = pw;
+        }
+        for (i = 0; samples_full[i]; i++) {
+            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
+                                                            samples_full[i]);
+            int pw = 0;
+
+            pango_layout_set_font_description(l, desc);
+            pango_layout_get_pixel_size(l, &pw, NULL);
+            g_object_unref(l);
+            if (pw > g->text_w_full)
+                g->text_w_full = pw;
+        }
+        if (st->source_text && *st->source_text) {
+            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
+                                                            st->source_text);
+            int pw = 0;
+
+            pango_layout_set_font_description(l, desc);
+            pango_layout_get_pixel_size(l, &pw, NULL);
+            g_object_unref(l);
+            if (pw > g->text_w_full)
+                g->text_w_full = pw;
         }
     }
     pango_font_description_free(desc);
@@ -864,7 +920,10 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     /* Слева отступ pad+content_gap, справа только pad: текст по твоему
      * правилу прижат вправо, и увеличение правого поля двигало его
      * от края, где он и должен быть. */
-    g->need_w = pad + content_gap + g->body_w + gap + g->text_w + pad;
+    /* Размер окна резервирует по ПОЛНОМУ списку строк, а блок текста
+     * прижимается вправо по text_w. Иначе окно было бы уже блока при
+     * длинном имени источника и текст обрезался бы рамкой. */
+    g->need_w = pad + content_gap + g->body_w + gap + g->text_w_full + pad;
     g->need_h = 2 * pad +
                 MAX(g->body_h, rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP);
 
