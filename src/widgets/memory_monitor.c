@@ -383,6 +383,19 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
     double text_x;
     int text_width;
 
+    /* Клип по округлому контуру ДО заливки фона.
+     *
+     * Фон заливается прямоугольником на весь размер окна, а маска X-сервера
+     * срезает углы уже после того, как всё нарисовано. Без клипа в углах
+     * остаются пиксели фона, маска их срежет, и получится рваный угол.
+     *
+     * Форму X-окна здесь НЕ применяется: render зовётся из rebuild_cache,
+     * а на первом draw кэш ещё NULL и mm_draw уходит на ранний return, до
+     * render дело не доходит. Форма применяется в mm_draw. */
+    cairo_save(cr);
+    mm_rounded_path(cr, width, height, priv->corner_radius);
+    cairo_clip(cr);
+
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_rgba(cr, priv->background_color[0], priv->background_color[1],
                           priv->background_color[2], priv->background_color[3]);
@@ -672,7 +685,21 @@ static void mm_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
     PrivData *priv = p ? p->priv : NULL;
 
-    if (!priv || !priv->cache)
+    if (!priv)
+        return;
+    /* Форму окна применяем здесь, а не в render.
+     *
+     * Стоило поставить вызов в render - и маска не применялась вовсе: на
+     * первом draw кэш ещё NULL, mm_draw уходит на ранний return, до render
+     * дело не доходит, а кэш перестраивается только при смене размера. То
+     * есть ни при старте, ни при постоянном размере форма считалась бы
+     * ровно ноль раз, и это видно было на сервере как shape из одного
+     * прямоугольника.
+     *
+     * Здесь размеры актуальные, а повторы отсекает кэш формы внутри
+     * mm_apply_shape, так что лишней работы на каждый кадр нет. */
+    mm_apply_shape(priv, p, w, h);
+    if (!priv->cache)
         return;
     if (priv->cache_width != w || priv->cache_height != h) {
         priv->cache_width = w;
