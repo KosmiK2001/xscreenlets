@@ -28,7 +28,12 @@ typedef struct {
     gdouble background_color[4];
     gdouble graph_background_color[4];
     gdouble text_color[4];
+    gdouble graph_border_color[4];
+    /* Рамка ОКНА (не графика). Толщина 0 = без рамки: до этой настройки
+     * applet рамок не рисовал вовсе, и добавлять их принудительно не
+     * правильно. */
     gdouble border_color[4];
+    double border_width;
     gdouble ram_color[4];
     gdouble shared_color[4];
     gdouble buffers_color[4];
@@ -56,7 +61,11 @@ typedef struct {
 static const gdouble mm_default_background[4] = {0.098, 0.098, 0.098, 0.75};
 static const gdouble mm_default_graph_background[4] = {0.04, 0.05, 0.07, 0.92};
 static const gdouble mm_default_text[4] = {1.0, 1.0, 1.0, 1.0};
-static const gdouble mm_default_border[4] = {0.451, 0.451, 0.451, 1.0};
+static const gdouble mm_default_graph_border[4] = {0.451, 0.451, 0.451, 1.0};
+/* Рамка окна по умолчанию - тот же серый, что у process_list (0.62/0.66/0.72
+ * при непрозрачности 1). Alpha именно 1: подложки у рамки нет, кроме фона
+ * applet, и полупрозрачность только съедала контраст. */
+static const gdouble mm_default_border[4] = {0.62, 0.66, 0.72, 1.0};
 static const gdouble mm_default_ram[4] = {0.325, 0.510, 0.729, 1.0};
 static const gdouble mm_default_shared[4] = {0.95, 0.35, 0.55, 1.0};
 static const gdouble mm_default_buffers[4] = {0.95, 0.72, 0.18, 1.0};
@@ -334,6 +343,31 @@ static void mm_rounded_path(cairo_t *cr, int width, int height, int radius)
     cairo_close_path(cr);
 }
 
+/* Контур рамки: округлённый прямоугольник с произвольным отступом и
+ * радиусом. Отдельная функция, потому что clip и обводка требуют разных
+ * пар значений - одними четырьмя cairo_arc() в render это не выразить. */
+static void mm_border_path(cairo_t *cr, int width, int height,
+                           double radius, double inset)
+{
+    double w = width - 2 * inset, h = height - 2 * inset;
+    double r = MIN(radius, MIN(w, h) / 2.0);
+
+    if (w <= 0 || h <= 0) {
+        cairo_rectangle(cr, 0, 0, width, height);
+        return;
+    }
+    if (r <= 0.0) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+    cairo_close_path(cr);
+}
+
 /* Применить форму X-окна. Вызывается из render, где известны фактические
  * размеры окна. */
 static void mm_apply_shape(PrivData *priv, XsPlugin *p, int w, int h)
@@ -480,12 +514,14 @@ static cairo_surface_t *mm_render(PrivData *priv, int width, int height)
         mm_draw_ram_stack(cr, ram_x, ram_y, graph_width, graph_height,
                           priv->ram_history, priv->ram_head,
                           priv->ram_count, ram_colors,
-                          priv->graph_background_color, priv->border_color);
+                          priv->graph_background_color,
+                          priv->graph_border_color);
     }
     mm_draw_graph(cr, ram_x, swap_y, graph_width, graph_height,
                   priv->swap_history, priv->swap_head,
                   priv->swap_count, priv->swap_color,
-                  priv->graph_background_color, priv->border_color);
+                  priv->graph_background_color,
+                  priv->graph_border_color);
 
     pango_layout_set_width(layout, header_width * PANGO_SCALE);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
@@ -570,6 +606,36 @@ done:
     /* Закрываем clip, открытый в начале render. Без restore контекст уедет
      * с балансом save/restore, и следующий draw начнётся с лишним уровнем. */
     cairo_restore(cr);
+
+    /* Рамка окна - ПОСЛЕ закрытия clip, и это не stylistic выбор.
+     *
+     * clip в render построен по контуру с отступом 1 px (mm_rounded_path
+     * отступает внутрь на пиксель, чтобы дуга не уходила под срез маски).
+     * Обводка идёт по контуру с отступом border_width/2. При толщине 1 это
+     * 0.5, то есть обводка целиком ложилась бы в полосу, которую clip
+     * отбрасывает, и рамка не рисовалась бы ВООБЩЕ. Та же ошибка была в
+     * process_list и там же была найдена измерением: при толщине 4 в clip
+     * попадали только 3 пикселя из 4.
+     *
+     * После restore клипа нет, но маска X-сервера по-прежнему режет углы,
+     * поэтому за скругление рамка вылезти не может. */
+    if (priv->border_width > 0.0) {
+        double inset = priv->border_width / 2.0;
+        double r = mm_corner_radius_value(priv->corner_radius);
+
+        if (mm_corner_radius_is_rounded(r) && r > inset)
+            mm_border_path(cr, width, height, r - inset, inset);
+        else
+            cairo_rectangle(cr, inset, inset, width - 2 * inset,
+                            height - 2 * inset);
+        cairo_set_source_rgba(cr, priv->graph_border_color[0],
+                              priv->graph_border_color[1],
+                              priv->graph_border_color[2],
+                              priv->graph_border_color[3]);
+        cairo_set_line_width(cr, priv->border_width);
+        cairo_stroke(cr);
+    }
+
     cairo_destroy(cr);
     cairo_surface_mark_dirty(surface);
     return surface;
@@ -613,7 +679,26 @@ static int mm_init(XsPlugin *p, GKeyFile *kf)
     mm_read_color(priv, "graph_background_color", mm_default_graph_background,
                   priv->graph_background_color);
     mm_read_color(priv, "text_color", mm_default_text, priv->text_color);
+    /* Миграция: border_color раньше означал ЦВЕТ РАМКИ ГРАФИКА, теперь это
+     * цвет рамки окна. Старое значение молча переехало бы в рамку окна и
+     * выглядело бы как «плагин сам перекрасил окно», поэтому при первом
+     * запуске переносим его под новое имя, если нового ключа ещё нет. */
+    if (!g_key_file_has_key(priv->kf, p->name, "graph_border_color", NULL) &&
+        g_key_file_has_key(priv->kf, p->name, "border_color", NULL)) {
+        g_autofree char *old_border = g_key_file_get_string(
+            priv->kf, p->name, "border_color", NULL);
+
+        if (old_border) {
+            g_key_file_set_string(priv->kf, p->name, "graph_border_color",
+                                  old_border);
+            g_key_file_remove_key(priv->kf, p->name, "border_color", NULL);
+        }
+    }
+    mm_read_color(priv, "graph_border_color", mm_default_graph_border,
+                  priv->graph_border_color);
     mm_read_color(priv, "border_color", mm_default_border, priv->border_color);
+    priv->border_width = CLAMP(xs_host_api()->conf_dbl(
+        kf, p->name, "border_width", 0.0), 0.0, 4.0);
     mm_read_color(priv, "ram_color", mm_default_ram, priv->ram_color);
     mm_read_color(priv, "shared_color", mm_default_shared, priv->shared_color);
     mm_read_color(priv, "buffers_color", mm_default_buffers, priv->buffers_color);
@@ -765,6 +850,33 @@ static void mm_int_changed(GtkSpinButton *spin, gpointer data)
     gtk_widget_queue_draw(p->win);
 }
 
+/* Толщина рамки окна из Properties.
+ *
+ * Кэш перестраивается целиком: рамка рисуется в mm_render, а не поверх
+ * готовой surface, поэтому одного queue_draw мало. Форма X-окна при этом
+ * не меняется (она зависит только от corner_radius и габаритов), так что
+ * кэш формы сбрасывать незачем. */
+static void mm_border_width_changed(GtkWidget *widget, gpointer data)
+{
+    XsPlugin *p = data;
+    PrivData *priv = p ? p->priv : NULL;
+    const char *key;
+    gdouble value;
+
+    if (!priv)
+        return;
+    key = g_object_get_data(G_OBJECT(widget), "xs-key");
+    if (!key)
+        return;
+    value = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
+    priv->border_width = CLAMP(value, 0.0, 4.0);
+    g_key_file_set_double(priv->kf, p->name, key, priv->border_width);
+    xs_core_plugin_conf_flush(p->name);
+    mm_rebuild_cache(priv);
+    if (p->win)
+        gtk_widget_queue_draw(p->win);
+}
+
 static void mm_font_set(GtkFontButton *button, gpointer data)
 {
     XsPlugin *p = data;
@@ -803,6 +915,8 @@ static void mm_color_set(GtkColorButton *button, gpointer data)
         target = priv->graph_background_color;
     else if (strcmp(key, "text_color") == 0)
         target = priv->text_color;
+    else if (strcmp(key, "graph_border_color") == 0)
+        target = priv->graph_border_color;
     else if (strcmp(key, "border_color") == 0)
         target = priv->border_color;
     else if (strcmp(key, "ram_color") == 0)
@@ -870,7 +984,23 @@ static void mm_properties(XsPlugin *p, GtkNotebook *notebook)
     mm_add_color(page, p, "graph_background_color", "Graph background",
                  priv->graph_background_color);
     mm_add_color(page, p, "text_color", "Text", priv->text_color);
-    mm_add_color(page, p, "border_color", "Graph border", priv->border_color);
+    mm_add_color(page, p, "graph_border_color", "Graph border",
+                 priv->graph_border_color);
+    mm_add_color(page, p, "border_color", "Frame color", priv->border_color);
+    {
+        /* Ползунок с шагом 1 и нулём цифр: толщина рамки - целое число
+         * пикселей, дробная часть мешает и визуально, и при записи в
+         * конфиг. */
+        GtkWidget *bw = xs_prop_add_float(GTK_BOX(page), "Frame width",
+                                          "Window frame thickness in pixels. "
+                                          "0 = no frame.",
+                                          priv->border_width, 0.0, 4.0, 1.0, 0);
+
+        g_object_set_data_full(G_OBJECT(bw), "xs-key",
+                               g_strdup("border_width"), g_free);
+        g_signal_connect(bw, "value-changed",
+                         G_CALLBACK(mm_border_width_changed), p);
+    }
     mm_add_color(page, p, "ram_color", "RAM user/apps", priv->ram_color);
     mm_add_color(page, p, "shared_color", "RAM shared", priv->shared_color);
     mm_add_color(page, p, "buffers_color", "RAM buffers", priv->buffers_color);
