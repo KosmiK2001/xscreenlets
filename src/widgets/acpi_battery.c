@@ -741,6 +741,15 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         ab_text(st, cr, " battery", g.text_x, g.text_y_time, FALSE,
                 g.ascent, g.scale);
     } else if (st->show_percent && st->show_time) {
+        if (xs_core_is_debug())
+            p->host->log("ab: DBG pct='%s' y=%d | time='%s' y=%d | w=%d h=%d "
+                         "line_h=%d pad=%d ascent=%d need=%dx%d",
+                         st->percent_text ? st->percent_text : "(null)",
+                         g.text_y_percent,
+                         st->time_text ? st->time_text : "(null)",
+                         g.text_y_time, w, h, g.line_h,
+                         (int)(AB_FRAME_PAD * g.scale + 0.5), g.ascent,
+                         g.need_w, g.need_h);
         ab_text(st, cr, st->percent_text, g.text_x, g.text_y_percent,
                 st->low, g.ascent, g.scale);
         ab_text(st, cr, st->time_text, g.text_x, g.text_y_time,
