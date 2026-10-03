@@ -71,6 +71,11 @@ typedef struct {
     gdouble title[4];
     gdouble header[4];
     gdouble text[4];
+    /* Рамка окна: цвет и толщина в пикселях. Толщина 0 = без рамки,
+     * это поведение по умолчанию - до настройки applet вовсе не рисовал
+     * рамки, и добавлять её всем подряд принудительно неправильно. */
+    gdouble border[4];
+    double border_width;
     char *title_font;
     char *row_font;
     GHashTable *previous;            /* pid -> PlProcess baseline */
@@ -117,6 +122,11 @@ static const gdouble pl_accent_default[4] = {
 static const gdouble pl_title_default[4] = {0.75, 0.75, 0.75, 1.0};
 static const gdouble pl_header_default[4] = {1.0, 0.0, 0.0, 1.0};
 static const gdouble pl_text_default[4] = {1.0, 1.0, 1.0, 1.0};
+/* Рамка окна по умолчанию — заметный серый на 70 % непрозрачности.
+ * Непрозрачность меньше единицы потому, что окно applet и так
+ * полупрозрачное (фон 0,0,0,0.2 по умолчанию): плотная рамка на таком
+ * фоне читалась бы рамкой поверх обоев, а не границей самого окна. */
+static const gdouble pl_border_default[4] = {0.55, 0.58, 0.62, 0.7};
 
 static gint64 pl_now_us(void)
 {
@@ -783,8 +793,12 @@ static void pl_format_io(gchar *buffer, gsize size, gint64 bytes_per_sec)
         g_snprintf(buffer, size, "%.1fM", value / (1024.0 * 1024.0));
 }
 
-/* Определение ниже pl_render(), где функция уже используется. */
+/* Определения ниже pl_render(), где они уже используются. */
 static void pl_rounded_path(cairo_t *cr, int width, int height, int radius);
+static void pl_border_path(cairo_t *cr, int width, int height,
+                           double radius, double inset);
+static double pl_corner_radius_value(int value);
+static gboolean pl_corner_radius_is_rounded(double radius);
 
 static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
 {
@@ -945,6 +959,36 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     /* Закрываем clip, открытый в начале render. Без restore контекст
      * уедет с балансом save/restore, и следующий draw начнётся с лишним
      * уровнем - со временем cairo начнёт жаловаться на стек. */
+    /* Рамка окна - последней, поверх содержимого.
+     *
+     * Контур рамки на полпикселя глубже, чем контур clip: дуга маски
+     * режется floor(), то есть никогда не глубже настоящей дуги, и
+     * полпикселя отступа хватает, чтобы обводка целиком осталась в
+     * видимой полосе. На контуре с нулевым отступом половина обводки ушла
+     * бы под срез - так же сделано в disk_monitor.
+     *
+     * Рисуется внутри открытого clip по rounded_path(), поэтому рамка
+     * физически не может вылезти за срезанный угол. */
+    if (priv->border_width > 0.0) {
+        double inset = priv->border_width / 2.0;
+        double r = pl_corner_radius_value(priv->corner_radius);
+
+        cairo_save(cr);
+        if (pl_corner_radius_is_rounded(r) && r > inset) {
+            /* Радиус уменьшается на тот же отступ: иначе дуга обводки
+             * окажется снаружи дуги маски и её срезало бы. */
+            pl_border_path(cr, width, height, r - inset, inset);
+        } else {
+            cairo_rectangle(cr, inset, inset, width - 2 * inset,
+                            height - 2 * inset);
+        }
+        cairo_set_source_rgba(cr, priv->border[0], priv->border[1],
+                              priv->border[2], priv->border[3]);
+        cairo_set_line_width(cr, priv->border_width);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
+
     cairo_restore(cr);
 
     g_object_unref(layout);
@@ -984,6 +1028,8 @@ static gdouble *pl_color_target(PrivData *priv, const char *key)
         return priv->title;
     if (strcmp(key, "header_color") == 0)
         return priv->header;
+    if (strcmp(key, "border_color") == 0)
+        return priv->border;
     return priv->text;
 }
 
@@ -1079,6 +1125,34 @@ static void pl_font_set(GtkFontButton *button, gpointer data)
                           strcmp(key, "title_font") == 0 ?
                           priv->title_font : priv->row_font);
     pl_flush(priv);
+}
+
+/* Толщина рамки из Properties.
+ *
+ * Пишется в конфиг через conf_dbl, поэтому ключ и ползунок разведены
+ * подсказкой, а не одной строкой. Содержимое перерисовывается целиком:
+ * рамка рисуется в pl_render(), а не поверх кэша, поэтому нужен полный
+ * re-render.
+ *
+ * Определение стоит здесь, до определения pl_add_color, и оба они ниже по
+ * файлу, чем pl_properties, где подключаются. */
+static void pl_border_width_changed(GtkWidget *widget, gpointer data)
+{
+    XsPlugin *plugin = data;
+    PrivData *priv = plugin ? plugin->priv : NULL;
+    const char *key;
+    gdouble value;
+
+    if (!priv || !priv->kf)
+        return;
+    key = g_object_get_data(G_OBJECT(widget), "xs-key");
+    if (!key)
+        return;
+    value = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
+    priv->border_width = CLAMP(value, 0.0, 4.0);
+    g_key_file_set_double(priv->kf, plugin->name, key, priv->border_width);
+    xs_core_plugin_conf_flush(plugin->name);
+    pl_rerender(priv);
 }
 
 static void pl_add_color(XsPlugin *plugin, GtkWidget *page, const char *label,
@@ -1237,6 +1311,25 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
      * одинаковый на вид угол у соседних апплетов. */
     pl_add_int(plugin, page, "Corner radius", "corner_radius",
                priv->corner_radius, 0, 200);
+    /* Рамка окна: цвет кнопкой, толщина ползунком. Порядок неудобный по
+     * смыслу (цвет перед толщиной), но добавляется после уже существующих
+     * пунктов, и переставлять их ради cosmetics не хочется. */
+    pl_add_color(plugin, page, "Border color", "border_color",
+                 priv->border);
+    {
+        /* Ползунок с шагом 1 и нулём цифр: толщина рамки - целое число
+         * пикселей, дробная часть тут только мешает и визуально, и при
+         * записи в конфиг. */
+        GtkWidget *bw = xs_prop_add_float(GTK_BOX(page), "Border width",
+                                          "Window border thickness in pixels. "
+                                          "0 = no border.",
+                                          priv->border_width, 0.0, 4.0, 1.0, 0);
+
+        g_object_set_data_full(G_OBJECT(bw), "xs-key", g_strdup("border_width"),
+                               g_free);
+        g_signal_connect(bw, "value-changed",
+                         G_CALLBACK(pl_border_width_changed), plugin);
+    }
     pl_add_font(plugin, page, "Title font", "title_font", priv->title_font);
     pl_add_font(plugin, page, "Row font", "row_font", priv->row_font);
     pl_add_color(plugin, page, "Background", "background_color",
@@ -1258,6 +1351,35 @@ static guint pl_tick(XsPlugin *plugin)
     pl_sample(priv);
     pl_rerender(priv);
     return priv->update_ms;
+}
+
+/* Контур рамки: тот же прямоугольник со скруглением, что и у clip, но
+ * с произвольным отступом внутрь и произвольным радиусом.
+ *
+ * Отдельная функция вместо повторения четырёх cairo_arc() в render: там
+ * нужны две разные пары значений (для clip и для обводки), и держать их
+ * в одном месте значило бы каждый раз вспоминать, какая из них уменьшается
+ * на отступ, а какая нет. */
+static void pl_border_path(cairo_t *cr, int width, int height,
+                           double radius, double inset)
+{
+    double w = width - 2 * inset, h = height - 2 * inset;
+    double r = MIN(radius, MIN(w, h) / 2.0);
+
+    if (w <= 0 || h <= 0) {
+        cairo_rectangle(cr, 0, 0, width, height);
+        return;
+    }
+    if (r <= 0.0) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+    cairo_close_path(cr);
 }
 
 /* Радиус углов из конфига.
@@ -1501,6 +1623,12 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
     pl_read_color(priv, "title_color", pl_title_default, priv->title);
     pl_read_color(priv, "header_color", pl_header_default, priv->header);
     pl_read_color(priv, "text_color", pl_text_default, priv->text);
+    pl_read_color(priv, "border_color", pl_border_default, priv->border);
+    /* Толщина рамки в пикселях, 0 = без рамки. Верхняя граница 4:
+     * толще рамка при окне 322x164 начинает съедать колонки, а не
+     * обрамлять их. */
+    priv->border_width = CLAMP(xs_host_api()->conf_dbl(
+        kf, plugin->name, "border_width", 0.0), 0.0, 4.0);
     priv->previous = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                             NULL, pl_process_free);
     priv->snapshot = g_ptr_array_new_with_free_func(pl_process_free);
@@ -1523,6 +1651,11 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
                            priv->window_width);
     g_key_file_set_integer(kf, plugin->name, "window_height",
                            priv->window_height);
+    g_key_file_set_integer(kf, plugin->name, "corner_radius",
+                           priv->corner_radius);
+    g_key_file_set_double(kf, plugin->name, "border_width",
+                          priv->border_width);
+    pl_save_default_color(priv, "border_color", pl_border_default);
     pl_save_default_string(priv, "title_font", priv->title_font);
     pl_save_default_string(priv, "row_font", priv->row_font);
     pl_save_default_color(priv, "background_color", priv->background);
