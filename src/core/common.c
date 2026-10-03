@@ -3221,7 +3221,6 @@ static void theme_draw_full(XsPlugin *p, cairo_t *cr, const char *element,
 {
     XsThemeItem *it;
     RsvgRectangle viewport;
-    GdkRectangle png_rect;
     double nw = 0.0, nh = 0.0;
 
     if (!p || !cr || !element || width <= 0.0 || height <= 0.0)
@@ -3265,16 +3264,32 @@ static void theme_draw_full(XsPlugin *p, cairo_t *cr, const char *element,
         viewport.height = nh;
         rsvg_handle_render_document(it->u.svg, cr, &viewport, NULL);
     } else {
+        gint pw, ph;
+
         if (!it->u.png)
             return;
-        png_rect.x = (int)x;
-        png_rect.y = (int)y;
-        png_rect.width = (int)width;
-        png_rect.height = (int)height;
-        gdk_cairo_set_source_pixbuf(cr, it->u.png, png_rect.x,
-                                    png_rect.y);
-        cairo_rectangle(cr, png_rect.x, png_rect.y, png_rect.width,
-                        png_rect.height);
+        pw = gdk_pixbuf_get_width(it->u.png);
+        ph = gdk_pixbuf_get_height(it->u.png);
+        if (pw <= 0 || ph <= 0) {
+            cairo_restore(cr);
+            return;
+        }
+        /* PNG масштабируется ТОЧНО так же, как SVG (cairo_scale по
+         * осям отдельно, без preserveAspectRatio). Раньше здесь стоял
+         * gdk_cairo_set_source_pixbuf без всякого масштаба: width/height
+         * просто игнорировались, и картинка ложилась натуральным
+         * размером. Для темы с PNG-подложкой это означало, что размер
+         * окна, заданный в настройках, менял только пустое место вокруг
+         * подложки - сам applet выглядел ровно так же, и настройки
+         * "не влияют на реальный размер".
+         *
+         * Масштаб единичный там, где вызывающий код передаёт
+         * натуральный размер (что делает большинство апплетов), так что
+         * для них ничего не меняется. */
+        cairo_translate(cr, x, y);
+        cairo_scale(cr, width / pw, height / ph);
+        gdk_cairo_set_source_pixbuf(cr, it->u.png, 0, 0);
+        cairo_rectangle(cr, 0, 0, pw, ph);
         cairo_fill(cr);
     }
     cairo_restore(cr);

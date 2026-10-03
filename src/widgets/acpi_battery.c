@@ -49,25 +49,33 @@
 #define AB_DEFAULT_ALARM     15
 #define AB_DEFAULT_INTERVAL  30     /* секунд */
 
-/* Геометрия темы green. Текст сбоку от батарейки, а не поверх неё:
- * в теме green процент уже читается по длине полосы индикатора,
- * второй раз писать его поверх корпуса только мешает. */
-#define AB_TEXT_X           86
-#define AB_TEXT_Y_PERCENT    7
-#define AB_TEXT_Y_TIME      28
-#define AB_TEXT_Y_ONLY      16
 #define AB_MIN_WIDTH         60
 #define AB_MIN_HEIGHT        30
 
-/* Положение батарейки и индикатора внутри окна 130x50. */
-#define AB_BODY_X            4
-#define AB_BODY_Y            6
+/* Натуральный размер корпуса батарейки в теме green (76x37). Он НЕ
+ * меняется под размер окна: корпус должен остаться батарейкой, а не
+ * расплываться пятном. Меняется только его положение. */
+#define AB_BODY_X            4      /* поле слева от блока */
 #define AB_BODY_W           76
 #define AB_BODY_H           37
-#define AB_IND_X            12
-#define AB_IND_Y            19
-#define AB_IND_W            60
+/* Зазор между корпусом и текстом. */
+#define AB_GAP               6
+/* Высота строки текста: нужна для симметричной раскладки двух строк. */
+#define AB_TEXT_LINE_H      14
+
+/* Индикатор вписан в корпус: тема нарисована с полями 8 по бокам. */
+#define AB_IND_INSET_X       8
 #define AB_IND_H            18
+/* Выше этого процента полоса рисуется целиком: разница 95 и 100 на
+ * 60 px не видна глазом, а обрезанный край читается как «не полный». */
+#define AB_IND_FULL_PCT      95
+
+/* Посчитанная от размера окна геометрия. */
+typedef struct {
+    int body_x, body_y;
+    int text_x, text_y_percent, text_y_time, text_y_only;
+    int ind_x, ind_y, ind_w;
+} AbGeom;
 
 typedef struct {
     int      window_width;
@@ -311,20 +319,82 @@ static void ab_draw_gray(XsPlugin *p, cairo_t *cr, const char *element,
  * При неизвестном проценте (нет батареи) рисуем полосу целиком, иначе
  * клип нулевой ширины оставил бы пустое место вместо индикатора. */
 static void ab_draw_indicator(XsPlugin *p, cairo_t *cr, const char *element,
-                             int percent)
+                             const AbGeom *g, double frac)
 {
-    double frac;
-
     if (!element || !xs_core_theme_has(p, element))
         return;
-    frac = (percent < 0 || percent > 100) ? 1.0 : percent / 100.0;
+    if (frac < 0.0)
+        frac = 0.0;
+    if (frac > 1.0)
+        frac = 1.0;
 
     cairo_save(cr);
-    cairo_rectangle(cr, AB_IND_X, AB_IND_Y, AB_IND_W * frac, AB_IND_H);
+    cairo_rectangle(cr, g->ind_x, g->ind_y, g->ind_w * frac, AB_IND_H);
     cairo_clip(cr);
     p->host->theme_draw_full(p, cr, element,
-                             AB_IND_X, AB_IND_Y, AB_IND_W, AB_IND_H);
+                             g->ind_x, g->ind_y, g->ind_w, AB_IND_H);
     cairo_restore(cr);
+}
+
+/* Геометрия темы green, посчитанная от РЕАЛЬНОГО размера окна.
+ *
+ * Раньше координаты были константами под окно 150x50, и при любом
+ * другом размере из настроек батарейка с текстом оставалась в левом
+ * верхнем углу, а всё остальное окно пустовало. Теперь блок
+ * (батарейка + текст) центрируется по вертикали и прижат к левому
+ * краю с полями, а индикатор считается от корпуса, а не от окна.
+ *
+ * Ширина блока = AB_BODY_W + AB_GAP + текст; берётся по вписыванию в
+ * окно, при нехватке места батарейка сжимается. */
+static void ab_layout(int w, int h, AbGeom *g)
+{
+    int text_w, block_w;
+
+    /* Текст начинается сразу за корпусом плюс зазор. */
+    text_w = w - AB_BODY_X - AB_BODY_W - AB_GAP - AB_BODY_X;
+    if (text_w < 0)
+        text_w = 0;
+
+    block_w = AB_BODY_W + AB_GAP + text_w;
+    if (block_w > w - 2 * AB_BODY_X) {
+        /* Окно уже блока: отдаём место корпусу, текст ужимается. */
+        block_w = w - 2 * AB_BODY_X;
+        text_w = block_w - AB_BODY_W - AB_GAP;
+    }
+    if (text_w < 0)
+        text_w = 0;
+
+    g->body_x = (w - block_w) / 2;
+    if (g->body_x < AB_BODY_X)
+        g->body_x = AB_BODY_X;
+    g->body_y = (h - AB_BODY_H) / 2;
+    if (g->body_y < 0)
+        g->body_y = 0;
+
+    g->text_x = g->body_x + AB_BODY_W + AB_GAP;
+    /* Две строки: процент сверху, время снизу, симметрично по высоте. */
+    g->text_y_percent = g->body_y + AB_BODY_H / 2 - AB_TEXT_LINE_H - 2;
+    g->text_y_time = g->body_y + AB_BODY_H / 2 + 2;
+    g->text_y_only = g->body_y + AB_BODY_H / 2 - AB_TEXT_LINE_H / 2;
+
+    /* Индикатор вписан в корпус по тем же полям, что и у темы 76x37. */
+    g->ind_x = g->body_x + AB_IND_INSET_X;
+    g->ind_y = g->body_y + (AB_BODY_H - AB_IND_H) / 2;
+    g->ind_w = AB_BODY_W - 2 * AB_IND_INSET_X;
+    if (g->ind_w < 1)
+        g->ind_w = 1;
+}
+
+/* Порог выше которого индикатор считается полным — тот же, что у темы:
+ * при полосе по проценту длина и так читается, обрезать её на 95 %
+ * незачем. */
+static double ab_fill_fraction(int percent)
+{
+    if (percent < 0 || percent > 100)
+        return 1.0;
+    if (percent >= AB_IND_FULL_PCT)
+        return 1.0;
+    return percent / 100.0;
 }
 
 static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
@@ -333,18 +403,21 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     XsHostApi *api = p->host;
     const char *indicator = NULL;
     gboolean no_battery;
+    AbGeom g;
+
+    ab_layout(w, h, &g);
 
     /* Порядок как в оригинале: фон, корпус, индикатор, блик, текст.
      *
      * Именно theme_draw_full, а НЕ theme_draw: theme_draw подставляет
      * высоту, равную ширине, то есть просит тему нарисовать в квадрате
-     * w x w. При окне 130x50 тема растягивалась бы по вертикали в 2.6
+     * w x w. При окне 150x50 тема растягивалась бы по вертикали в 3
      * раза, и нижняя половина батарейки уезжала бы за край. */
     if (xs_core_theme_has(p, "acpibattery-bg"))
         api->theme_draw_full(p, cr, "acpibattery-bg", 0, 0, w, h);
     if (xs_core_theme_has(p, "acpibattery-battery"))
         api->theme_draw_full(p, cr, "acpibattery-battery",
-                             AB_BODY_X, AB_BODY_Y, AB_BODY_W, AB_BODY_H);
+                             g.body_x, g.body_y, AB_BODY_W, AB_BODY_H);
 
     no_battery = (!st->battery ||
                   st->battery->state == ACPI_BATTERY_NOT_PRESENT);
@@ -356,7 +429,7 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
          * выдаёт его за низкий заряд. */
         if (xs_core_theme_has(p, "acpibattery-using"))
             ab_draw_gray(p, cr, "acpibattery-using",
-                         AB_IND_X, AB_IND_Y, AB_IND_W, AB_IND_H);
+                         g.ind_x, g.ind_y, g.ind_w, AB_IND_H);
     } else if (st->battery->state == ACPI_BATTERY_CHARGING) {
         indicator = "acpibattery-charging";
     } else if (st->battery->state == ACPI_BATTERY_DISCHARGING) {
@@ -364,8 +437,9 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     } else {
         indicator = "acpibattery-using";
     }
-    ab_draw_indicator(p, cr, indicator,
-                      no_battery ? -1 : st->battery->percent);
+    /* Длина полосы = процент, поэтому состояние передаётся дальше. */
+    ab_draw_indicator(p, cr, indicator, &g,
+                      ab_fill_fraction(no_battery ? -1 : st->battery->percent));
 
     /* Клип по окну: при крупном шрифте текст вылезет за рамку, а окно
      * непрозрачное, и текст зарисуется поверх соседних апплетов. */
@@ -379,18 +453,18 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * мешает, а корпус получает объём. */
     if (xs_core_theme_has(p, "acpibattery-glass"))
         api->theme_draw_full(p, cr, "acpibattery-glass",
-                             AB_BODY_X, AB_BODY_Y, AB_BODY_W, AB_BODY_H);
+                             g.body_x, g.body_y, AB_BODY_W, AB_BODY_H);
 
     if (no_battery) {
-        ab_text(st, cr, " No", AB_TEXT_X, AB_TEXT_Y_PERCENT, FALSE);
-        ab_text(st, cr, " battery", AB_TEXT_X, AB_TEXT_Y_TIME, FALSE);
+        ab_text(st, cr, " No", g.text_x, g.text_y_percent, FALSE);
+        ab_text(st, cr, " battery", g.text_x, g.text_y_time, FALSE);
     } else if (st->show_percent && st->show_time) {
-        ab_text(st, cr, st->percent_text, AB_TEXT_X, AB_TEXT_Y_PERCENT, st->low);
-        ab_text(st, cr, st->time_text,    AB_TEXT_X, AB_TEXT_Y_TIME,    st->low);
+        ab_text(st, cr, st->percent_text, g.text_x, g.text_y_percent, st->low);
+        ab_text(st, cr, st->time_text,    g.text_x, g.text_y_time,    st->low);
     } else if (st->show_percent) {
-        ab_text(st, cr, st->percent_text, AB_TEXT_X, AB_TEXT_Y_ONLY, st->low);
+        ab_text(st, cr, st->percent_text, g.text_x, g.text_y_only, st->low);
     } else if (st->show_time) {
-        ab_text(st, cr, st->time_text, AB_TEXT_X, AB_TEXT_Y_ONLY, st->low);
+        ab_text(st, cr, st->time_text, g.text_x, g.text_y_only, st->low);
     }
 
     cairo_restore(cr);
