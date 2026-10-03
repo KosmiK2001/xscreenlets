@@ -482,8 +482,20 @@ static gboolean xs_window_occluded(XsWinState *state)
         top_win = parent;
     }
 
-    if (!XQueryTree(dpy, root, NULL, NULL, &children, &n_children))
-        goto out;
+    {
+        /* Выходные указатели root_return и parent_return передаются
+         * настоящими переменными, а НЕ NULL: libX11 пишет в них безусловно,
+         * не проверяя на NULL (оптимизация ради скорости). С NULL там был
+         * SIGSEGV - демон падал на первом же тике applet.
+         *
+         * Проверено gdb: #0 XQueryTree () #1 xs_window_occluded
+         * common.c:485 #2 xs_core_tick_cb */
+        Window dummy_root = 0, dummy_parent = 0;
+
+        if (!XQueryTree(dpy, root, &dummy_root, &dummy_parent, &children,
+                        &n_children))
+            goto out;
+    }
 
     /* XQueryTree даёт детей снизу вверх, поэтому наше окно ищем по всей
      * выборке, а обход закрывателей пойдёт с конца. */
