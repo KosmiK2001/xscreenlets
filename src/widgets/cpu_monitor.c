@@ -878,10 +878,9 @@ static gboolean cm_core_has_ht(const CoreData *core)
 }
 
 /* Один логический процессор на ядро: верхний график занимает всю
- * ячейку, частота и температура идут под ним. Пропорция 0.62 - не
- * точная константа, а подгонка под CM_TEXT_HEIGHT: при ней полосы
- * графика остаётся достаточно, а текст не наезжает на нижний край. */
-#define CM_SINGLE_GRAPH_RATIO 0.62
+ * ячейку, частота и температура идут под ним. Высоты считаются от
+ * фактической высоты текста, а не от фиксированной доли ячейки,
+ * иначе под текстом остаётся пустое поле. */
 
 static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
 {
@@ -967,8 +966,16 @@ static cairo_surface_t *cm_render(PrivData *priv, int width, int height)
             /* Без Hyper Threading: один график на всю ширину, частота и
              * температура - под ним, в той же рамке ядра. Второй график
              * не рисуем намеренно: thread_load[1] для одноядерного
-             * sibling никогда не заполняется. */
-            double graph_h = MAX(1.0, content_h * CM_SINGLE_GRAPH_RATIO);
+             * sibling никогда не заполняется.
+             *
+             * Высоту текста берём ровно такую, какая нужна, и всё
+             * остальное отдаём графику. Если вместо этого отдать под
+             * текст долю ячейки (например 0.38), то под самим текстом
+             * останется пустое поле: текст-то занимает ~14px, а не
+             * треть ячейки. */
+            double text_h = MIN(content_h * 0.50,
+                                text_height + 2.0 * CM_TEXT_PADDING);
+            double graph_h = MAX(1.0, content_h - text_h);
 
             cm_draw_history(cr, x, y, block_w, graph_h, core, 0,
                             core->history_points, priv->history_head,
