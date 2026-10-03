@@ -2948,6 +2948,14 @@ static gboolean xs_core_tick_cb(XsPlugin *p)
      * никогда не рисовалось, и при разморозке обязано получить первый
      * кадр иначе покажет пустоту. */
     state->occluded = xs_window_occluded(state);
+    { static gint64 last_us = 0;
+      gint64 now_us = g_get_monotonic_time();
+      if (now_us - last_us > 3000000) {
+          fprintf(stderr, "OCCDBG %s occ=%d drawn=%d\n", p->name,
+                  state->occluded, state->ever_drawn);
+          fflush(stderr);
+          last_us = now_us;
+      } }
     if (!state->occluded || !state->ever_drawn) {
         /* Видно (или ещё ни разу не рисовали) - обычный путь. Сюда же
          * попадает и разморозка: occluded только что сменился на FALSE,
