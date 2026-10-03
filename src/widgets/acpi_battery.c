@@ -279,30 +279,40 @@ static int ab_text_metrics(GtkWidget *w, double scale, int *out_ascent)
  * внутри сдвигается на ascent, см. ab_text_metrics). Шрифт берётся
  * масштабированный, тот же, которым мерилась раскладка, - иначе текст
  * не совпадёт с местом, которое под него выделили. */
+/* y — верх, КУДА должна попасть ВЕРХНЯЯ точка реальных глифов, а не
+ * абстрактной строки шрифта. Раньше тут стоял фиксированный сдвиг на
+ * ascent, и он НЕ совпадал с тем, куда Pango реально кладёт глифы:
+ * измерением на ноуте (scale 1.5) фактическое смещение оказалось равно
+ * line_h, а не ascent. Из-за этого нижняя строка уходила за нижнюю
+ * рамку окна и обрезалась, а при show_percent=0 та же строка рисовалась
+ * посередине и читалась полностью.
+ *
+ * Поэтому смещение не вычисляется, а измеряется у той же раскладки:
+ * pango_layout_get_pixel_extents() даёт реальные края глифов, и мы
+ * сдвигаем базовую линию на разницу между ними и требуемым верхом.
+ * ascent больше не нужен и не используется. */
 static void ab_text(AbState *st, cairo_t *cr, const char *text,
                     double x, double y, gboolean red, int ascent, double scale)
 {
     PangoLayout *layout;
     PangoFontDescription *desc;
+    PangoRectangle ink;
 
     if (!text || !*text)
         return;
 
-    if (xs_core_is_debug())
-        p->host->log("ab: TEXT '%s' x=%.1f y=%.1f -> baseline %.1f (win %dx%d)",
-                     text, x, y, y + ascent,
-                     p->win ? gdk_window_get_width(gtk_widget_get_window(p->win)) : -1,
-                     p->win ? gdk_window_get_height(gtk_widget_get_window(p->win)) : -1);
+    layout = gtk_widget_create_pango_layout(st->widget, text);
+    desc = ab_font_scaled(st->widget, scale);
+    pango_layout_set_font_description(layout, desc);
 
-    cairo_move_to(cr, x, y + ascent);
+    /* ink.y — где Pango хочет верх глифов относительно текущей точки
+     * отрисовки; сдвигаем на разницу с требуемым верхом строки. */
+    pango_layout_get_pixel_extents(layout, NULL, &ink);
     if (red)
         cairo_set_source_rgb(cr, 1.0, 0.15, 0.15);
     else
         cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-
-    layout = gtk_widget_create_pango_layout(st->widget, text);
-    desc = ab_font_scaled(st->widget, scale);
-    pango_layout_set_font_description(layout, desc);
+    cairo_move_to(cr, x, (double)((int)y - ink.y));
     pango_cairo_show_layout(cr, layout);
     pango_font_description_free(desc);
     g_object_unref(layout);
@@ -747,15 +757,6 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         ab_text(st, cr, " battery", g.text_x, g.text_y_time, FALSE,
                 g.ascent, g.scale);
     } else if (st->show_percent && st->show_time) {
-        if (xs_core_is_debug())
-            p->host->log("ab: DBG pct='%s' y=%d | time='%s' y=%d | w=%d h=%d "
-                         "line_h=%d pad=%d ascent=%d need=%dx%d",
-                         st->percent_text ? st->percent_text : "(null)",
-                         g.text_y_percent,
-                         st->time_text ? st->time_text : "(null)",
-                         g.text_y_time, w, h, g.line_h,
-                         (int)(AB_FRAME_PAD * g.scale + 0.5), g.ascent,
-                         g.need_w, g.need_h);
         ab_text(st, cr, st->percent_text, g.text_x, g.text_y_percent,
                 st->low, g.ascent, g.scale);
         ab_text(st, cr, st->time_text, g.text_x, g.text_y_time,
