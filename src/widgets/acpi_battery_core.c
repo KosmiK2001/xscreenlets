@@ -317,14 +317,39 @@ AcpiBattery *acpi_battery_list_primary(const AcpiBatteryList *list)
     if (!list || !list->items)
         return NULL;
 
-    /* Приоритет: настоящая батарея, потом устройство с батарейкой
-     * (мышь/гарнитура). Порядок каталогов в sysfs алфавитный и от
-     * загрузки не зависит, но имя «hidpp_battery_0» не должно
-     * перебивать «BAT0», поэтому сортируем по типу, а не по позиции. */
-    for (i = 0; i < list->items->len; i++) {
-        AcpiBattery *bat = g_ptr_array_index(list->items, i);
-        if (bat->type && g_ascii_strcasecmp(bat->type, "Battery") == 0)
-            return bat;
+    /* Приоритет: батарея с ИЗВЕСТНЫМ зарядом, затем настоящая батарея,
+     * потом устройство с батарейкой (мышь/гарнитура).
+     *
+     * Одной сортировки по типу мало. На ноутбуке с hid-logitech-hidpp
+     * в /sys/class/power_supply лежат ДВА узла с type=Battery: настоящая
+     * BAT0 и hidpp_battery_0 (батарейка мыши). Порядок readdir() не
+     * задан, и на практике hidpp_battery_0 приходил ПЕРВЫМ. Он тоже
+     * type=Battery, поэтому проверка «тип == Battery» его пропускала, и
+     * апплет показывал NA, хотя BAT0 рядом имел capacity=100.
+     *
+     * Порядок sysfs воспроизводим между сессиями, но не между
+     * загрузками, поэтому полагаться на него нельзя. */
+    {
+        AcpiBattery *fallback = NULL;
+
+        for (i = 0; i < list->items->len; i++) {
+            AcpiBattery *bat = g_ptr_array_index(list->items, i);
+
+            if (!bat->type ||
+                g_ascii_strcasecmp(bat->type, "Battery") != 0)
+                continue;
+
+            /* Заряд известен - это то, что нужно показать. */
+            if (bat->percent >= 0)
+                return bat;
+
+            /* Иначе запоминаем и продолжаем искать: вдруг дальше есть
+             * настоящая батарея с capacity. */
+            if (!fallback)
+                fallback = bat;
+        }
+        if (fallback)
+            return fallback;
     }
     return list->items->len ? g_ptr_array_index(list->items, 0) : NULL;
 }

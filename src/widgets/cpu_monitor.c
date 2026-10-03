@@ -460,6 +460,7 @@ static void cm_discover_temperatures(PrivData *priv)
             char *name_path, *name_text = NULL;
             gint input;
             gboolean package_match = FALSE;
+            gboolean saw_package_label = FALSE;
 
             if (strncmp(hwmon, "hwmon", 5) != 0)
                 continue;
@@ -484,13 +485,28 @@ static void cm_discover_temperatures(PrivData *priv)
                 if (g_str_has_prefix(label, "Package id ")) {
                     gint package = (gint)g_ascii_strtoull(label + 11, NULL, 10);
                     package_match = package == priv->socket_id;
+                    saw_package_label = TRUE;
+                    g_free(label);
+                    if (package_match)
+                        break;
+                    continue;
                 }
                 g_free(label);
-                if (package_match)
-                    break;
             }
-            if (!package_match)
-                continue;
+            /* Меток "Package id N" в hwmon может не быть вовсе - так
+             * отдаёт температуру часть ноутбучных платформ, где есть
+             * только "Core 0", "Core 1". Прежний код в этом случае
+             * оставлял package_match=FALSE и ПРОПУСКАЛ весь hwmon, из-за
+             * чего апплет рисовал "---" при живой температуре.
+             *
+             * Если меток не было вовсе, это единственный источник -
+             * берём его. Если метки были, но не нашего сокета, hwmon
+             * действительно чужой, и его пропуск правилен. */
+            if (!package_match) {
+                if (saw_package_label)
+                    continue;
+                package_match = TRUE;
+            }
             for (input = 1; input < 10000; input++) {
                 char suffix[32], *label_path, *label = NULL;
                 gint core_id;
