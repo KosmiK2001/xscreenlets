@@ -136,15 +136,40 @@ void xs_tray_init(void)
     {
         static const char *tray_icons[] = {
             "/usr/share/icons/xscreenlets/screenlets-tray.png",
+            /* Обёртка того же значка: ebuild ставит иконки циклом
+             * icons/*.svg, поэтому растр в пакет не попадает, а
+             * положить его в git можно только в виде SVG. Правку
+             * ebuild вносит пользователь, поэтому демон сначала
+             * пробует .png, а если его нет — эту обёртку.
+             * Когда ebuild начнёт ставить *.png, её можно убрать. */
+            "/usr/share/icons/xscreenlets/screenlets-tray.svg",
             "/usr/share/icons/screenlets.svg",
             NULL
         };
         int i;
 
         for (i = 0; tray_icons[i] && !g_tray_icon_set; i++) {
-            if (g_file_test(tray_icons[i], G_FILE_TEST_EXISTS)) {
+            GdkPixbuf *pb;
+
+            /* Проверять нужно не существование файла, а то, что GTK его
+             * РЕАЛЬНО ДЕКОДИРУЕТ. g_file_test() проходит по битому
+             * screenlets-tray.svg, gtk_status_icon_set_from_file() на нём
+             * молча не показывает ничего, и цикл уходит на следующего
+             * кандидата — в итоге в трее оказывался старый значок от
+             * python2-пакета. Такое случилось с обёрткой: xmllint и
+             * rsvg-convert такой файл принимают, а gdk-pixbuf — нет.
+             *
+             * Декодируем заранее и отбрасываем пиксель только как
+             * ПРОВЕРКУ; сам значок ставим через set_from_file — на этой
+             * машине set_from_pixbuf не создавал embed-окно трея вовсе. */
+            pb = gdk_pixbuf_new_from_file(tray_icons[i], NULL);
+            if (pb) {
+                g_object_unref(pb);
                 gtk_status_icon_set_from_file(g_tray, tray_icons[i]);
                 g_tray_icon_set = TRUE;
+            } else {
+                g_warning("xscreenlets: трей-значок %s не читается, "
+                          "пробуем следующий", tray_icons[i]);
             }
         }
         if (!g_tray_icon_set)
