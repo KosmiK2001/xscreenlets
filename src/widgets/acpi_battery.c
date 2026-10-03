@@ -77,10 +77,14 @@
  * text_w) тоже здесь: раскладка обязана опираться на реальный шрифт. */
 typedef struct {
     GtkWidget *widget;              /* для замера текста через Pango */
+    double scale;                   /* множитель из scale, >= 0.2 */
+    /* Размеры корпуса и индикатора УЖЕ масштабированы. Натуральный
+     * размер темы (76x37) живёт в макросах, здесь - результат. */
+    int body_w, body_h;
+    int ind_x, ind_y, ind_w, ind_h;
     int body_x, body_y;
     /* Текст прижат по ПРАВОМУ краю: text_x считается от w - ширина. */
     int text_x, text_y_percent, text_y_time, text_y_only;
-    int ind_x, ind_y, ind_w;
     int line_h, ascent, text_w;
     /* Сколько места нужно окну, чтобы всё влезло без обрезания. */
     int need_w, need_h;
@@ -108,6 +112,14 @@ typedef struct {
      * сделать меньше нарисованного, и текст обрезался. */
     int min_width;
     int min_height;
+
+    /* Множитель из Properties/Size-меню. Масштабирует ВСЁ: окно, корпус,
+     * индикатор и шрифт. Раньше он менял только окно, а батарейка
+     * оставалась 76x37, и масштабирование выглядело как «ничего не
+     * произошло». Конфиг - единственный источник истины (см.
+     * ab_apply_scale): Properties и Size-меню пишут scale туда напрямую,
+     * минуя нас, поэтому значение перечитывается на каждом тике. */
+    double scale;
 } AbState;
 
 static void ab_set_text(char **dst, char *value)
@@ -206,30 +218,57 @@ static void ab_poll(AbState *st)
 /* Рисование текста. Белый — обычное состояние, красный — аларм.
  * Цвет из настроек не читаем: тема задаёт белый, а настройка цвета в
  * оригинале была, но не работала — писалась в конфиг и не читалась. */
-/* Высота строки и её ascent для текущего шрифта.
+/* Описание шрифта, увеличенное в scale раз.
  *
- * Считается через Pango. Жёсткая константа AB_TEXT_LINE_H была не
- * только неверной по величине, но и стояла не с того края: ab_text()
- * передавал в cairo_move_to() ВЕРХ строки, а pango_cairo_show_layout()
+ * Шрифт масштабируется ВМЕСТЕ с картинкой, а не остаётся прежним: иначе
+ * при scale=2 корпус и батарейка вырастают вдвое, а «100%» и «00:35»
+ * остаются такими же мелкими, и applet выглядит сломанным.
+ *
+ * Берём описание шрифта из контекста виджета и умножаем кегль, а не
+ * задаём свой шрифт целиком: описание виджета уже содержит семейство,
+ * начертание и язык, и подмена испортила бы внешний вид. */
+static PangoFontDescription *ab_font_scaled(GtkWidget *w, double scale)
+{
+    PangoContext *pc = gtk_widget_get_pango_context(w);
+    PangoFontDescription *base, *out;
+    gint size;
+
+    if (!pc)
+        return pango_font_description_from_string("Sans 10");
+
+    base = pango_context_get_font_description(pc);
+    out = pango_font_description_copy(base);
+    size = pango_font_description_get_size(out);
+    if (size <= 0)
+        size = 10 * PANGO_SCALE;
+    pango_font_description_set_size(out, (gint)(size * scale));
+    return out;
+}
+
+/* Высота строки и её ascent для МАСШТАБИРОВАННОГО шрифта.
+ *
+ * Считается через Pango. Жёсткая константа была не только неверной по
+ * величине, но и стояла не с того края: ab_text() передавал в
+ * cairo_move_to() ВЕРХ строки, а pango_cairo_show_layout()
  * позиционирует от BASELINE. Текст уезжал вниз на ascent, и строки
  * наезжали друг на друга - это и было «странное» позиционирование. */
-static int ab_text_metrics(cairo_t *cr, int *out_ascent)
+static int ab_text_metrics(GtkWidget *w, double scale, int *out_ascent)
 {
-    PangoContext *pc = pango_cairo_create_context(cr);
+    PangoContext *pc = gtk_widget_get_pango_context(w);
     PangoFontDescription *desc;
     PangoFontMetrics *fm;
     int h, ascent;
 
-    /* Метрики берём у шрифта ИМЕННО ЭТОГО контекста (того же, которым
-     * рисуем), иначе ascent не совпадёт с реально отрисованным текстом
-     * и раскладка снова уедет. Описание шрифта и язык - как у того
-     * контекста. */
-    desc = pango_context_get_font_description(pc);
+    if (!pc)
+        pc = pango_cairo_create_context(NULL);
+
+    desc = ab_font_scaled(w, scale);
     fm = pango_context_get_metrics(pc, desc, pango_language_get_default());
     ascent = pango_font_metrics_get_ascent(fm) / PANGO_SCALE;
     h = (pango_font_metrics_get_ascent(fm) +
          pango_font_metrics_get_descent(fm)) / PANGO_SCALE;
     pango_font_metrics_unref(fm);
+    pango_font_description_free(desc);
 
     if (out_ascent)
         *out_ascent = ascent;
@@ -237,11 +276,14 @@ static int ab_text_metrics(cairo_t *cr, int *out_ascent)
 }
 
 /* Рисует строку текста. x — левый край, y — ВЕРХ строки (baseline
- * внутри сдвигается на ascent, см. ab_text_metrics). */
+ * внутри сдвигается на ascent, см. ab_text_metrics). Шрифт берётся
+ * масштабированный, тот же, которым мерилась раскладка, - иначе текст
+ * не совпадёт с местом, которое под него выделили. */
 static void ab_text(AbState *st, cairo_t *cr, const char *text,
-                    double x, double y, gboolean red, int ascent)
+                    double x, double y, gboolean red, int ascent, double scale)
 {
     PangoLayout *layout;
+    PangoFontDescription *desc;
 
     if (!text || !*text)
         return;
@@ -253,11 +295,66 @@ static void ab_text(AbState *st, cairo_t *cr, const char *text,
         cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
 
     layout = gtk_widget_create_pango_layout(st->widget, text);
+    desc = ab_font_scaled(st->widget, scale);
+    pango_layout_set_font_description(layout, desc);
     pango_cairo_show_layout(cr, layout);
+    pango_font_description_free(desc);
     g_object_unref(layout);
 }
 
 static void ab_save_int(XsPlugin *p, const char *key, int value);
+
+/* Подогнать окно под текущий scale из конфига.
+ *
+ * КАНОН: конфиг - единственный источник истины. И Properties-ползунок
+ * Scale, и меню Size -> N % пишут ключ "scale" прямо в конфиг, минуя
+ * плагин (см. xs_core_prop_scale_changed и обработчик "scale:" в
+ * common.c). Поэтому значение перечитывается здесь каждый раз, а не
+ * берётся из переданного аргумента.
+ *
+ * Вызывается из двух мест, и оба нужны:
+ *  - ab_menu_cmd("scale-applied") - ползунок в Properties, реакция сразу;
+ *  - ab_tick() - путь Size -> N %, который НЕ зовёт menu_cmd, ядро ждёт
+ *    подгонки на ближайшем тике (так же сделано в calendar: cal_fit_height).
+ *
+ * Окно = масштабированный натуральный размер. window_width/window_height
+ * НЕ пишутся в конфиг намеренно: они задаются пользователем вручную, и
+ * запись поверх них ломала бы ручной размер - стоило бы двинуть ползунок
+ * Scale, как ручной размер пропадал бы. */
+static void ab_apply_scale(XsPlugin *p)
+{
+    AbState *st = p->priv;
+    GKeyFile *kf;
+    double s;
+    int want_w, want_h;
+
+    if (!st)
+        return;
+    kf = xs_core_plugin_conf(p->name);
+    if (!kf)
+        return;
+
+    s = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
+    if (s < 0.2)
+        s = 0.2;
+    else if (s > 10.0)
+        s = 10.0;
+    st->scale = s;
+
+    want_w = (int)(AB_DEFAULT_WIDTH * s + 0.5);
+    want_h = (int)(AB_DEFAULT_HEIGHT * s + 0.5);
+
+    if (p->win) {
+        int cur_w = 0, cur_h = 0;
+
+        gtk_window_get_size(GTK_WINDOW(p->win), &cur_w, &cur_h);
+        if (cur_w != want_w || cur_h != want_h)
+            p->host->resize(p, want_w, want_h);
+    } else {
+        st->window_width  = want_w;
+        st->window_height = want_h;
+    }
+}
 
 /* Обработка штатной команды ядра "scale-applied".
  *
@@ -272,35 +369,15 @@ static void ab_save_int(XsPlugin *p, const char *key, int value);
 static void ab_menu_cmd(XsPlugin *p, const char *cmd)
 {
     AbState *st = p->priv;
-    GKeyFile *kf;
-    double s;
 
     if (!st || !cmd)
         return;
     if (strcmp(cmd, "scale-applied") != 0)
         return;
 
-    kf = xs_core_plugin_conf(p->name);
-    if (!kf)
-        return;
-    s = xs_host_api()->conf_dbl(kf, p->name, "scale", 1.0);
-    if (s < 0.2)
-        s = 0.2;
-    else if (s > 10.0)
-        s = 10.0;
-
-    st->window_width  = (int)(AB_DEFAULT_WIDTH * s);
-    st->window_height = (int)(AB_DEFAULT_HEIGHT * s);
-    ab_clamp(st);
-    /* Ширину/высоту пишем в конфиг, иначе после рестарта демона размер
-     * вернётся к дефолту и ползунок перестанет иметь смысл. */
-    ab_save_int(p, "window_width", st->window_width);
-    ab_save_int(p, "window_height", st->window_height);
-
-    if (p->win) {
-        p->host->resize(p, st->window_width, st->window_height);
+    ab_apply_scale(p);
+    if (p->win)
         gtk_widget_queue_draw(p->win);
-    }
 }
 
 static int ab_init(XsPlugin *p, GKeyFile *kf)
@@ -324,6 +401,14 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
     st->show_percent    = api->conf_int(kf, p->name, "show_percent", 1) != 0;
     st->show_time       = api->conf_int(kf, p->name, "show_time", 1) != 0;
     ab_clamp(st);
+
+    /* scale читаем ДО make_window: окно должно создаться уже нужного
+     * размера, иначе applet на секунду мелькнет в натуральном размере. */
+    st->scale = api->conf_dbl(kf, p->name, "scale", 1.0);
+    if (st->scale < 0.2)
+        st->scale = 0.2;
+    else if (st->scale > 10.0)
+        st->scale = 10.0;
 
     p->priv = st;
 
@@ -360,6 +445,9 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
     }
 
     st->widget = p->win;
+    /* Подгоняем окно под scale после make_window: на этом шаге p->win
+     * уже есть, и размер применяется без лишнего кадра. */
+    ab_apply_scale(p);
     ab_poll(st);
     api->set_tick(p, (guint)st->update_interval * 1000);
     return 0;
@@ -431,10 +519,10 @@ static void ab_draw_indicator(XsPlugin *p, cairo_t *cr, const char *element,
         frac = 1.0;
 
     cairo_save(cr);
-    cairo_rectangle(cr, g->ind_x, g->ind_y, g->ind_w * frac, AB_IND_H);
+    cairo_rectangle(cr, g->ind_x, g->ind_y, g->ind_w * frac, g->ind_h);
     cairo_clip(cr);
     p->host->theme_draw_full(p, cr, element,
-                             g->ind_x, g->ind_y, g->ind_w, AB_IND_H);
+                             g->ind_x, g->ind_y, g->ind_w, g->ind_h);
     cairo_restore(cr);
 }
 
@@ -448,17 +536,29 @@ static void ab_draw_indicator(XsPlugin *p, cairo_t *cr, const char *element,
  *
  * Ширина блока = AB_BODY_W + AB_GAP + текст; берётся по вписыванию в
  * окно, при нехватке места батарейка сжимается. */
-static void ab_layout(AbState *st, int w, int h, cairo_t *cr, AbGeom *g)
+static void ab_layout(AbState *st, int w, int h, AbGeom *g)
 {
-    int rows;
+    int rows, pad, gap;
+    PangoFontDescription *desc;
 
-    g->line_h = ab_text_metrics(cr, &g->ascent);
+    g->scale = (st->scale > 0.0) ? st->scale : 1.0;
+    g->line_h = ab_text_metrics(g->widget, g->scale, &g->ascent);
+
+    /* Все размеры темы умножаем на scale. Считаем в макросах (натуральный
+     * размер темы green) и округляем, но НЕ обрезаем в ноль: при scale
+     * меньше 1 индикатор и корпус должны остаться хотя бы в 1 px. */
+    g->body_w = MAX(1, (int)(AB_BODY_W * g->scale + 0.5));
+    g->body_h = MAX(1, (int)(AB_BODY_H * g->scale + 0.5));
+    g->ind_h = MAX(1, (int)(AB_IND_H * g->scale + 0.5));
+    pad = MAX(0, (int)(AB_FRAME_PAD * g->scale + 0.5));
+    gap = MAX(0, (int)(AB_GAP * g->scale + 0.5));
 
     /* Ширина текста меряется по САМОЙ ДЛИННОЙ из возможных строк, а не
      * по текущей. Иначе прижатый вправо текст прыгал бы: у "Full" и
      * " 90%" ширина разная, и правый край был бы то на месте, то нет.
-     * Ширины берём у реального шрифта через Pango. */
+     * Ширины берём у того же масштабированного шрифта, которым рисуем. */
     g->text_w = 0;
+    desc = ab_font_scaled(g->widget, g->scale);
     {
         const char *samples[] = { "100%", " 90%", "00:00", "3:59",
                                   "Full", " battery", NULL };
@@ -469,12 +569,14 @@ static void ab_layout(AbState *st, int w, int h, cairo_t *cr, AbGeom *g)
                                                             samples[i]);
             int pw = 0;
 
+            pango_layout_set_font_description(l, desc);
             pango_layout_get_pixel_size(l, &pw, NULL);
             g_object_unref(l);
             if (pw > g->text_w)
                 g->text_w = pw;
         }
     }
+    pango_font_description_free(desc);
 
     /* Сколько строк реально рисуется - от этого зависит и нужная высота,
      * и вертикальное выравнивание. */
@@ -487,43 +589,44 @@ static void ab_layout(AbState *st, int w, int h, cairo_t *cr, AbGeom *g)
     /* Минимальный размер: корпус слева, текст справа, оба отступом от
      * рамки. Окно меньше этого обрезает содержимое, поэтому draw()
      * потом поднимет размер до need_w/need_h. */
-    g->need_w = 2 * AB_FRAME_PAD + AB_BODY_W + AB_GAP + g->text_w;
-    g->need_h = 2 * AB_FRAME_PAD +
-                MAX(AB_BODY_H, rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP);
+    g->need_w = 2 * pad + g->body_w + gap + g->text_w;
+    g->need_h = 2 * pad +
+                MAX(g->body_h, rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP);
 
     /* Ниже минимума раскладка считается от минимума: иначе текст уехал бы
-     * в отрицательные координаты и пропал совсем. */
+     * в отрицательные координации и пропал совсем. */
     if (w < g->need_w)
         w = g->need_w;
     if (h < g->need_h)
         h = g->need_h;
 
-    /* Корпус: натуральный 76x37, по вертикали по центру, слева от текста.
-     * Вертикальный центр берём от h, а не от need_h - иначе при окне
-     * меньше нужного корпус прилипал бы к верхнему краю. */
-    g->body_x = AB_FRAME_PAD;
-    g->body_y = (h - AB_BODY_H) / 2;
+    /* Корпус: масштабированный размер, по вертикали по центру, слева от
+     * текста. */
+    g->body_x = pad;
+    g->body_y = (h - g->body_h) / 2;
     if (g->body_y < 0)
         g->body_y = 0;
 
-    /* Текст прижат к ПРАВОМУ краю с отступом AB_FRAME_PAD. */
-    g->text_x = w - AB_FRAME_PAD - g->text_w;
+    /* Текст прижат к ПРАВОМУ краю с отступом pad. */
+    g->text_x = w - pad - g->text_w;
 
     /* Вертикаль: процент прижат к ВЕРХУ рамки, время - к НИЗУ.
      * При одной строке она центрируется по корпусу. */
     if (rows >= 2) {
-        g->text_y_percent = AB_FRAME_PAD;
-        g->text_y_time = h - AB_FRAME_PAD - g->line_h;
+        g->text_y_percent = pad;
+        g->text_y_time = h - pad - g->line_h;
     } else {
-        g->text_y_percent = g->body_y + (AB_BODY_H - g->line_h) / 2;
+        g->text_y_percent = g->body_y + (g->body_h - g->line_h) / 2;
         g->text_y_time = g->text_y_percent;
     }
-    g->text_y_only = g->body_y + (AB_BODY_H - g->line_h) / 2;
+    g->text_y_only = g->body_y + (g->body_h - g->line_h) / 2;
 
-    /* Индикатор вписан в корпус по тем же полям, что и у темы 76x37. */
-    g->ind_x = g->body_x + AB_IND_INSET_X;
-    g->ind_y = g->body_y + (AB_BODY_H - AB_IND_H) / 2;
-    g->ind_w = AB_BODY_W - 2 * AB_IND_INSET_X;
+    /* Индикатор вписан в корпус: поля тоже масштабируются, иначе при
+     * scale=2 батарейка выросла бы, а желобка индикатора осталась бы
+     * в натуральных 8 px. */
+    g->ind_x = g->body_x + MAX(0, (int)(AB_IND_INSET_X * g->scale + 0.5));
+    g->ind_y = g->body_y + (g->body_h - g->ind_h) / 2;
+    g->ind_w = g->body_w - 2 * MAX(0, (int)(AB_IND_INSET_X * g->scale + 0.5));
     if (g->ind_w < 1)
         g->ind_w = 1;
 }
@@ -549,7 +652,7 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     AbGeom g;
 
     g.widget = p->win;
-    ab_layout(st, w, h, cr, &g);
+    ab_layout(st, w, h, &g);
 
     /* Окно не должно быть меньше нарисованного. Раньше размер брался
      * только из настроек (ab_clamp по жёстким 60x30), и при крупном
@@ -570,7 +673,7 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         w = nw;
         h = nh;
         /* Раскладка считалась от меньшего размера - пересчитываем. */
-        ab_layout(st, w, h, cr, &g);
+        ab_layout(st, w, h, &g);
     }
 
     /* Порядок как в оригинале: фон, корпус, индикатор, блик, текст.
@@ -583,7 +686,7 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         api->theme_draw_full(p, cr, "acpibattery-bg", 0, 0, w, h);
     if (xs_core_theme_has(p, "acpibattery-battery"))
         api->theme_draw_full(p, cr, "acpibattery-battery",
-                             g.body_x, g.body_y, AB_BODY_W, AB_BODY_H);
+                             g.body_x, g.body_y, g.body_w, g.body_h);
 
     no_battery = (!st->battery ||
                   st->battery->state == ACPI_BATTERY_NOT_PRESENT);
@@ -595,7 +698,7 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
          * выдаёт его за низкий заряд. */
         if (xs_core_theme_has(p, "acpibattery-using"))
             ab_draw_gray(p, cr, "acpibattery-using",
-                         g.ind_x, g.ind_y, g.ind_w, AB_IND_H);
+                         g.ind_x, g.ind_y, g.ind_w, g.ind_h);
     } else if (st->battery->state == ACPI_BATTERY_CHARGING) {
         indicator = "acpibattery-charging";
     } else if (st->battery->state == ACPI_BATTERY_DISCHARGING) {
@@ -619,24 +722,26 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
      * мешает, а корпус получает объём. */
     if (xs_core_theme_has(p, "acpibattery-glass"))
         api->theme_draw_full(p, cr, "acpibattery-glass",
-                             g.body_x, g.body_y, AB_BODY_W, AB_BODY_H);
+                             g.body_x, g.body_y, g.body_w, g.body_h);
 
     /* ascent передаётся в ab_text: тот сдвигает baseline от верха строки,
      * иначе текст уезжает вниз и строки слипаются. */
     if (no_battery) {
-        ab_text(st, cr, " No", g.text_x, g.text_y_percent, FALSE, g.ascent);
-        ab_text(st, cr, " battery", g.text_x, g.text_y_time, FALSE, g.ascent);
+        ab_text(st, cr, " No", g.text_x, g.text_y_percent, FALSE,
+                g.ascent, g.scale);
+        ab_text(st, cr, " battery", g.text_x, g.text_y_time, FALSE,
+                g.ascent, g.scale);
     } else if (st->show_percent && st->show_time) {
         ab_text(st, cr, st->percent_text, g.text_x, g.text_y_percent,
-                st->low, g.ascent);
+                st->low, g.ascent, g.scale);
         ab_text(st, cr, st->time_text, g.text_x, g.text_y_time,
-                st->low, g.ascent);
+                st->low, g.ascent, g.scale);
     } else if (st->show_percent) {
         ab_text(st, cr, st->percent_text, g.text_x, g.text_y_only,
-                st->low, g.ascent);
+                st->low, g.ascent, g.scale);
     } else if (st->show_time) {
         ab_text(st, cr, st->time_text, g.text_x, g.text_y_only,
-                st->low, g.ascent);
+                st->low, g.ascent, g.scale);
     }
 
     cairo_restore(cr);
@@ -647,6 +752,10 @@ static guint ab_tick(XsPlugin *p)
     AbState *st = p->priv;
     XsHostApi *api = p->host;
 
+    /* Меню Size -> N % пишет scale в конфиг и НЕ зовёт menu_cmd, так
+     * что окно подгоняется здесь - на ближайшем тике, как cal_fit_height
+     * у календаря. */
+    ab_apply_scale(p);
     ab_poll(st);
 
     /* Интервал могли поменять в настройках — сбрасываем таймер, иначе
