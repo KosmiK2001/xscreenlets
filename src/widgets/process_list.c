@@ -811,8 +811,8 @@ static void pl_format_io(gchar *buffer, gsize size, gint64 bytes_per_sec)
 
 /* Определения ниже pl_render(), где они уже используются. */
 static void pl_rounded_path(cairo_t *cr, int width, int height, int radius);
-static void pl_border_path(cairo_t *cr, int width, int height,
-                           double radius, double inset);
+static void pl_border_region_path(cairo_t *cr, int width, int height,
+                                  double radius, double thickness);
 static double pl_corner_radius_value(int value);
 static gboolean pl_corner_radius_is_rounded(double radius);
 
@@ -996,19 +996,14 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
      * с отступом border_width/2 остаётся - он нужен, чтобы дуга обводки
      * не оказалась снаружи дуги маски и не срезалась. */
     if (priv->border_width > 0.0) {
-        double inset = priv->border_width / 2.0;
-        double r = pl_corner_radius_value(priv->corner_radius);
-
-        if (pl_corner_radius_is_rounded(r) && r > inset) {
-            pl_border_path(cr, width, height, r - inset, inset);
-        } else {
-            cairo_rectangle(cr, inset, inset, width - 2 * inset,
-                            height - 2 * inset);
-        }
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        pl_border_region_path(cr, width, height,
+                              pl_corner_radius_value(priv->corner_radius),
+                              priv->border_width);
         cairo_set_source_rgba(cr, priv->border[0], priv->border[1],
                               priv->border[2], priv->border[3]);
-        cairo_set_line_width(cr, priv->border_width);
-        cairo_stroke(cr);
+        cairo_fill(cr);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
     }
 
     g_object_unref(layout);
@@ -1373,33 +1368,84 @@ static guint pl_tick(XsPlugin *plugin)
     return priv->update_ms;
 }
 
-/* Контур рамки: тот же прямоугольник со скруглением, что и у clip, но
- * с произвольным отступом внутрь и произвольным радиусом.
- *
- * Отдельная функция вместо повторения четырёх cairo_arc() в render: там
- * нужны две разные пары значений (для clip и для обводки), и держать их
- * в одном месте значило бы каждый раз вспоминать, какая из них уменьшается
- * на отступ, а какая нет. */
-static void pl_border_path(cairo_t *cr, int width, int height,
-                           double radius, double inset)
-{
-    double w = width - 2 * inset, h = height - 2 * inset;
-    double r = MIN(radius, MIN(w, h) / 2.0);
 
-    if (w <= 0 || h <= 0) {
-        cairo_rectangle(cr, 0, 0, width, height);
+/* Ширина среза у строки y для заданного радиуса.
+ *
+ * Та же формула, что и в pl_rounded_region(), вынесена отдельно, потому
+ * что теперь по ней считается и маска окна, и рамка. Если они считаются
+ * разными формулами, рамка не совпадёт с формой окна, и это видно глазом:
+ * обводка по гладкой дуге уезжает на пол-пикселя от ступеней маски. */
+static int pl_corner_cut(double scaled, int y, int height)
+{
+    double dy;
+
+    if (y < (int)scaled)
+        dy = scaled - y;
+    else if (y >= height - (int)scaled)
+        dy = (double)(y - (height - (int)scaled));
+    else
+        dy = 0.0;
+    if (dy <= 0.0)
+        return 0;
+
+    /* floor(), а не округление: дуга маски никогда не должна выходить за
+     * настоящую дугу, иначе в углу появится лишний пиксель фона. */
+    {
+        double t = scaled * scaled - dy * dy;
+
+        if (t < 0.0)
+            t = 0.0;
+        return (int)floor(scaled - sqrt(t));
+    }
+}
+
+/* Рамка окна как ЗАЛИВКА кольца по той же построчной сетке, что и маска.
+ *
+ * Раньше рамка рисулась обводкой по дуге, и на пологом участке обводка в
+ * 1 px размазывалась сглаживанием между двумя пикселями: измерением на
+ * сервере яркость рамки падала 160 -> 125 -> 87 -> 66 -> 52 при фоне 32,
+ * то есть дуга буквально растворялась, и рамка выглядела рваной с
+ * разрывами в 1-3 px. Увеличение толщины до 2 проблему снимало, но рамка
+ * становилась заметно грубой.
+ *
+ * Заливка кольца построчной сеткой убирает разрывы без утолщения: каждый
+ * пиксель заливается целиком, яркость не зависит от крутизны дуги, и
+ * рамка по ширине совпадает с маской окна, то есть не выходит за срез.
+ *
+ * even-odd: внешний контур строится по радиусу r, внутренний по r - width.
+ * Порядок контуров не важен - правило чётности смотрит на вложенность. */
+static void pl_border_region_path(cairo_t *cr, int width, int height,
+                                  double radius, double thickness)
+{
+    int inner_r, y;
+
+    if (width <= 0 || height <= 0 || thickness <= 0.0)
+        return;
+    if (!pl_corner_radius_is_rounded(radius)) {
+        cairo_rectangle(cr, 0.0, 0.0, width, height);
+        cairo_rectangle(cr, thickness, thickness,
+                        width - 2 * thickness, height - 2 * thickness);
         return;
     }
-    if (r <= 0.0) {
-        cairo_rectangle(cr, inset, inset, w, h);
-        return;
+
+    {
+        double max_r = MIN(width, height) / 2.0;
+
+        if (radius > max_r)
+            radius = max_r;
+        inner_r = (int)(radius - thickness);
+        if (inner_r < 0)
+            inner_r = 0;
     }
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
-    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
-    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
-    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
-    cairo_close_path(cr);
+
+    for (y = 0; y < height; y++) {
+        int outer_cut = pl_corner_cut(radius, y, height);
+        int inner_cut = inner_r > 0 ? pl_corner_cut(inner_r, y, height) : 0;
+
+        cairo_rectangle(cr, outer_cut, y, width - 2 * outer_cut, 1);
+        if (inner_r > 0 && width - 2 * inner_cut > 0)
+            cairo_rectangle(cr, inner_cut, y, width - 2 * inner_cut, 1);
+    }
 }
 
 /* Радиус углов из конфига.

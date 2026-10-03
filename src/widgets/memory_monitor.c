@@ -343,29 +343,78 @@ static void mm_rounded_path(cairo_t *cr, int width, int height, int radius)
     cairo_close_path(cr);
 }
 
-/* Контур рамки: округлённый прямоугольник с произвольным отступом и
- * радиусом. Отдельная функция, потому что clip и обводка требуют разных
- * пар значений - одними четырьмя cairo_arc() в render это не выразить. */
-static void mm_border_path(cairo_t *cr, int width, int height,
-                           double radius, double inset)
-{
-    double w = width - 2 * inset, h = height - 2 * inset;
-    double r = MIN(radius, MIN(w, h) / 2.0);
 
-    if (w <= 0 || h <= 0) {
-        cairo_rectangle(cr, 0, 0, width, height);
+/* Ширина среза у строки y для заданного радиуса.
+ *
+ * Та же формула, что в mm_rounded_region(), вынесена отдельно: теперь по
+ * ней считаются и маска окна, и рамка. Разные формулы означали бы, что
+ * рамка не совпадает с формой окна, и это видно глазом. */
+static int mm_corner_cut(double scaled, int y, int height)
+{
+    double dy;
+
+    if (y < (int)scaled)
+        dy = scaled - y;
+    else if (y >= height - (int)scaled)
+        dy = (double)(y - (height - (int)scaled));
+    else
+        dy = 0.0;
+    if (dy <= 0.0)
+        return 0;
+
+    /* floor(): дуга маски никогда не должна выходить за настоящую дугу. */
+    {
+        double t = scaled * scaled - dy * dy;
+
+        if (t < 0.0)
+            t = 0.0;
+        return (int)floor(scaled - sqrt(t));
+    }
+}
+
+/* Рамка окна как ЗАЛИВКА кольца по той же построчной сетке, что и маска.
+ *
+ * Обводка по гладкой дуге на пологом участке размазывалась сглаживанием
+ * между двумя пикселями: измерением на сервере яркость падала 160 -> 125 ->
+ * 87 -> 66 -> 52 при фоне 32, то есть дуга растворялась и рамка выглядела
+ * рваной с разрывами в 1-3 px. Толщина 2 это снимала, но рамка выходила
+ * грубой.
+ *
+ * Заливка кольца построчной сеткой убирает разрывы без утолщения: пиксель
+ * заливается целиком, яркость не зависит от крутизны дуги, и ширина рамки
+ * совпадает с маской окна, то есть не выходит за срез. */
+static void mm_border_region_path(cairo_t *cr, int width, int height,
+                                  double radius, double thickness)
+{
+    int inner_r, y;
+
+    if (width <= 0 || height <= 0 || thickness <= 0.0)
+        return;
+    if (!mm_corner_radius_is_rounded(radius)) {
+        cairo_rectangle(cr, 0.0, 0.0, width, height);
+        cairo_rectangle(cr, thickness, thickness,
+                        width - 2 * thickness, height - 2 * thickness);
         return;
     }
-    if (r <= 0.0) {
-        cairo_rectangle(cr, inset, inset, w, h);
-        return;
+
+    {
+        double max_r = MIN(width, height) / 2.0;
+
+        if (radius > max_r)
+            radius = max_r;
+        inner_r = (int)(radius - thickness);
+        if (inner_r < 0)
+            inner_r = 0;
     }
-    cairo_new_sub_path(cr);
-    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
-    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
-    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
-    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
-    cairo_close_path(cr);
+
+    for (y = 0; y < height; y++) {
+        int outer_cut = mm_corner_cut(radius, y, height);
+        int inner_cut = inner_r > 0 ? mm_corner_cut(inner_r, y, height) : 0;
+
+        cairo_rectangle(cr, outer_cut, y, width - 2 * outer_cut, 1);
+        if (inner_r > 0 && width - 2 * inner_cut > 0)
+            cairo_rectangle(cr, inner_cut, y, width - 2 * inner_cut, 1);
+    }
 }
 
 /* Применить форму X-окна. Вызывается из render, где известны фактические
@@ -620,20 +669,14 @@ done:
      * После restore клипа нет, но маска X-сервера по-прежнему режет углы,
      * поэтому за скругление рамка вылезти не может. */
     if (priv->border_width > 0.0) {
-        double inset = priv->border_width / 2.0;
-        double r = mm_corner_radius_value(priv->corner_radius);
-
-        if (mm_corner_radius_is_rounded(r) && r > inset)
-            mm_border_path(cr, width, height, r - inset, inset);
-        else
-            cairo_rectangle(cr, inset, inset, width - 2 * inset,
-                            height - 2 * inset);
-        cairo_set_source_rgba(cr, priv->graph_border_color[0],
-                              priv->graph_border_color[1],
-                              priv->graph_border_color[2],
-                              priv->graph_border_color[3]);
-        cairo_set_line_width(cr, priv->border_width);
-        cairo_stroke(cr);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        mm_border_region_path(cr, width, height,
+                              mm_corner_radius_value(priv->corner_radius),
+                              priv->border_width);
+        cairo_set_source_rgba(cr, priv->border_color[0], priv->border_color[1],
+                              priv->border_color[2], priv->border_color[3]);
+        cairo_fill(cr);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
     }
 
     cairo_destroy(cr);
