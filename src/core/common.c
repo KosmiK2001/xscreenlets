@@ -7,6 +7,11 @@
 #include "i18n.h"
 
 #include <cairo.h>
+/* Для проверки перекрытия окон (occlusion). Работает только на X11; на
+ * Wayland функция возвращает FALSE, то есть ничего не гасится, - там
+ * композитор сам решает, что видно, и клиентской оптимизации не нужно. */
+#include <gdk/gdkx.h>
+#include <X11/Xatom.h>
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <librsvg/rsvg.h>
@@ -378,6 +383,84 @@ void xs_core_conf_flush(void)
 static cairo_surface_t *capture_frame(cairo_t *cr, int w, int h);
 static void reset_shape_schedule(XsWinState *state);
 static gboolean xs_core_tick_cb(XsPlugin *p);
+/* Перекрыто ли окно плагина другим окном.
+ *
+ * Обход стека X-сервера: берём корень, XQueryTree даёт окна от верхнего к
+ * нижнему, и всё, что выше нашего окна и пересекается с ним по
+ * прямоугольнику, считается закрывающим.
+ *
+ * Почему не EWMH _NET_WM_STATE_FULLSCREEN: полноэкранных окон мало, а
+ * закрывать applet может и обычное окно, подведённое мышью, и развёрнутый
+ * терминал. Проверка пересечения ловит оба случая одинаково.
+ *
+ * Перекрытие считается ПОЛНЫМ: окно должно закрыть applet целиком.
+ * Частичное перекрытие возвращает FALSE намеренно - иначе видимая часть
+ * applet залипла бы нарисованной до смены порядка окон, и это выглядело
+ * бы как зависший апплет. */
+static gboolean xs_window_occluded(XsWinState *state)
+{
+    Display *dpy;
+    Window root, self_win, dummy;
+    Window *children = NULL;
+    unsigned int n_children = 0;
+    gint rx, ry, gx, gy;
+    int wx, wy, width, height;
+    int i;
+    gboolean covered = FALSE;
+
+    if (!state || !state->win)
+        return FALSE;
+    if (!GDK_IS_X11_DISPLAY(gdk_window_get_display(gdk_get_default_root_window())))
+        return FALSE;
+
+    dpy = GDK_DISPLAY_XDISPLAY(gdk_window_get_display(gdk_get_default_root_window()));
+    if (!dpy)
+        return FALSE;
+
+    self_win = GDK_WINDOW_XID(gtk_widget_get_window(state->win));
+    if (!self_win)
+        return FALSE;
+
+    /* gdk_window_get_geometry возвращает void, результата проверять не на
+     * чем; страхуемся только размерами. */
+    gdk_window_get_geometry(gtk_widget_get_window(state->win), &wx, &wy,
+                            &width, &height);
+    if (!gdk_window_get_origin(gtk_widget_get_window(state->win), &gx, &gy))
+        return FALSE;
+    if (width <= 0 || height <= 0)
+        return FALSE;
+
+    root = DefaultRootWindow(dpy);
+    if (!XQueryTree(dpy, root, &dummy, &dummy, &children, &n_children))
+        return FALSE;
+
+    for (i = 0; i < (int)n_children && !covered; i++) {
+        XWindowAttributes attr;
+        Window target = children[i];
+
+        /* Окна выше нашего в стеке и есть потенциальные закрыватели. */
+        if (target == self_win) {
+            XFree(children);
+            return FALSE;
+        }
+        if (!XGetWindowAttributes(dpy, target, &attr))
+            continue;
+        /* Только видимые окна закрывают то, что под ними. */
+        if (attr.map_state != IsViewable)
+            continue;
+        {
+            int ix = attr.x, iy = attr.y;
+            int iw = attr.width, ih = attr.height;
+
+            /* Пересечение прямоугольников (в координатах экрана). */
+            if (ix + iw > gx && ix < gx + width &&
+                iy + ih > gy && iy < gy + height)
+                covered = TRUE;
+        }
+    }
+    XFree(children);
+    return covered;
+}
 static void set_tick(XsPlugin *p, guint ms);
 static gboolean theme_load(XsPlugin *p, const char *dir);
 static void theme_draw_ninepatch(XsPlugin *p, cairo_t *cr,
@@ -2844,8 +2927,37 @@ static gboolean xs_core_tick_cb(XsPlugin *p)
     state = p->win ? g_object_get_data(G_OBJECT(p->win), "xs-state") : NULL;
     if (!state || state->freed)
         return G_SOURCE_REMOVE;
-    state->frame_dirty = TRUE;
-    gtk_widget_queue_draw(state->area);
+    /* Гасим ПЕРЕРИСОВКУ, но не сбор данных.
+     *
+     * Апплеты дешёво читают /proc и дорого перерисовывают кэш, поэтому при
+     * полном перекрытии окна экономится ровно вторая часть, а первая
+     * продолжает работать. Из-за этого история графиков остаётся
+     * непрерывной: при возврате окна первый же кадр рисует честные
+     * данные, и никакой «разморозки» не видно - сравнивать не с чем,
+     * промежуточных кадров не было.
+     *
+     * Если гасить ещё и сбор, накопилось бы разрыв или пачка свепов, и
+     * график дёрнулся бы вертикальной полосой - ровно тот артефакт,
+     * которого мы избегаем.
+     *
+     * frame_dirty при перекрытии тоже НЕ ставится: иначе накопленный
+     * флаг выстрелил бы кадром сразу после возврата окна, то есть вся
+     * экономия была бы вхолостую потраченным ожиданием.
+     *
+     * ever_drawn защищает один случай: окно, перекрытое с самого старта,
+     * никогда не рисовалось, и при разморозке обязано получить первый
+     * кадр иначе покажет пустоту. */
+    state->occluded = xs_window_occluded(state);
+    if (!state->occluded || !state->ever_drawn) {
+        /* Видно (или ещё ни разу не рисовали) - обычный путь. Сюда же
+         * попадает и разморозка: occluded только что сменился на FALSE,
+         * поэтому первый кадр после возврата окна будет свежим. */
+        state->frame_dirty = TRUE;
+        gtk_widget_queue_draw(state->area);
+    }
+    /* Иначе окно перекрыто и уже рисовалось: очередь перерисовок не трогаем
+     * и frame_dirty не ставим, копить его незачем - на разморозке кадр
+     * всё равно будет полным. */
     if (p->ops && p->ops->tick) {
         guint interval = p->ops->tick(p);
         if (interval > 0 && interval != state->tick_ms)
@@ -3409,6 +3521,9 @@ static gboolean on_draw_frame(GtkWidget *area, cairo_t *cr, gpointer data)
         return FALSE;
     width = gtk_widget_get_allocated_width(area);
     height = gtk_widget_get_allocated_height(area);
+    /* Кадр отдан: с этого момента окно можно смело гасить при перекрытии,
+     * потому что при разморозке будет с чего рисовать. */
+    state->ever_drawn = TRUE;
     if (g_debug)
         xs_log_impl("draw: %dx%d op=%.2f", width, height, state->opacity);
     cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);

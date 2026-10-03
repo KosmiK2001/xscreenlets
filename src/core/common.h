@@ -48,6 +48,8 @@ typedef struct _XsWinState {
 	gboolean keep_above;       /* всегда сверху */
 	gboolean keep_below;       /* всегда снизу */
 	gboolean freed;            /* ресурсы уже освобождены */
+	gboolean occluded;         /* окно перекрыто другим окном (paint можно гасить) */
+	gboolean ever_drawn;       /* кадр уже отдавался хотя бы раз */
 } XsWinState;
 
 /* Отложенная команда меню (выполняется в idle после закрытия меню) */
