@@ -383,85 +383,157 @@ void xs_core_conf_flush(void)
 static cairo_surface_t *capture_frame(cairo_t *cr, int w, int h);
 static void reset_shape_schedule(XsWinState *state);
 static gboolean xs_core_tick_cb(XsPlugin *p);
-/* Перекрыто ли окно плагина другим окном.
+/* Перекрыто ли окно плагина другим окном ПОЛНОСТЬЮ.
  *
- * Обход стека X-сервера: берём корень, XQueryTree даёт окна от верхнего к
- * нижнему, и всё, что выше нашего окна и пересекается с ним по
- * прямоугольнику, считается закрывающим.
+ * Разбор стека X-сервера с двумя обязательными оговорками, обе из-за
+ * которых первая версия функции работала неправильно.
  *
- * Почему не EWMH _NET_WM_STATE_FULLSCREEN: полноэкранных окон мало, а
- * закрывать applet может и обычное окно, подведённое мышью, и развёрнутый
- * терминал. Проверка пересечения ловит оба случая одинаково.
+ * ПОРЯДОК ОБХОДА. XQueryTree возвращает детей «from bottom-most (first)
+ * to top-most (last)», то есть СНИЗУ ВВЕРХ. Первая версия шла с i=0, то
+ * есть с самого нижнего окна, и объявляла applet перекрытым из-за любого
+ * окна ПОД ним - то есть отвечала на противоположный вопрос. Здесь обход
+ * идёт с конца массива, сверху вниз, и только до нашего окна.
  *
- * Перекрытие считается ПОЛНЫМ: окно должно закрыть applet целиком.
- * Частичное перекрытие возвращает FALSE намеренно - иначе видимая часть
- * applet залипла бы нарисованной до смены порядка окон, и это выглядело
- * бы как зависший апплет. */
+ * РЕПАРЕНТИНГ. Репарентящий WM (Mutter, KWin, Xfwm4) заворачивает окно в
+ * frame, поэтому наш инстанс не является прямым ребёнком root. Искать его
+ * среди детей root бессмысленно, а хуже того - собственный frame того же
+ * размера оказывался среди проверяемых и объявлял applet перекрытым
+ * САМИМ СОБОЙ, то есть все appletы замирали навсегда после первого кадра.
+ * Поэтому сначала поднимаемся от нашего окна к верхнеуровневому предку.
+ *
+ * Теперь по определению «перекрыт» означает: есть видимое окно ВЫШЕ нашего
+ * в стеке, которое содержит наш прямоугольник целиком. Пересечение, а не
+ * содержание, проверять нельзя: окно уведомлений, задевшее угол, не
+ * делает applet невидимым, а первая версия именно так его и замораживала.
+ *
+ * Перекрытие несколькими окнами по частям (сверху одно, снизу другое) не
+ * ловится: это требует union непрозрачных областей. На практике applet
+ * перекрывают одним окном - терминалом, браузером, полноэкранной игрой, -
+ * и это покрытие случается одним окном.
+ *
+ * Про X-ошибки: между XQueryTree и XGetWindowAttributes окно может
+ * исчезнуть, а BadWindow без перехвата в GDK3 завершает процесс, то есть
+ * уронил бы демон целиком. Поэтому весь обход под
+ * gdk_x11_display_error_trap_*: gdk_error_trap_push без аргументов в
+ * GDK3 deprecated и не принимает дисплей, нужен x11-специфичный. */
 static gboolean xs_window_occluded(XsWinState *state)
 {
+    GdkWindow *gdk_win;
+    GdkDisplay *gdk_dpy;
     Display *dpy;
-    Window root, self_win, dummy;
+    Window root, self_win, top_win;
     Window *children = NULL;
     unsigned int n_children = 0;
-    gint rx, ry, gx, gy;
-    int wx, wy, width, height;
+    int self_index = -1;
+    gint gx, gy;
+    int gwk_x, gwk_y;          /* положение в своих координатах, не нужно */
+    int width, height;
     int i;
     gboolean covered = FALSE;
+    int guard;
 
     if (!state || !state->win)
         return FALSE;
-    if (!GDK_IS_X11_DISPLAY(gdk_window_get_display(gdk_get_default_root_window())))
+
+    gdk_win = gtk_widget_get_window(state->win);
+    /* До realize окна не существует, а GTK на NULL печатает CRITICAL.
+     * Не реализованное окно перекрытым быть не может. */
+    if (!gdk_win)
         return FALSE;
 
-    dpy = GDK_DISPLAY_XDISPLAY(gdk_window_get_display(gdk_get_default_root_window()));
+    gdk_dpy = gdk_window_get_display(gdk_win);
+    if (!gdk_dpy || !GDK_IS_X11_DISPLAY(gdk_dpy))
+        return FALSE;
+
+    dpy = GDK_DISPLAY_XDISPLAY(gdk_dpy);
     if (!dpy)
         return FALSE;
 
-    self_win = GDK_WINDOW_XID(gtk_widget_get_window(state->win));
+    self_win = GDK_WINDOW_XID(gdk_win);
     if (!self_win)
         return FALSE;
 
-    /* gdk_window_get_geometry возвращает void, результата проверять не на
-     * чем; страхуемся только размерами. */
-    gdk_window_get_geometry(gtk_widget_get_window(state->win), &wx, &wy,
-                            &width, &height);
-    if (!gdk_window_get_origin(gtk_widget_get_window(state->win), &gx, &gy))
+    gdk_window_get_geometry(gdk_win, &gwk_x, &gwk_y, &width, &height);
+    if (!gdk_window_get_origin(gdk_win, &gx, &gy))
         return FALSE;
     if (width <= 0 || height <= 0)
         return FALSE;
 
+    gdk_x11_display_error_trap_push(gdk_dpy);
+
     root = DefaultRootWindow(dpy);
-    if (!XQueryTree(dpy, root, &dummy, &dummy, &children, &n_children))
-        return FALSE;
 
-    for (i = 0; i < (int)n_children && !covered; i++) {
-        XWindowAttributes attr;
-        Window target = children[i];
+    /* Подъём к верхнеуровневому предку: у applet это его же окно при
+     * non-reparenting WM и frame при reparenting. */
+    top_win = self_win;
+    for (guard = 0; guard < 64; guard++) {
+        Window r = 0, parent = 0, *kids = NULL;
+        unsigned int n_kids = 0;
 
-        /* Окна выше нашего в стеке и есть потенциальные закрыватели. */
-        if (target == self_win) {
-            XFree(children);
-            return FALSE;
+        if (!XQueryTree(dpy, top_win, &r, &parent, &kids, &n_kids)) {
+            if (kids)
+                XFree(kids);
+            break;
         }
-        if (!XGetWindowAttributes(dpy, target, &attr))
-            continue;
-        /* Только видимые окна закрывают то, что под ними. */
-        if (attr.map_state != IsViewable)
-            continue;
-        {
-            int ix = attr.x, iy = attr.y;
-            int iw = attr.width, ih = attr.height;
+        if (kids)
+            XFree(kids);
+        if (parent == 0 || parent == root || parent == top_win)
+            break;
+        top_win = parent;
+    }
 
-            /* Пересечение прямоугольников (в координатах экрана). */
-            if (ix + iw > gx && ix < gx + width &&
-                iy + ih > gy && iy < gy + height)
-                covered = TRUE;
+    if (!XQueryTree(dpy, root, NULL, NULL, &children, &n_children))
+        goto out;
+
+    /* XQueryTree даёт детей снизу вверх, поэтому наше окно ищем по всей
+     * выборке, а обход закрывателей пойдёт с конца. */
+    for (i = 0; i < (int)n_children; i++) {
+        if (children[i] == top_win) {
+            self_index = i;
+            break;
         }
     }
-    XFree(children);
+    if (self_index < 0)
+        goto out;
+
+    for (i = (int)n_children - 1; i > self_index; i--) {
+        XWindowAttributes attr;
+        Window target = children[i];
+        int ix, iy, iw, ih;
+
+        if (target == top_win)
+            continue;
+        if (!XGetWindowAttributes(dpy, target, &attr))
+            continue;
+        /* Закрывает только то, что действительно нарисовано. */
+        if (attr.map_state != IsViewable)
+            continue;
+        /* InputOnly-окна (курсоры, grab-помощники) невидимы и закрывать
+         * ничего не могут. */
+        if (attr.class == InputOnly)
+            continue;
+
+        /* attr.x/y заданы относительно родителя; у детей root это и есть
+         * экранные координаты. Иного родителя у верхнего уровня не бывает. */
+        ix = attr.x;
+        iy = attr.y;
+        iw = attr.width;
+        ih = attr.height;
+
+        /* СОДЕРЖАНИЕ, а не пересечение: окно должно накрыть applet целиком. */
+        if (ix <= gx && iy <= gy &&
+            ix + iw >= gx + width && iy + ih >= gy + height) {
+            covered = TRUE;
+            break;
+        }
+    }
+
+out:
+    if (children)
+        XFree(children);
+    gdk_x11_display_error_trap_pop_ignored(gdk_dpy);
     return covered;
-}
-static void set_tick(XsPlugin *p, guint ms);
+}static void set_tick(XsPlugin *p, guint ms);
 static gboolean theme_load(XsPlugin *p, const char *dir);
 static void theme_draw_ninepatch(XsPlugin *p, cairo_t *cr,
                                   const char *element, double x, double y,
@@ -2957,7 +3029,21 @@ static gboolean xs_core_tick_cb(XsPlugin *p)
     }
     /* Иначе окно перекрыто и уже рисовалось: очередь перерисовок не трогаем
      * и frame_dirty не ставим, копить его незачем - на разморозке кадр
-     * всё равно будет полным. */
+     * всё равно будет полным.
+     *
+     * Тут же снято возражение, что frame_dirty управляет ещё и input shape
+     * через capture_frame. Да, управляет, и при перекрытии связь рвётся:
+     * если applet сменит corner_radius под закрывающим окном, его
+     * queue_draw вызовет on_draw_frame с frame_dirty == FALSE, capture
+     * пропустится, и форма окна останется прежней.
+     *
+     * Это безвредно ИМЕННО потому, что перекрытие полное: кликнуть по
+     * закрытому applet нельзя, форма никому не нужна, а на разморозке
+     * occluded становится FALSE, frame_dirty ставится заново, draw
+     * отрабатывает с capture_frame и reset_shape_schedule - форма приходит
+     * в актуальное состояние ДО того, как applet снова станет кликабельным.
+     *
+     * На частичном перекрытии applet кликабелен, но там и не гасится. */
     if (p->ops && p->ops->tick) {
         guint interval = p->ops->tick(p);
         if (interval > 0 && interval != state->tick_ms)
