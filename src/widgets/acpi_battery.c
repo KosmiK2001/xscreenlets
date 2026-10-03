@@ -915,11 +915,22 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     g.widget = p->win;
     ab_layout(st, w, h, &g);
 
-    /* Окно не должно быть меньше нарисованного. Раньше размер брался
-     * только из настроек (ab_clamp по жёстким 60x30), и при крупном
-     * шрифте текст вылезал за рамку и обрезался. Требуемый размер
-     * считает ab_layout() по метрикам шрифта; если окно меньше - растим
-     * его и запоминаем минимум, чтобы ab_clamp() не ужал обратно. */
+    /* Окно не должно быть меньше нарисованного. Размер берётся из
+     * настроек пользователя как ПОЛ, а не как точное значение:
+     *
+     *   - меньше need_* нельзя, содержимое не влезет и текст обрежется;
+     *   - больше можно, и это как раз то, зачем настройка нужна.
+     *
+     * Раньше здесь стояло st->window_width = nw, то есть размер из
+     * настроек молча перезаписывался фактическим в памяти. В конфиг это
+     * не писалось, поэтому настройка и реальный размер расходились:
+     * ползунок показывал фактическую ширину, в конфиге лежала
+     * пользовательская, и при открытии Properties нижняя граница
+     * ползунка уже подпрыгивала до фактической - вернуть меньше было
+     * невозможно. Теперь в памяти и в конфиге одно и то же число.
+     *
+     * Пользовательский размер НЕ пишется в конфиг: иначе движение
+     * ползунка Scale затирало бы его (см. ab_apply_scale). */
     if (g.need_w > st->min_width)
         st->min_width = g.need_w;
     if (g.need_h > st->min_height)
@@ -928,8 +939,6 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
         int nw = MAX(w, g.need_w);
         int nh = MAX(h, g.need_h);
 
-        st->window_width  = nw;
-        st->window_height = nh;
         api->resize(p, nw, nh);
         w = nw;
         h = nh;
@@ -1180,13 +1189,24 @@ static void ab_properties(XsPlugin *p, GtkNotebook *nb)
 
     /* Нижняя граница ползунка - измеренный минимум, а не жёсткие 60x30:
      * при крупном шрифте меньший размер обрезал бы текст, и applet
-     * всё равно растил бы себя в draw(). */
+     * всё равно растил бы себя в draw(). Размер из настроек работает как
+     * ПОЛ: поставить меньше содержимого нельзя, больше - можно, и это
+     * как раз то, зачем настройка нужна.
+     *
+     * Верхняя граница не ниже нижней: при крупном scale содержимое может
+     * быть шире жёсткого предела, и ползунок с min > max в GTK ведёт себя
+     * непредсказуемо (не скроллится либо рисуется перевёрнутым). */
     ab_int_prop(GTK_BOX(page), p, "window_width", "Window width",
-                "Applet width in pixels", st->window_width,
-                MAX(AB_MIN_WIDTH, st->min_width), 400);
+                "Applet width in pixels. Acts as a minimum: the applet grows "
+                "wider if its contents do not fit.",
+                st->window_width,
+                MAX(AB_MIN_WIDTH, st->min_width),
+                MAX(400, MAX(AB_MIN_WIDTH, st->min_width)));
     ab_int_prop(GTK_BOX(page), p, "window_height", "Window height",
-                "Applet height in pixels", st->window_height,
-                MAX(AB_MIN_HEIGHT, st->min_height), 200);
+                "Applet height in pixels. Acts as a minimum.",
+                st->window_height,
+                MAX(AB_MIN_HEIGHT, st->min_height),
+                MAX(400, MAX(AB_MIN_HEIGHT, st->min_height)));
     ab_int_prop(GTK_BOX(page), p, "update_interval", "Update interval (s)",
                 "Seconds between reads of sysfs", st->update_interval, 1, 3600);
     ab_int_prop(GTK_BOX(page), p, "alarm_threshold", "Low battery threshold (%)",
