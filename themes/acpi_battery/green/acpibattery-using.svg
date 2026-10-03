@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Green battery theme. Body derived from the LinkedIn reference.
+     Indicator is drawn FULL WIDTH on purpose: acpi_battery.c clips
+     it to the real charge percent. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="18"
+     viewBox="0 0 60 18">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9BF07F"/>
+      <stop offset="1" stop-color="#5FD14A"/>
+    </linearGradient>
+  </defs>
+  <!-- Тёмная желобка обязательна: корпус батарейки светло-зелёный
+       (#A4E698), и светлый индикатор на нём сливался. Желобка
+       даёт тёмный фон, на котором заливка читается всегда. -->
+  <rect x="0" y="0" width="60" height="18" rx="3"
+        fill="#0C1F0A"/>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="url(#g)"/>
+  <rect x="0" y="0" width="60" height="18" rx="3" fill="none"
+        stroke="#C4F7AC" stroke-width="1" opacity="0.9"/>
+</svg>

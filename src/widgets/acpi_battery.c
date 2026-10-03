@@ -35,19 +35,34 @@
 #include "acpi_battery_core.h"
 
 #include "../core/i18n.h"
-#define AB_DEFAULT_WIDTH    100
+/* Окно 130x50 под тему green: батарейка 76x37 слева, текст сбоку.
+ * Было 100x50 с текстом поверх батарейки (координаты оригинала). */
+#define AB_DEFAULT_WIDTH    130
 #define AB_DEFAULT_HEIGHT    50
 /* Порог ниже которого заряд считается низким. 15 — тот же процент,
  * что стоял в оригинале по умолчанию. */
 #define AB_DEFAULT_ALARM     15
 #define AB_DEFAULT_INTERVAL  30     /* секунд */
 
-#define AB_TEXT_X            37
-#define AB_TEXT_Y_PERCENT     5
-#define AB_TEXT_Y_TIME       26
-#define AB_TEXT_Y_ONLY       13
+/* Геометрия темы green. Текст сбоку от батарейки, а не поверх неё:
+ * в теме green процент уже читается по длине полосы индикатора,
+ * второй раз писать его поверх корпуса только мешает. */
+#define AB_TEXT_X           86
+#define AB_TEXT_Y_PERCENT    7
+#define AB_TEXT_Y_TIME      28
+#define AB_TEXT_Y_ONLY      16
 #define AB_MIN_WIDTH         60
 #define AB_MIN_HEIGHT        30
+
+/* Положение батарейки и индикатора внутри окна 130x50. */
+#define AB_BODY_X            4
+#define AB_BODY_Y            6
+#define AB_BODY_W           76
+#define AB_BODY_H           37
+#define AB_IND_X            12
+#define AB_IND_Y            19
+#define AB_IND_W            60
+#define AB_IND_H            18
 
 typedef struct {
     int      window_width;
@@ -210,15 +225,22 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
      * Остальные апплеты (clock, calendar, clearrss, frame_launcher) с
      * самого начала вызывали find_theme() первым. */
     {
+        /* Имя темы берём из конфига (по умолчанию "default"). Раньше
+         * строка "default" стояла здесь жёстко, и выбрать другую тему
+         * было нечем - тема green из референса просто не подхватывалась,
+         * хотя лежала рядом на диске. */
+        char *theme_name = api->conf_str(kf, p->name, "theme", "default");
         char *theme_dir = xs_core_find_theme(p->type ? p->type : p->name,
-                                             "default");
+                                             theme_name);
 
         if (theme_dir && api->theme_load(p, theme_dir)) {
             if (xs_core_is_debug())
                 api->log("acpi_battery: theme loaded from %s", theme_dir);
         } else if (xs_core_is_debug()) {
-            api->log("acpi_battery: theme 'default' not found, text only");
+            api->log("acpi_battery: theme '%s' not found, text only",
+                     theme_name);
         }
+        g_free(theme_name);
         g_free(theme_dir);
     }
 
@@ -274,6 +296,32 @@ static void ab_draw_gray(XsPlugin *p, cairo_t *cr, const char *element,
     cairo_surface_destroy(surf);
 }
 
+/* Рисует индикатор заряда, обрезанный по реальному проценту.
+ *
+ * Элемент темы нарисован на всю ширину AB_IND_W, а здесь мы режем его
+ * клипом по проценту. В оригинальной python-теме индикатор был
+ * статичной картинкой: уровень заряда не показывался никак, менялся
+ * только цвет аларма. Полоса по проценту - то, чего там не было.
+ *
+ * При неизвестном проценте (нет батареи) рисуем полосу целиком, иначе
+ * клип нулевой ширины оставил бы пустое место вместо индикатора. */
+static void ab_draw_indicator(XsPlugin *p, cairo_t *cr, const char *element,
+                             int percent)
+{
+    double frac;
+
+    if (!element || !xs_core_theme_has(p, element))
+        return;
+    frac = (percent < 0 || percent > 100) ? 1.0 : percent / 100.0;
+
+    cairo_save(cr);
+    cairo_rectangle(cr, AB_IND_X, AB_IND_Y, AB_IND_W * frac, AB_IND_H);
+    cairo_clip(cr);
+    p->host->theme_draw_full(p, cr, element,
+                             AB_IND_X, AB_IND_Y, AB_IND_W, AB_IND_H);
+    cairo_restore(cr);
+}
+
 static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
 {
     AbState *st = p->priv;
@@ -281,17 +329,17 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     const char *indicator = NULL;
     gboolean no_battery;
 
-    /* Порядок как в оригинале: фон, корпус, индикатор, текст.
+    /* Порядок как в оригинале: фон, корпус, индикатор, блик, текст.
      *
      * Именно theme_draw_full, а НЕ theme_draw: theme_draw подставляет
-     * высоту, равную ширине, то есть для окна 100x50 просит тему
-     * нарисовать в квадрате 100x100. Тема натурального размера
-     * 98x50 растягивалась вдвое по вертикали, и нижняя половина
-     * батарейки уезжала за край окна и обрезалась. */
+     * высоту, равную ширине, то есть просит тему нарисовать в квадрате
+     * w x w. При окне 130x50 тема растягивалась бы по вертикали в 2.6
+     * раза, и нижняя половина батарейки уезжала бы за край. */
     if (xs_core_theme_has(p, "acpibattery-bg"))
         api->theme_draw_full(p, cr, "acpibattery-bg", 0, 0, w, h);
     if (xs_core_theme_has(p, "acpibattery-battery"))
-        api->theme_draw_full(p, cr, "acpibattery-battery", 0, 0, w, h);
+        api->theme_draw_full(p, cr, "acpibattery-battery",
+                             AB_BODY_X, AB_BODY_Y, AB_BODY_W, AB_BODY_H);
 
     no_battery = (!st->battery ||
                   st->battery->state == ACPI_BATTERY_NOT_PRESENT);
@@ -302,7 +350,8 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
          * просто нет. Серый корпус даёт читаемый applet, при этом не
          * выдаёт его за низкий заряд. */
         if (xs_core_theme_has(p, "acpibattery-using"))
-            ab_draw_gray(p, cr, "acpibattery-using", 0, 0, w, h);
+            ab_draw_gray(p, cr, "acpibattery-using",
+                         AB_IND_X, AB_IND_Y, AB_IND_W, AB_IND_H);
     } else if (st->battery->state == ACPI_BATTERY_CHARGING) {
         indicator = "acpibattery-charging";
     } else if (st->battery->state == ACPI_BATTERY_DISCHARGING) {
@@ -310,8 +359,8 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     } else {
         indicator = "acpibattery-using";
     }
-    if (indicator && xs_core_theme_has(p, indicator))
-        api->theme_draw_full(p, cr, indicator, 0, 0, w, h);
+    ab_draw_indicator(p, cr, indicator,
+                      no_battery ? -1 : st->battery->percent);
 
     /* Клип по окну: при крупном шрифте текст вылезет за рамку, а окно
      * непрозрачное, и текст зарисуется поверх соседних апплетов. */
@@ -319,17 +368,13 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     cairo_rectangle(cr, 0, 0, w, h);
     cairo_clip(cr);
 
-    /* Блик "acpibattery-glass" рисуется ПОСЛЕ текста - так в оригинале
-     * (ACPIBatteryScreenlet.py: "draw glass (if theme available)" в
-     * конце on_draw). Пропускали мы его, поэтому батарейка выглядела
-     * плоской: оставался только серый корпус с полоской индикатора.
-     *
-     * Рисуем прямо в cr, клип по окну выше уже установлен - так элемент
-     * попадает в ту же поверхность, что и всё остальное. Создавать
-     * cairo_create(cr) нельзя: cairo_create() принимает ПОВЕРХНОСТЬ,
-     * а не контекст, и такая попытка не компилируется. */
+    /* Блик ложится на корпус батарейки, поэтому рисуется по её
+     * координатам, а не на всё окно. В оригинале он рисовался
+     * последним, поверх текста, - здесь текст сбоку и блик ему не
+     * мешает, а корпус получает объём. */
     if (xs_core_theme_has(p, "acpibattery-glass"))
-        api->theme_draw_full(p, cr, "acpibattery-glass", 0, 0, w, h);
+        api->theme_draw_full(p, cr, "acpibattery-glass",
+                             AB_BODY_X, AB_BODY_Y, AB_BODY_W, AB_BODY_H);
 
     if (no_battery) {
         ab_text(st, cr, " No", AB_TEXT_X, AB_TEXT_Y_PERCENT, FALSE);
