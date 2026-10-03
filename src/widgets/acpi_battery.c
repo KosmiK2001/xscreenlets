@@ -67,6 +67,18 @@
  * краю, поэтому отступ считается справа и по вертикали. */
 #define AB_FRAME_PAD          2
 
+/* Дополнительный зазор от РАМКИ до содержимого слева и сверху/снизу.
+ *
+ * AB_FRAME_PAD недостаточно: он равен 2, но это отступ от края ОКНА, а не
+ * от нарисованной рамки. В темах рамка имеет собственную толщину (в green
+ * это 1 px тёмного #0D0F10, который при scale=1.64 становится 2 px на
+ * экране), поэтому при pad=3 батарейка отстояла от рамки на 1 px и
+ * визуально упиралась в неё вплотную.
+ *
+ * Считается в натуральных пикселях темы и масштабируется вместе со
+ * всем остальным, иначе при крупном scale зазор не рос бы. */
+#define AB_CONTENT_GAP        3
+
 /* Индикатор вписан в корпус: тема нарисована с полями 8 по бокам. */
 #define AB_IND_INSET_X       8
 #define AB_IND_H            18
@@ -700,7 +712,7 @@ static void ab_apply_shape(AbState *st, XsPlugin *p, int w, int h)
 
 static void ab_layout(AbState *st, int w, int h, AbGeom *g)
 {
-    int rows, pad, gap;
+    int rows, pad, gap, content_gap;
     PangoFontDescription *desc;
 
     g->scale = (st->scale > 0.0) ? st->scale : 1.0;
@@ -714,6 +726,10 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     g->ind_h = MAX(1, (int)(AB_IND_H * g->scale + 0.5));
     pad = MAX(0, (int)(AB_FRAME_PAD * g->scale + 0.5));
     gap = MAX(0, (int)(AB_GAP * g->scale + 0.5));
+    /* Зазор от рамки до содержимого слева: толщина нарисованной рамки
+     * задаётся темой и нам неизвестна, поэтому отступ от окна pad
+     * складывается с отдельным запасом. */
+    content_gap = MAX(0, (int)(AB_CONTENT_GAP * g->scale + 0.5));
 
     /* Ширина текста меряется по САМОЙ ДЛИННОЙ из возможных строк, а не
      * по текущей. Иначе прижатый вправо текст прыгал бы: у "Full" и
@@ -760,7 +776,10 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     /* Минимальный размер: корпус слева, текст справа, оба отступом от
      * рамки. Окно меньше этого обрезает содержимое, поэтому draw()
      * потом поднимет размер до need_w/need_h. */
-    g->need_w = 2 * pad + g->body_w + gap + g->text_w;
+    /* Слева отступ pad+content_gap, справа только pad: текст по твоему
+     * правилу прижат вправо, и увеличение правого поля двигало его
+     * от края, где он и должен быть. */
+    g->need_w = pad + content_gap + g->body_w + gap + g->text_w + pad;
     g->need_h = 2 * pad +
                 MAX(g->body_h, rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP);
 
@@ -773,7 +792,7 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
 
     /* Корпус: масштабированный размер, по вертикали по центру, слева от
      * текста. */
-    g->body_x = pad;
+    g->body_x = pad + content_gap;
     g->body_y = (h - g->body_h) / 2;
     if (g->body_y < 0)
         g->body_y = 0;
