@@ -10,7 +10,6 @@
 #include <inttypes.h>
 #include <math.h>
 #include <string.h>
-#include <stdio.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -836,10 +835,6 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
                             MAX(priv->row_count, 1U));
     guint i;
 
-    fprintf(stderr, "PLDBG render w=%d h=%d bw=%f\n", width, height,
-            priv->border_width);
-    fflush(stderr);
-
     /* Клип по округлому контуру ДО заливки фона.
      *
      * Фон заливается прямоугольником на весь размер окна, и маска X-сервера
@@ -1001,22 +996,12 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
      * с отступом border_width/2 остаётся - он нужен, чтобы дуга обводки
      * не оказалась снаружи дуги маски и не срезалась. */
     if (priv->border_width > 0.0) {
-        fprintf(stderr, "PLDBG bw=%f r=%d w=%d h=%d pre=%d\n",
-                priv->border_width, priv->corner_radius, width, height,
-                cairo_status(cr));
-        fflush(stderr);
-        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
         pl_border_region_path(cr, width, height,
                               pl_corner_radius_value(priv->corner_radius),
                               priv->border_width);
         cairo_set_source_rgba(cr, priv->border[0], priv->border[1],
                               priv->border[2], priv->border[3]);
-        fprintf(stderr, "PLDBG path=%d\n", cairo_status(cr));
-        fflush(stderr);
         cairo_fill(cr);
-        fprintf(stderr, "PLDBG post=%d\n", cairo_status(cr));
-        fflush(stderr);
-        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
     }
 
     g_object_unref(layout);
@@ -1430,48 +1415,42 @@ static int pl_corner_cut(double scaled, int y, int height)
 static void pl_border_region_path(cairo_t *cr, int width, int height,
                                   double radius, double thickness)
 {
-    int inner_r, y;
-    int t;
+    int t, y;
 
     if (width <= 0 || height <= 0 || thickness <= 0.0)
         return;
-    /* Рамка шире половины окна рисовать бессмысленно, а уменьшенное
-     * окно дало бы контуры с неположительным размером. */
+    /* Рамка шире половины окна рисовать бессмысленно. */
     t = (int)floor(thickness);
     if (t < 1 || t * 2 >= width || t * 2 >= height)
         return;
-    if (!pl_corner_radius_is_rounded(radius)) {
-        cairo_rectangle(cr, 0.0, 0.0, width, height);
-        cairo_rectangle(cr, thickness, thickness,
-                        width - 2 * thickness, height - 2 * thickness);
-        return;
-    }
-
-    {
-        double max_r = MIN(width, height) / 2.0;
-
-        if (radius > max_r)
-            radius = max_r;
-        inner_r = (int)MAX(radius - thickness, 0.0);
-    }
 
     for (y = 0; y < height; y++) {
-        int outer_cut = pl_corner_cut(radius, y, height);
-        int inner_h = height - 2 * t;
-        int iy = y - t;
-        int inner_cut;
+        /* Внешняя граница рамки совпадает с маской окна, поэтому рамка
+         * физически не может выйти за срез угла. */
+        int outer = pl_corner_cut(radius, y, height);
+        int inner = outer > 0 ? outer + t : t;
+        int bar;
 
-        /* Строки вне уменьшенного окна внутренним контуром перекрываются
-         * целиком: иначе на углах заливалась бы вся верхняя строка, то
-         * есть рамка превращалась бы в сплошную полосу. */
-        if (inner_r <= 0 || iy < 0 || iy >= inner_h)
-            inner_cut = 0;
-        else
-            inner_cut = t + pl_corner_cut(inner_r, iy, inner_h);
+        if (inner > width / 2)
+            inner = width / 2;
+        bar = inner - outer;
+        if (bar <= 0)
+            continue;
 
-        cairo_rectangle(cr, outer_cut, y, width - 2 * outer_cut, 1);
-        if (width - 2 * inner_cut > 0)
-            cairo_rectangle(cr, inner_cut, y, width - 2 * inner_cut, 1);
+        /* Две полосы слева и справа, а не кольцо из двух контуров.
+         *
+         * Кольцо через правило чётности требует, чтобы внутренний контур
+         * был построен для уменьшенного окна, и тут он вступал в противоречие
+         * с маской: на прямых участках уменьшенное окно даёт отступ t, а на
+         * строках вне него (верх и низ) внутреннего контура нет вовсе, и там
+         * он совпадал с внешним. Из-за этого рамка была только по бокам, а
+         * сверху и снизу отсутствовала.
+         *
+         * Ширина полосы берётся от маски окна: там, где маска срезает угол,
+         * рамка идёт сразу за ней, на прямых участках это ровно t пикселей
+         * от края. Разрывов в углах при этом не бывает по построению. */
+        cairo_rectangle(cr, outer, y, bar, 1);
+        cairo_rectangle(cr, width - inner, y, bar, 1);
     }
 }
 
