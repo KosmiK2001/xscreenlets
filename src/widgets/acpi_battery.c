@@ -288,6 +288,12 @@ static void ab_text(AbState *st, cairo_t *cr, const char *text,
     if (!text || !*text)
         return;
 
+    if (xs_core_is_debug())
+        p->host->log("ab: TEXT '%s' x=%.1f y=%.1f -> baseline %.1f (win %dx%d)",
+                     text, x, y, y + ascent,
+                     p->win ? gdk_window_get_width(gtk_widget_get_window(p->win)) : -1,
+                     p->win ? gdk_window_get_height(gtk_widget_get_window(p->win)) : -1);
+
     cairo_move_to(cr, x, y + ascent);
     if (red)
         cairo_set_source_rgb(cr, 1.0, 0.15, 0.15);
