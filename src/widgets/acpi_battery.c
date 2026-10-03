@@ -97,7 +97,7 @@ typedef struct {
     int ind_x, ind_y, ind_w, ind_h;
     int body_x, body_y;
     /* Текст прижат по ПРАВОМУ краю: text_x считается от w - ширина. */
-    int text_x, text_y_percent, text_y_time, text_y_only;
+    int text_x, text_y_percent, text_y_time, text_y_source, text_y_only;
     int line_h, ascent, text_w;
     /* Сколько места нужно окну, чтобы всё влезло без обрезания. */
     int need_w, need_h;
@@ -118,6 +118,17 @@ typedef struct {
     char        *percent_text;
     gboolean low;            /* заряд ниже порога */
     GtkWidget   *widget;         /* окно для gtk_widget_create_pango_layout */
+
+    /* Третья строка: состояние сети и имя источника.
+     *
+     * Нужна потому, что вторую строку занимает время/статус, а по нему
+     * нельзя отличить «заряжается от сети» от «заряжается, потому что
+     * подключён блок питания». Плюс имя источника: на ноутбуке в sysfs
+     * два узла (BAT0 и батарейка мыши), и без имени непонятно, чей это
+     * процент показан. */
+    char        *source_text;   /* NULL = строку не рисуем */
+    gboolean     has_ac;        /* узел Mains есть в sysfs */
+    gboolean     ac_online;     /* сеть подключена */
 
     /* Минимальный размер, который реально вмещает содержимое. Считается
      * по метрикам шрифта в draw(), потому что раньше был жёсткий
@@ -170,6 +181,37 @@ static void ab_clamp(AbState *st)
     if (st->alarm_threshold > 100) st->alarm_threshold = 100;
 }
 
+/* Третья строка: состояние сети и имя источника.
+ *
+ * Показываем не всё сразу, а самое важное: есть ли смысл вообще смотреть.
+ * Без сети и на полном заряде строка не нужна, поэтому в этом случае она
+ * пустая и не занимает высоту (см. ab_layout: строк столько, сколько
+ * непустых).
+ *
+ * Формат: " AC BAT0" при сети, "  BAT0" без. Имя источника нужно, потому
+ * что на ноутбуке в sysfs два узла с зарядом (BAT0 и батарейка мыши), и
+ * процент без имени неоднозначен. */
+static void ab_refresh_source_text(AbState *st)
+{
+    const char *name = NULL;
+    const char *ac = NULL;
+
+    if (st->battery && st->battery->name)
+        name = st->battery->name;
+
+    if (st->has_ac)
+        ac = st->ac_online ? " AC" : "  ";
+
+    /* Нечего показывать: сети нет и имя неизвестно. */
+    if (!ac && !name) {
+        ab_set_text(&st->source_text, NULL);
+        return;
+    }
+    ab_set_text(&st->source_text,
+                g_strdup_printf(" %s %s", ac ? ac : " ",
+                                name ? name : "?"));
+}
+
 /* Пересчитать тексты из прочитанного состояния. */
 static void ab_refresh_text(AbState *st)
 {
@@ -177,7 +219,9 @@ static void ab_refresh_text(AbState *st)
 
     ab_set_text(&st->percent_text, NULL);
     ab_set_text(&st->time_text, NULL);
+    ab_set_text(&st->source_text, NULL);
     st->low = FALSE;
+    ab_refresh_source_text(st);
 
     if (!bat || bat->state == ACPI_BATTERY_NOT_PRESENT) {
         /* Устройства нет вовсе, либо батарейка извлечена: цифры не
@@ -223,6 +267,10 @@ static void ab_poll(AbState *st)
     st->battery = NULL;
 
     if (list) {
+        /* Состояние сети забираем до освобождения списка: список умирает
+         * вместе со своими элементами, а строки applet держит между тиками. */
+        st->has_ac    = list->has_ac;
+        st->ac_online = list->ac_online;
         bat = acpi_battery_list_primary(list);
         if (bat) {
             /* Deep copy: список сейчас освободится вместе со своими
@@ -746,8 +794,12 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
          * выводе не бывает: измеренная ширина оказывалась меньше
          * фактической, правый блок обрезался рамкой ("Full" съедало
          * почти целиком). */
+        /* " AC BAT0" - реальный вид третьей строки. Ширина берётся по
+         * САМОЙ ДЛИННОЙ строке всех трёх, иначе блок прыгает: при
+         * hidpp_battery_0 в имени больше символов, чем в BAT0. */
         const char *samples[] = { "100%", " 90%", " 80%", " No",
                                   " battery", " Full", "00:00", "99:59",
+                                  " AC BAT0", "   hidpp_battery_0",
                                   NULL };
         int i;
 
@@ -770,6 +822,11 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     rows = 0;
     if (st->show_percent) rows++;
     if (st->show_time)    rows++;
+    /* Третья строка считается, только если в ней есть что показать.
+     * Пустую строку не резервируем: иначе applet без сети (сервер)
+     * получил бы лишнюю высоту с пустым местом внизу. */
+    if (st->source_text && *st->source_text)
+        rows++;
     if (rows < 1)
         rows = 1;
 
@@ -803,11 +860,25 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     /* Вертикаль: процент прижат к ВЕРХУ рамки, время - к НИЗУ.
      * При одной строке она центрируется по корпусу. */
     if (rows >= 2) {
+        /* Две строки: первая у верхнего края, вторая у нижнего.
+         * Три строки: равномерно по вертикали, иначе первая прижата бы к
+         * рамке, а третья стояла бы впритык к ней снизу. */
         g->text_y_percent = pad;
-        g->text_y_time = h - pad - g->line_h;
+        if (rows >= 3) {
+            int block = rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP;
+
+            g->text_y_percent = pad;
+            g->text_y_time    = pad + (h - 2 * pad - block) / 2 + g->line_h
+                             + AB_TEXT_ROW_GAP;
+            g->text_y_source  = g->text_y_time + g->line_h + AB_TEXT_ROW_GAP;
+        } else {
+            g->text_y_time   = h - pad - g->line_h;
+            g->text_y_source = g->text_y_time;
+        }
     } else {
         g->text_y_percent = g->body_y + (g->body_h - g->line_h) / 2;
         g->text_y_time = g->text_y_percent;
+        g->text_y_source = g->text_y_percent;
     }
     g->text_y_only = g->body_y + (g->body_h - g->line_h) / 2;
 
@@ -937,6 +1008,11 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
                 st->low, g.ascent, g.scale);
         ab_text(st, cr, st->time_text, g.text_x, g.text_y_time,
                 st->low, g.ascent, g.scale);
+        /* Третья строка: сеть и имя источника. Показывается только если
+         * ab_layout() посчитал для неё место, то есть строка непустая. */
+        if (st->source_text && *st->source_text)
+            ab_text(st, cr, st->source_text, g.text_x, g.text_y_source,
+                    FALSE, g.ascent, g.scale);
     } else if (st->show_percent) {
         ab_text(st, cr, st->percent_text, g.text_x, g.text_y_only,
                 st->low, g.ascent, g.scale);
@@ -974,6 +1050,7 @@ static void ab_shutdown(XsPlugin *p)
     acpi_battery_free(st->battery);
     g_free(st->time_text);
     g_free(st->percent_text);
+    g_free(st->source_text);
     g_free(st);
     p->priv = NULL;
 }

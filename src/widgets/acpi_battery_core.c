@@ -329,6 +329,35 @@ AcpiBatteryList *acpi_battery_list_read(const char *root)
              * показывать есть что. Такие появляются только с модулем
              * hid-logitech-hidpp и подобными. */
             g_ptr_array_add(list->items, bat);
+        } else if (bat->type && g_ascii_strcasecmp(bat->type, "Mains") == 0) {
+            /* Сеть. В items не идёт, но состояние записываем отдельно.
+             *
+             * У Mains единственный полезный файл - online (1/0), и он
+             * именно булев, а не строка: "0" это выключено, а не
+             * «неизвестно». Читать его как строку и сравнивать с "1"
+             * нельзя из-за пробельного символа в конце файла.
+             *
+             * Путь строится здесь заново: выше d уже освобождён, и
+             * обращение к нему было бы use-after-free. */
+            gint64 online;
+            gboolean ok_online;
+
+            list->has_ac = TRUE;
+            {
+                char *d = g_build_filename(root, entry, NULL);
+
+                online = read_int_file(d, "online", &ok_online);
+                g_free(d);
+            }
+            /* Узлов Mains может быть несколько (AC0, AC1 на двух
+             * адаптерах). Берём первый, у которого online читается, и
+             * больше НЕ перетираем: «AC0 отключена, AC1 включена» должно
+             * читаться как «сеть есть», а не как «сети нет». */
+            if (ok_online && !list->ac_name) {
+                list->ac_online = (online != 0);
+                list->ac_name = g_strdup(bat->name);
+            }
+            acpi_battery_free(bat);
         } else {
             acpi_battery_free(bat);
         }
@@ -413,5 +442,6 @@ void acpi_battery_list_free(AcpiBatteryList *list)
         return;
     if (list->items)
         g_ptr_array_unref(list->items);
+    g_free(list->ac_name);
     g_free(list);
 }

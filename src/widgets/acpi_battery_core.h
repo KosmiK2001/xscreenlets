@@ -75,9 +75,19 @@ typedef struct {
     gboolean       read_error;
 } AcpiBattery;
 
-/* Список найденных источников. */
+/* Список найденных источников.
+ *
+ * AC-сеть (type=Mains) в items НЕ попадает: это не батарея, у неё нет ни
+ * capacity, ни status. Но состояние сети полезно показать, и без него applet
+ * не может отличить «заряжается» от «заряжается, потому что сеть
+ * подключена», поэтому сеть читается отдельно. */
 typedef struct {
     GPtrArray *items; /* AcpiBattery* */
+    /* Сеть: has_ac — узел Mains есть, ac_online — он подключён.
+     * Оба false на машине без сети (сервер), и это НЕ ошибка. */
+    gboolean   has_ac;
+    gboolean   ac_online;
+    char      *ac_name;   /* "AC0", для показа */
 } AcpiBatteryList;
 
 /* Корень sysfs. На живой машине "/sys/class/power_supply", в тестах —

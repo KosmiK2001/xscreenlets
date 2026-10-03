@@ -34,6 +34,16 @@ static void check_int(const char *what, gint got, gint want)
     }
 }
 
+static void check_bool(const char *what, gboolean got, gboolean want)
+{
+    if ((got != 0) == (want != 0)) {
+        printf("  ok   %-28s %d\n", what, got != 0);
+        return;
+    }
+    printf("  FAIL %s: получено %d, ожидалось %d\n", what, got, want);
+    failed++;
+}
+
 static void check_state(const char *what, AcpiBatteryState got,
                         AcpiBatteryState want)
 {
@@ -277,6 +287,70 @@ int main(int argc, char **argv)
             check_state("q10 -> заряжена", bat->state, ACPI_BATTERY_FULL);
         }
         acpi_battery_list_free(list); g_free(root);
+    }
+
+    /* ---- сеть (type=Mains) ------------------------------------------
+     *
+     * AC не батарея, поэтому в items он не попадает: только() на такой
+     * фикстуре не годится, проверяем has_ac/ac_online напрямую. */
+    printf("\n== сеть: Mains ==\n");
+
+    /* Основная фикстура: AC0 с online=1 рядом с батареей. */
+    list = acpi_battery_list_read(root_base);
+    if (!list) { printf("  FAIL список не прочитан\n"); failed++; }
+    else {
+        check_bool("  has_ac", list->has_ac, TRUE);
+        check_bool("  ac_online", list->ac_online, TRUE);
+        check_str("  ac_name", list->ac_name, "AC0");
+        /* Mains не должен попасть в список источников */
+        if (list->items->len != 2) {
+            printf("  FAIL в items %d узлов, ожидалось 2 "
+                   "(AC не должен быть источником)\n", list->items->len);
+            failed++;
+        }
+        acpi_battery_list_free(list);
+    }
+
+    /* Сеть есть, но отключена. */
+    {
+        char *root = g_build_filename(root_base, "ac_off", NULL);
+        list = acpi_battery_list_read(root);
+        if (!list) { printf("  FAIL ac_off не прочитан\n"); failed++; }
+        else {
+            check_bool("ac_off: has_ac", list->has_ac, TRUE);
+            check_bool("ac_off: ac_online снят", list->ac_online, FALSE);
+            acpi_battery_list_free(list);
+        }
+        g_free(root);
+    }
+
+    /* Сети нет вообще: это сервер, и has_ac=false здесь НЕ ошибка. */
+    {
+        char *root = g_build_filename(root_base, "ac_none", NULL);
+        list = acpi_battery_list_read(root);
+        if (!list) { printf("  FAIL ac_none не прочитан\n"); failed++; }
+        else {
+            check_bool("ac_none: has_ac", list->has_ac, FALSE);
+            check_bool("ac_none: ac_online", list->ac_online, FALSE);
+            check_str("ac_none: ac_name пуст", list->ac_name, NULL);
+            acpi_battery_list_free(list);
+        }
+        g_free(root);
+    }
+
+    /* Два адаптера: первый выключен, второй включён. Показываем первый
+     * прочитанный, но НЕ даём последующим перетирать его - иначе
+     * «AC0 отключена, AC1 включена» читалось бы как «сети нет». */
+    {
+        char *root = g_build_filename(root_base, "ac_second", NULL);
+        list = acpi_battery_list_read(root);
+        if (!list) { printf("  FAIL ac_second не прочитан\n"); failed++; }
+        else {
+            check_bool("ac_second: has_ac", list->has_ac, TRUE);
+            check_bool("ac_second: ac_online есть", list->ac_online, TRUE);
+            acpi_battery_list_free(list);
+        }
+        g_free(root);
     }
 
     printf("\n%s: %d провалов\n", failed ? "ЕСТЬ ОШИБКИ" : "ВСЁ ЗЕЛЁНОЕ", failed);

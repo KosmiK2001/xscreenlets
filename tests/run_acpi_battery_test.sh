@@ -9,6 +9,12 @@ F=/home/kosmik2001_dir/.hermes/cache/scratch/abat-fixture
 rm -rf "$F"
 mkdir -p "$F/BAT0" "$F/hidpp_battery_0" "$F/ac"
 
+# Сеть (type=Mains): подключена. В items не попадает, но has_ac/ac_online
+# должны это увидеть - без них applet не может показать третью строку.
+mkdir -p "$F/AC0"
+printf 'Mains\n'       > "$F/AC0/type"
+printf '1\n'            > "$F/AC0/online"
+
 # ноутбук: разряжается, 42%, 12.6 из 30 Wh при 10 W
 printf 'Battery\n'      > "$F/BAT0/type"
 printf 'Discharging\n'  > "$F/BAT0/status"
@@ -101,6 +107,31 @@ printf 'Battery\n'      > "$F/q10/BAT0/type"
 printf 'Full\n'         > "$F/q10/BAT0/status"
 printf '90\n'           > "$F/q10/BAT0/capacity"
 printf '0\n'            > "$F/q10/BAT0/current_now"
+
+# ac_off: узел Mains есть, но online=0
+mkdir -p "$F/ac_off/AC0" "$F/ac_off/BAT0"
+printf 'Mains\n'       > "$F/ac_off/AC0/type"
+printf '0\n'            > "$F/ac_off/AC0/online"
+printf 'Battery\n'      > "$F/ac_off/BAT0/type"
+printf 'Discharging\n'  > "$F/ac_off/BAT0/status"
+printf '55\n'           > "$F/ac_off/BAT0/capacity"
+
+# ac_none: сети нет вообще (сервер)
+mkdir -p "$F/ac_none/BAT0"
+printf 'Battery\n'      > "$F/ac_none/BAT0/type"
+printf 'Full\n'         > "$F/ac_none/BAT0/status"
+printf '100\n'          > "$F/ac_none/BAT0/capacity"
+
+# ac_second: два адаптера, первый выключен, второй включён.
+# Должно читаться как "сеть есть" - иначе applet врал бы про сеть.
+mkdir -p "$F/ac_second/AC0" "$F/ac_second/AC1" "$F/ac_second/BAT0"
+printf 'Mains\n'       > "$F/ac_second/AC0/type"
+printf '0\n'            > "$F/ac_second/AC0/online"
+printf 'Mains\n'       > "$F/ac_second/AC1/type"
+printf '1\n'            > "$F/ac_second/AC1/online"
+printf 'Battery\n'      > "$F/ac_second/BAT0/type"
+printf 'Charging\n'     > "$F/ac_second/BAT0/status"
+printf '70\n'           > "$F/ac_second/BAT0/capacity"
 
 gcc -O0 -g3 -Wall -Wextra -I"$B/src/widgets" $(pkg-config --cflags glib-2.0) \
     "$B/tests/test_acpi_battery.c" "$B/src/widgets/acpi_battery_core.c" \
