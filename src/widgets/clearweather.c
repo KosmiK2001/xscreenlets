@@ -1485,7 +1485,7 @@ static char *cw_find_theme(const char *configured)
     char *found = NULL;
     const char *home = g_getenv("HOME");
     const char *sysdir = xs_core_themedir();
-    char *c1 = NULL, *c2 = NULL, *c3 = NULL;
+    char *c1 = NULL, *c2 = NULL;
     gsize i;
     const char *cands[4];
 
@@ -1493,18 +1493,17 @@ static char *cw_find_theme(const char *configured)
         own = g_build_filename(home, "lib", "xscreenlets", "plugins",
                                "clearweather_theme", NULL);
     c1 = own;
-    /* Системный каталог: -DXS_THEME_DIR при сборке или --themedir.
-     * Раньше вместо него был жёстко зашитый /usr/share/screenlets/
-     * ClearWeather, которого в системе нет. */
+    /* Каталоги-кандидаты: заданный в конфиге, пользовательский, тема пакета.
+     * Запасного пути в /usr/share/screenlets (python2) больше нет - его
+     * тема clearweather тоже лежит в themes/ и ставится пакетом в
+     * <themedir>/clearweather/default, что и есть c2. */
     c2 = (sysdir && sysdir[0])
              ? g_build_filename(sysdir, "clearweather", "default", NULL)
              : NULL;
-    c3 = g_strdup("/usr/share/screenlets/ClearWeather/themes/default");
 
     cands[0] = (configured && configured[0]) ? configured : NULL;
     cands[1] = c1;
     cands[2] = c2;
-    cands[3] = c3;
 
     for (i = 0; i < G_N_ELEMENTS(cands); i++) {
         char *probe;
@@ -1520,7 +1519,6 @@ static char *cw_find_theme(const char *configured)
     }
     g_free(c1);
     g_free(c2);
-    g_free(c3);
     return found;
 }
 

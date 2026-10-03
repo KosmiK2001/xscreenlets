@@ -206,19 +206,23 @@ static cairo_surface_t *launcher_render_buffer(PrivData *priv,
 	return NULL;
 }
 
-/* дефолт: иконка из каталога оригинального плагина */
+/* дефолт: иконка апплета из каталога иконок пакета
+ * (/usr/share/icons/xscreenlets, ставится циклом по icons/*.svg).
+ * Прежде здесь был каталог оригинального плагина screenlets. */
 static char *launcher_default_icon(void)
 {
-	static const char *cands[] = {
-		"/usr/share/screenlets/Launcher/default-icon.svg",
-		"/usr/share/screenlets/Launcher/icon.svg",
+	char *cands[] = {
+		"/usr/share/icons/xscreenlets/launcher.svg",
 		NULL
 	};
+	gboolean dbg = xs_core_is_debug();
 	size_t i;
 
 	for (i = 0; cands[i]; i++)
 		if (g_file_test(cands[i], G_FILE_TEST_EXISTS))
 			return g_strdup(cands[i]);
+	if (dbg)
+		g_printerr("launcher: default icon not found in /usr/share/icons/xscreenlets\n");
 	return g_strdup("");
 }
 

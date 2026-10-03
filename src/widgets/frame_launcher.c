@@ -1107,12 +1107,17 @@ static gboolean fl_guest_restart_clicked(GtkWidget *tree,
 static char **fl_list_themes(void)
 {
 	const char *dirs[2];
+	const char *tdirs;
 	char **out;
 	int n = 0, d;
 
 	dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
 	                           "themes", "frame_launcher", NULL);
-	dirs[1] = "/usr/share/screenlets/FrameLauncher/themes";
+	/* Системные темы пакета: xs_core_themedir() (-DXS_THEME_DIR при
+	 * сборке). Каталога /usr/share/screenlets/FrameLauncher/themes,
+	 * который был раньше, в системе нет. */
+	tdirs = xs_core_themedir();
+	dirs[1] = tdirs ? g_build_filename(tdirs, "frame_launcher", NULL) : NULL;
 	out = g_new0(char *, 1);
 	for (d = 0; d < 2; d++) {
 		GDir *dir = g_dir_open(dirs[d], 0, NULL);
@@ -1146,6 +1151,7 @@ static char **fl_list_themes(void)
 		g_dir_close(dir);
 	}
 	g_free((char *)dirs[0]);
+	g_free((char *)dirs[1]);
 	return out;
 }
 

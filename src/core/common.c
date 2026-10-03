@@ -1371,19 +1371,21 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
     const char *desc;
     const char *author;
 
-    if (p && p->name && p->name[0])
-        name_up = g_strdup_printf("%c%s",
-                                  g_ascii_toupper(p->name[0]), p->name + 1);
-    icon_path = g_strdup_printf("/usr/share/screenlets/%s/icon.svg",
-                                name_up ? name_up : "Clock");
-    pix = gdk_pixbuf_new_from_file_at_size(icon_path, 64, 64, &err);
-    if (!pix) {
-        g_clear_error(&err);
-        g_free(icon_path);
-        icon_path = g_strdup_printf("/usr/share/screenlets/%s/icon.png",
-                                    name_up ? name_up : "Clock");
-        pix = gdk_pixbuf_new_from_file_at_size(icon_path, 64, 64, &err);
-    }
+    /* Иконка типа из каталога иконок пакета: /usr/share/icons/xscreenlets/
+    	 * <тип>.svg (ставится циклом по icons/*.svg). Прежде здесь был
+    	 * /usr/share/screenlets/<Имя>/icon.svg — каталог python2-пакета. */
+    	if (p && p->type && p->type[0])
+    		name_up = g_strdup(p->type);
+    	icon_path = g_strdup_printf("/usr/share/icons/xscreenlets/%s.svg",
+    	                            name_up ? name_up : "clock");
+    	pix = gdk_pixbuf_new_from_file_at_size(icon_path, 64, 64, &err);
+    	if (!pix) {
+    		g_clear_error(&err);
+    		g_free(icon_path);
+    		icon_path = g_strdup_printf("/usr/share/icons/xscreenlets/%s.png",
+    		                            name_up ? name_up : "clock");
+    		pix = gdk_pixbuf_new_from_file_at_size(icon_path, 64, 64, &err);
+    	}
     if (!pix) {
         g_clear_error(&err);
         gtk_image_set_from_icon_name(GTK_IMAGE(img), "gtk-properties",

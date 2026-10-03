@@ -1008,12 +1008,19 @@ static void cal_menu(XsPlugin *p, GtkMenu *m)
 	cal_menu_item(GTK_WIDGET(m), p, "Back to today", "back_today");
 	xs_core_add_separator(GTK_WIDGET(m));
 
-	/* Theme-подменю (как у clock) */
+	/* Theme-подменю: пользовательские темы, затем темы пакета
+	 * (xs_core_themedir, -DXS_THEME_DIR при сборке). Каталога
+	 * /usr/share/screenlets (python2) здесь больше нет. */
 	user_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets",
 	                            "themes", p->type ? p->type : p->name, NULL);
 	names = g_ptr_array_new_with_free_func(g_free);
 	cal_menu_add_themes(user_dir, names);
-	cal_menu_add_themes("/usr/share/screenlets/ClearCalendar/themes", names);
+	{
+		const char *td = xs_core_themedir();
+		char *sys_dir = td ? g_build_filename(td, p->type ? p->type : p->name, NULL) : NULL;
+		cal_menu_add_themes(sys_dir, names);
+		g_free(sys_dir);
+	}
 	g_free(user_dir);
 	if (names->len > 0) {
 		g_ptr_array_sort(names, cal_cmp_names);
@@ -1323,14 +1330,18 @@ static void cal_theme_conf_field(const char *dir, const char *field,
 
 static void cal_fill_themes(XsPlugin *p, GtkListStore *store)
 {
-	const char *search_dirs[2] = {NULL, "/usr/share/screenlets/ClearCalendar/themes"};
+	/* Пользовательские темы, затем темы пакета. Каталога
+	 * /usr/share/screenlets (python2) здесь больше нет. */
+	const char *td = xs_core_themedir();
+	char *user_dir = g_build_filename(g_get_user_config_dir(), "xscreenlets",
+	                                  "themes", p->type ? p->type : p->name, NULL);
+	char *sys_dir = td ? g_build_filename(td, p->type ? p->type : p->name, NULL) : NULL;
+	char *search_dirs[2] = { user_dir, sys_dir };
 	GtkTreeIter it;
 	gsize di;
 
 	if (!p || !p->priv || !store)
 		return;
-	search_dirs[0] = g_build_filename(g_get_user_config_dir(), "xscreenlets",
-	                                  "themes", p->type ? p->type : p->name, NULL);
 	for (di = 0; di < G_N_ELEMENTS(search_dirs); di++) {
 		GDir *d = g_dir_open(search_dirs[di], 0, NULL);
 		const char *fn;
@@ -1362,7 +1373,8 @@ static void cal_fill_themes(XsPlugin *p, GtkListStore *store)
 		}
 		g_dir_close(d);
 	}
-	g_free((gpointer)search_dirs[0]);
+	g_free(user_dir);
+	g_free(sys_dir);
 }
 
 /* ---------- init / tick / shutdown / desc ---------- */
@@ -1388,8 +1400,15 @@ static int calendar_init(XsPlugin *p, GKeyFile *kf)
 	else if (priv->scale > 10.0)
 		priv->scale = 10.0;
 	priv->theme = xs_host_api()->conf_str(kf, p->name, "theme", "default");
-	priv->icalpath = xs_host_api()->conf_str(kf, p->name, "icalpath",
-	                                         "/usr/share/screenlets/ClearCalendar/calendar.ics");
+	/* Файла нет ни в пакете, ни в системе - и у оригинального
+	     * ClearCalendar дефолтом был тот же несуществующий путь в
+	     * /usr/share/screenlets. Путь задаётся в конфиге (icalpath), а
+	     * дефолт указываем рядом с конфигом апплета: каталог ~/.config
+	     * у пользователя точно есть. */
+	    char *ics_default = g_build_filename(g_get_user_config_dir(), "xscreenlets",
+	                                         "calendar.ics", NULL);
+	    priv->icalpath = xs_host_api()->conf_str(kf, p->name, "icalpath", ics_default);
+	    g_free(ics_default);
 	priv->showevents = g_key_file_get_boolean(kf, p->name, "showevents",
 	                                          NULL);
 	/* По умолчанию ВКЛЮЧЕНО, как в оригинале: там опция

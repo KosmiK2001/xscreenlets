@@ -1917,8 +1917,10 @@ static void rss_menu(XsPlugin *p, GtkMenu *menu)
         char *user = g_build_filename(g_get_user_config_dir(), "xscreenlets",
                                       "themes", "clearrss", NULL);
         char *project = rss_project_root_from_plugdir();
-        char *system = g_build_filename("/usr/share/screenlets",
-                                        "ClearRss", "themes", NULL);
+        /* Системные темы пакета: xs_core_themedir() (-DXS_THEME_DIR при
+         * сборке). Каталога /usr/share/screenlets (python2) нет. */
+        const char *td = xs_core_themedir();
+        char *system = td ? g_build_filename(td, "clearrss", NULL) : NULL;
 
         rss_add_theme_dirs(user, names);
         rss_add_theme_dirs(project, names);
@@ -2458,7 +2460,10 @@ static void rss_fill_themes(XsPlugin *p, GtkListStore *store)
     (void)p;
     char *user = g_build_filename(g_get_user_config_dir(), "xscreenlets", "themes", "clearrss", NULL);
     char *project = rss_project_root_from_plugdir();
-    char *system = g_build_filename("/usr/share/screenlets", "ClearRss", "themes", NULL);
+    /* Системные темы пакета: xs_core_themedir(). Каталога
+     * /usr/share/screenlets (python2) нет. */
+    const char *td = xs_core_themedir();
+    char *system = td ? g_build_filename(td, "clearrss", NULL) : NULL;
     rss_add_theme_dirs(user, names);
     rss_add_theme_dirs(project, names);
     rss_add_theme_dirs(system, names);
