@@ -26,7 +26,6 @@
 /* PL_NAME_MAX и PlProcess живут в process_list_core.h: разбор /proc и
  * структура процесса вынесены туда ради тестов без X. */
 #include "process_list_core.h"
-#include "disk_monitor_core.h"
 #include "../core/i18n.h"
 #define PL_PADDING             4.0
 #define PL_TEXT_PADDING        2.0
@@ -1261,6 +1260,86 @@ static guint pl_tick(XsPlugin *plugin)
     return priv->update_ms;
 }
 
+/* Радиус углов из конфига.
+ *
+ * Отрицательное значение в конфиге не должно превращаться в ошибку
+ * shape-маски, поэтому всё, что не положительное, трактуется как «без
+ * скругления». */
+static double pl_corner_radius_value(int value)
+{
+    return value > 0 ? (double)value : 0.0;
+}
+
+static gboolean pl_corner_radius_is_rounded(double radius)
+{
+    return radius > 0.5;
+}
+
+/* Регион со скруглёнными углами для shape-маски X-окна.
+ *
+ * Формула скопирована из disk_monitor_core, а НЕ берётся оттуда
+ * линковкой. Причина найдена на живом апплете: плагины собираются
+ * изолированно, process_list.so линкуется только из process_list.o и
+ * process_list_core.o, поэтому dm_rounded_region() в него просто не
+ * попадает. При попытке позаимствовать вышло
+ *
+ *   process_list.so: undefined symbol: dm_corner_radius_value
+ *
+ * и applet переставал грузиться целиком - окно не появлялось вовсе,
+ * без единой строчки в логе об ошибке, кроме undefined symbol в
+ * сообщении демона.
+ *
+ * Так же поступает acpi_battery со своей ab_rounded_region(). Дубли
+ * формулы - цена изоляции сборки плагинов, расплата за неё - обязанность
+ * держать построения идентичными: тот же floor() (никогда не срезает
+ * глубже настоящей дуги) и та же разбивка по строкам. */
+static cairo_region_t *pl_rounded_region(int width, int height, int radius)
+{
+    const double r = pl_corner_radius_value(radius);
+    cairo_region_t *region;
+    cairo_rectangle_int_t box;
+    int scaled;
+
+    if (width <= 0 || height <= 0)
+        return NULL;
+    if (!pl_corner_radius_is_rounded(r))
+        return NULL;
+
+    scaled = (int)MIN(r, MIN(width, height) / 2.0);
+    region = cairo_region_create();
+    if (!region)
+        return NULL;
+
+    /* cairo_region хранит только целочисленные прямоугольники, поэтому
+     * скруглённый контур приближается одним столбцом на строку: столбец
+     * идёт от верхней дуги до нижней, что и нужно маске X-сервера. */
+    for (int y = 0; y < height; y++) {
+        int cut = 0;
+        double dy;
+
+        if (y < scaled)
+            dy = scaled - y;
+        else if (y >= height - scaled)
+            dy = (double)(y - (height - scaled));
+        else
+            dy = 0.0;
+
+        if (dy > 0.0) {
+            double t = scaled * scaled - dy * dy;
+            if (t < 0.0)
+                t = 0.0;
+            cut = (int)floor(scaled - sqrt(t));
+        }
+        box.x = cut;
+        box.y = y;
+        box.width = width - 2 * cut;
+        box.height = 1;
+        if (box.width > 0)
+            cairo_region_union_rectangle(region, &box);
+    }
+    return region;
+}
+
 /* Контур скруглённого окна как путь, для clip в render.
  *
  * Отдельная функция, потому что dm_rounded_path() в disk_monitor.c
@@ -1274,13 +1353,13 @@ static void pl_rounded_path(cairo_t *cr, int width, int height, int radius)
 {
     const double inset = 1.0;
     double w = width - 2 * inset, h = height - 2 * inset;
-    double r = dm_corner_radius_value(radius);
+    double r = pl_corner_radius_value(radius);
 
     if (w <= 0 || h <= 0) {
         cairo_rectangle(cr, 0, 0, width, height);
         return;
     }
-    if (!dm_corner_radius_is_rounded(r)) {
+    if (!pl_corner_radius_is_rounded(r)) {
         cairo_rectangle(cr, inset, inset, w, h);
         return;
     }
@@ -1321,7 +1400,7 @@ static void pl_apply_shape(PrivData *priv, XsPlugin *p, int w, int h)
     window = gtk_widget_get_window(p->win);
     if (!window)
         return;
-    region = dm_rounded_region(w, h, priv->corner_radius);
+    region = pl_rounded_region(w, h, priv->corner_radius);
     gdk_window_shape_combine_region(window, region, 0, 0);
     if (region)
         cairo_region_destroy(region);
