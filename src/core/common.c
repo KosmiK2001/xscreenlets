@@ -2935,30 +2935,13 @@ const char *xs_core_themedir(void)
  *   3. <XS_THEME_DIR>/<plugin>/<theme>                (система, -D/--themedir)
  *
  * Пользовательские темы первыми намеренно: установленный пакет не должен
- * перекрывать настройку конкретного пользователя. */
-/* Имена каталогов тем родных апплетов screenlets отличаются от типов
- * наших плагинов: тип clock, а каталог /usr/share/screenlets/Clock.
- * Без этого сопоставления темы, установленные вместе с оригинальным
- * screenlets, перестают находиться после перехода на xs_core_find_theme.
- * Запись отсутствует, если у апплета нет темы в старой раскладке. */
-static const char *xs_legacy_theme_dir(const char *plugin)
-{
-    static const struct { const char *type, *dir; } map[] = {
-        { "clock",         "Clock"         },
-        { "calendar",      "ClearCalendar" },
-        { "clearrss",      "ClearRss"      },
-        { "clearweather",  "ClearWeather"  },
-    };
-    gsize i;
-
-    if (!plugin)
-        return NULL;
-    for (i = 0; i < G_N_ELEMENTS(map); i++)
-        if (g_strcmp0(map[i].type, plugin) == 0)
-            return map[i].dir;
-    return NULL;
-}
-
+ * перекрывать настройку конкретного пользователя.
+ *
+ * Каталога /usr/share/screenlets/Clock (темы оригинального python2-пакета)
+ * в поиске больше НЕТ. Он был последним шансом, и из-за него тема часов
+ * случайно работала на машине со старым screenlets и падала на чистой.
+ * Теперь у каждого апплета есть своя тема в themes/, и ebuild ставит их
+ * циклом по каталогам themes; искать оригинал больше незачем. */
 char *xs_core_find_theme(const char *plugin, const char *theme)
 {
     char *user_xdg, *user_legacy, *system, *out;
@@ -3014,21 +2997,6 @@ char *xs_core_find_theme(const char *plugin, const char *theme)
                 out = near;
             else
                 g_free(near);
-        }
-    }
-
-    /* Последний шанс: тема родного апплета screenlets, если она стоит в
-     * системе. Имена каталогов там с заглавной буквы, поэтому требуется
-     * сопоставление с типом плагина. */
-    if (!out) {
-        const char *lname = xs_legacy_theme_dir(plugin);
-        if (lname) {
-            char *old_sys = g_build_filename("/usr/share/screenlets",
-                                             lname, "themes", theme, NULL);
-            if (g_file_test(old_sys, G_FILE_TEST_IS_DIR))
-                out = old_sys;
-            else
-                g_free(old_sys);
         }
     }
 
@@ -4602,7 +4570,7 @@ int xs_core_type_count(void)
 char **xs_core_list_running_daemon_instances(int *count)
 {
     char **out;
-    int n = 0, i;
+    int n = 0;
     gsize j;
 
     if (count)
