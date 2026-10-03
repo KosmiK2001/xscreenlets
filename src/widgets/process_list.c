@@ -21,6 +21,10 @@
 #define PL_WIDTH_DEFAULT      320
 #define PL_HEIGHT_DEFAULT     164
 #define PL_UPDATE_DEFAULT     1000
+
+/* Как часто перечитывать ВСЕ процессы. Таймер аплета продолжает
+ * тикать каждый update_ms, но полный обход /proc идёт раз в 3 с. */
+#define PL_FULL_SAMPLE_US     (3 * G_USEC_PER_SEC)
 #define PL_ROWS_DEFAULT       8
 #define PL_MAX_PROCESSES      16384
 /* PL_NAME_MAX и PlProcess живут в process_list_core.h: разбор /proc и
@@ -1363,7 +1367,30 @@ static guint pl_tick(XsPlugin *plugin)
 
     if (!priv || !plugin->win)
         return 0;
-    pl_sample(priv);
+
+    /* Полный обход /proc не каждый тик.
+     *
+     * Замер strace: applet делал около 1020 openat в секунду - по одному
+     * schedstat на каждый процесс машины, - и это был 89% всего файлового
+     * ввода-вывода демона. При сортировке по CPU нужен счётчик CPU каждого
+     * процесса, а он лежит только в schedstat (24 байта) или stat (209
+     * байт); отказ от schedstat в пользу stat утяжелил бы чтение, а не
+     * облегчил.
+     *
+     * Дешевле обходить реже: между полными обходами список и счётчики CPU
+     * не меняются, поэтому перерисовывать есть что - ровно то же
+     * изображение. Счётчик list идёт раз в платформенный update_ms, а
+     * данные обновляются раз в PL_FULL_SAMPLE_US.
+     *
+     * Плата осознанная: процесс, который резко нагрузился, попадёт в
+     * список с задержкой до PL_FULL_SAMPLE_US, а не немедленно. */
+    {
+        gint64 now = pl_now_us();
+
+        if (priv->last_sample_us == 0 ||
+            now - priv->last_sample_us >= PL_FULL_SAMPLE_US)
+            pl_sample(priv);
+    }
     pl_rerender(priv);
     return priv->update_ms;
 }
