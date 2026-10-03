@@ -198,7 +198,29 @@ static int ab_init(XsPlugin *p, GKeyFile *kf)
     p->priv = st;
 
     api->make_window(p, x, y, st->window_width, st->window_height);
-    api->theme_load(p, "default");
+
+    /* Тему ищем через xs_core_find_theme(), а не передаём в theme_load()
+     * строку "default". Здесь был единственный апплет, который делал
+     * именно так, и theme_load() вызывал g_dir_open("default") - открыть
+     * относительный путь из текущего каталога демона невозможно. Тема не
+     * грузилась вообще: xs_core_theme_has() возвращал FALSE на каждый
+     * элемент, и апплет рисовал один только текст, хотя файлы тем на
+     * диске были и читались.
+     *
+     * Остальные апплеты (clock, calendar, clearrss, frame_launcher) с
+     * самого начала вызывали find_theme() первым. */
+    {
+        char *theme_dir = xs_core_find_theme(p->type ? p->type : p->name,
+                                             "default");
+
+        if (theme_dir && api->theme_load(p, theme_dir)) {
+            if (xs_core_is_debug())
+                api->log("acpi_battery: theme loaded from %s", theme_dir);
+        } else if (xs_core_is_debug()) {
+            api->log("acpi_battery: theme 'default' not found, text only");
+        }
+        g_free(theme_dir);
+    }
 
     st->widget = p->win;
     ab_poll(st);
