@@ -99,10 +99,6 @@ typedef struct {
     /* Текст прижат по ПРАВОМУ краю: text_x считается от w - ширина. */
     int text_x, text_y_percent, text_y_time, text_y_source, text_y_only;
     int line_h, ascent, text_w;
-    /* Ширина блока по ПОЛНОМУ списку строк. Влияет только на
-     * need_w (размер окна), в отличие от text_w, по которому
-     * блок прижимается вправо. */
-    int text_w_full;
     /* Сколько места нужно окну, чтобы всё влезло без обрезания. */
     int need_w, need_h;
 } AbGeom;
@@ -838,66 +834,12 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
      * "%d%%"/"%02d:%02d". Раньше здесь стоял "Full" без пробела и
      * "3:59", которых в выводе не бывает. */
     g->text_w = 0;
-    g->text_w_full = 0;
     desc = ab_font_scaled(st, g->scale);
     {
         /* Строки, которые точно рисуются. */
         const char *samples[] = { "100%", " 90%", " 80%", " No",
                                   " battery", " Full", "00:00", "99:59",
                                   NULL };
-        /* Полный список: он шире samples и влияет только на need_w. */
-        const char *samples_full[] = { "100%", " 90%", " 80%", " No",
-                                       " battery", " Full", "00:00", "99:59",
-                                       " AC BAT0", "   hidpp_battery_0",
-                                       NULL };
-        int i;
-
-        for (i = 0; samples[i]; i++) {
-            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
-                                                            samples[i]);
-            int pw = 0;
-
-            pango_layout_set_font_description(l, desc);
-            pango_layout_get_pixel_size(l, &pw, NULL);
-            g_object_unref(l);
-            if (pw > g->text_w)
-                g->text_w = pw;
-        }
-        /* Третья строка добавляется по факту: её имя источника известно
-         * только сейчас, и в samples его быть не может. */
-        if (st->source_text && *st->source_text) {
-            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
-                                                            st->source_text);
-            int pw = 0;
-
-            pango_layout_set_font_description(l, desc);
-            pango_layout_get_pixel_size(l, &pw, NULL);
-            g_object_unref(l);
-            if (pw > g->text_w)
-                g->text_w = pw;
-        }
-        for (i = 0; samples_full[i]; i++) {
-            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
-                                                            samples_full[i]);
-            int pw = 0;
-
-            pango_layout_set_font_description(l, desc);
-            pango_layout_get_pixel_size(l, &pw, NULL);
-            g_object_unref(l);
-            if (pw > g->text_w_full)
-                g->text_w_full = pw;
-        }
-        if (st->source_text && *st->source_text) {
-            PangoLayout *l = gtk_widget_create_pango_layout(g->widget,
-                                                            st->source_text);
-            int pw = 0;
-
-            pango_layout_set_font_description(l, desc);
-            pango_layout_get_pixel_size(l, &pw, NULL);
-            g_object_unref(l);
-            if (pw > g->text_w_full)
-                g->text_w_full = pw;
-        }
     }
     pango_font_description_free(desc);
 
@@ -920,10 +862,21 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
     /* Слева отступ pad+content_gap, справа только pad: текст по твоему
      * правилу прижат вправо, и увеличение правого поля двигало его
      * от края, где он и должен быть. */
-    /* Размер окна резервирует по ПОЛНОМУ списку строк, а блок текста
-     * прижимается вправо по text_w. Иначе окно было бы уже блока при
-     * длинном имени источника и текст обрезался бы рамкой. */
-    g->need_w = pad + content_gap + g->body_w + gap + g->text_w_full + pad;
+    /* Размер окна резервирует по text_w - по той же ширине, по которой
+     * блок прижимается вправо. Иначе окно шире содержимого, и лишнее
+     * место уезжает в середину, между батарейкой и текстом.
+     *
+     * Раньше здесь стоял text_w_full (максимум по полному списку строк,
+     * включая длинное имя источника hidpp_battery_0). Измерением на ноуте
+     * при window_width=261: батарейка занимала x 5..74, текст начинался с
+     * x=166, то есть между ними было 92 px пустоты, а окно не давало
+     * сузиться. Пользователь это видел как дыру в середине апплета.
+     *
+     * Цена: при смене источника на мышиный блок станет шире и окно
+     * подрастёт ОДИН раз. Это лучше, чем постоянная дыра: блок при
+     * каждом тике не прыгает, растёт только окно и только в момент
+     * смены источника. */
+    g->need_w = pad + content_gap + g->body_w + gap + g->text_w + pad;
     g->need_h = 2 * pad +
                 MAX(g->body_h, rows * g->line_h + (rows - 1) * AB_TEXT_ROW_GAP);
 
