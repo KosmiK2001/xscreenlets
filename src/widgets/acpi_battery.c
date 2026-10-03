@@ -204,16 +204,23 @@ static void ab_refresh_source_text(AbState *st)
         name = st->battery->name;
 
     if (st->has_ac)
-        ac = st->ac_online ? " AC" : "  ";
+        ac = st->ac_online ? "AC " : "   ";
 
     /* Нечего показывать: сети нет и имя неизвестно. */
     if (!ac && !name) {
         ab_set_text(&st->source_text, NULL);
         return;
     }
+    /* Без ведущего пробела: строки прижаты по общему левому краю
+     * text_x, и внешний отступ сдвигал бы именно эту строку вправо
+     * относительно процента и времени. Измерением на ноуте: левые
+     * края строк x=89, 95, 99.
+     *
+     * Внутренний отступ ("AC " против "   ") остаётся: он держит ширину
+     * строки постоянной при появлении и пропадании сети, иначе имя
+     * источника прыгало бы влево-вправо на каждом тике. */
     ab_set_text(&st->source_text,
-                g_strdup_printf(" %s %s", ac ? ac : " ",
-                                name ? name : "?"));
+                g_strdup_printf("%s%s", ac ? ac : "", name ? name : "?"));
 }
 
 /* Пересчитать тексты из прочитанного состояния. */
@@ -229,21 +236,33 @@ static void ab_refresh_text(AbState *st)
 
     if (!bat || bat->state == ACPI_BATTERY_NOT_PRESENT) {
         /* Устройства нет вовсе, либо батарейка извлечена: цифры не
-         * показываем, сообщение рисует draw(). */
-        ab_set_text(&st->percent_text, g_strdup("     "));
+         * показываем, сообщение рисует draw().
+         *
+         * Заполняющих пробелов здесь и дальше больше нет. Раньше стояло
+         * "%3d%%", " Full", "   --", "     ": пробелы дописывались слева,
+         * чтобы цифры не прыгали. Но текст прижат вправо по text_x, то
+         * есть общий левый край у строк и так одинаковый, а вот эти
+         * пробелы делали разные строки разной длины - и сдвигали их
+         * влево тем сильнее, чем строка короче. Измерением на ноуте при
+         * ширине 184: левые края строк были x=89, 95, 99, то есть
+         * каждая следующая была сдвинута вправо на 6 и 4 px.
+         *
+         * Ровно та же правка убрана в образцах для обмера: они тоже
+         * должны совпадать с тем, что реально рисует draw(). */
+        ab_set_text(&st->percent_text, g_strdup(""));
         return;
     }
 
     if (bat->percent >= 0) {
-        ab_set_text(&st->percent_text, g_strdup_printf("%3d%%", bat->percent));
+        ab_set_text(&st->percent_text, g_strdup_printf("%d%%", bat->percent));
         st->low = (bat->percent <= st->alarm_threshold);
     } else {
-        ab_set_text(&st->percent_text, g_strdup("  --"));
+        ab_set_text(&st->percent_text, g_strdup("--"));
     }
 
     switch (bat->state) {
     case ACPI_BATTERY_FULL:
-        ab_set_text(&st->time_text, g_strdup(" Full"));
+        ab_set_text(&st->time_text, g_strdup("Full"));
         st->low = FALSE;      /* полная батарея не бывает «низкой» */
         break;
     case ACPI_BATTERY_CHARGING:
@@ -254,7 +273,7 @@ static void ab_refresh_text(AbState *st)
     default:
         /* Данных нет: прочерк и НЕ аларм. Иначе сервер без батареи или
          * ноутбук со статусом Unknown мигал бы красным. */
-        ab_set_text(&st->time_text, g_strdup("   --"));
+        ab_set_text(&st->time_text, g_strdup("--"));
         st->low = FALSE;
         break;
     }
@@ -861,8 +880,8 @@ static void ab_layout(AbState *st, int w, int h, AbGeom *g)
          * таймер приходят из acpi_battery_format_minutes() как
          * "%d%%"/"%02d:%02d". Раньше здесь стоял "Full" без пробела и
          * "3:59", которых в выводе не бывает. */
-        const char *samples[] = { "100%", " 90%", " 80%", " No",
-                                  " battery", " Full", "00:00", "99:59",
+        const char *samples[] = { "100%", "90%", "80%", "No",
+                                  "battery", "Full", "00:00", "99:59",
                                   NULL };
         int i;
 
@@ -1098,9 +1117,9 @@ static void ab_draw(XsPlugin *p, cairo_t *cr, int w, int h)
     /* ascent передаётся в ab_text: тот сдвигает baseline от верха строки,
      * иначе текст уезжает вниз и строки слипаются. */
     if (no_battery) {
-        ab_text(st, cr, " No", g.text_x, g.text_y_percent, FALSE,
+        ab_text(st, cr, "No", g.text_x, g.text_y_percent, FALSE,
                 g.ascent, g.scale);
-        ab_text(st, cr, " battery", g.text_x, g.text_y_time, FALSE,
+        ab_text(st, cr, "battery", g.text_x, g.text_y_time, FALSE,
                 g.ascent, g.scale);
     } else if (st->show_percent && st->show_time) {
         ab_text(st, cr, st->percent_text, g.text_x, g.text_y_percent,
