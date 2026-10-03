@@ -26,6 +26,7 @@
 /* PL_NAME_MAX и PlProcess живут в process_list_core.h: разбор /proc и
  * структура процесса вынесены туда ради тестов без X. */
 #include "process_list_core.h"
+#include "disk_monitor_core.h"
 #include "../core/i18n.h"
 #define PL_PADDING             4.0
 #define PL_TEXT_PADDING        2.0
@@ -79,6 +80,14 @@ typedef struct {
     cairo_surface_t *cache;
     int cache_width;
     int cache_height;
+    /* Радиус скругления углов окна, 0 = прямые углы. Форма окна задаётся
+     * здесь, а не темой: тема у applet нет, фон рисуется кодом. */
+    int corner_radius;
+    /* Кэш применённой shape-маски: пересоздавать её на каждом draw
+     * незачем, маска меняется только при смене радиуса или размера. */
+    int shape_radius;
+    int shape_w;
+    int shape_h;
     guint process_count;
     guint running_count;
     gint64 last_sample_us;
@@ -775,6 +784,9 @@ static void pl_format_io(gchar *buffer, gsize size, gint64 bytes_per_sec)
         g_snprintf(buffer, size, "%.1fM", value / (1024.0 * 1024.0));
 }
 
+/* Определение ниже pl_render(), где функция уже используется. */
+static void pl_rounded_path(cairo_t *cr, int width, int height, int radius);
+
 static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
 {
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
@@ -793,6 +805,20 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     double row_height = MIN(16.0, available_rows_height /
                             MAX(priv->row_count, 1U));
     guint i;
+
+    /* Клип по округлому контуру ДО заливки фона.
+     *
+     * Фон заливается прямоугольником на весь размер окна, и маска X-сервера
+     * срезает углы уже после того, как всё нарисовано. Без клипа в углах
+     * остаются пиксели фона, маска их срежет, и получится ровно тот рваный
+     * угол, который мы уже чинили в acpi_battery.
+     *
+     * dm_rounded_path() рисует контур ПРОВОДКОЙ и с отступом внутрь на
+     * пиксель: маска режет по краю окна, поэтому контур, проведённый по
+     * самому краю, терял бы половину обводки под срез. */
+    cairo_save(cr);
+    pl_rounded_path(cr, width, height, priv->corner_radius);
+    cairo_clip(cr);
 
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_set_source_rgba(cr, priv->background[0], priv->background[1],
@@ -916,6 +942,12 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     pango_layout_set_font_description(layout, title_font);
     pango_layout_set_text(layout, " ", -1);
     (void)pl_text_height(layout);
+
+    /* Закрываем clip, открытый в начале render. Без restore контекст
+     * уедет с балансом save/restore, и следующий draw начнётся с лишним
+     * уровнем - со временем cairo начнёт жаловаться на стек. */
+    cairo_restore(cr);
+
     g_object_unref(layout);
     g_free(title_font);
     g_free(row_font);
@@ -1001,6 +1033,12 @@ static void pl_int_changed(GtkSpinButton *spin, gpointer data)
     } else if (strcmp(key, "window_width") == 0) {
         priv->window_width = CLAMP(value, 320, 1200);
         value = priv->window_width;
+    } else if (strcmp(key, "corner_radius") == 0) {
+        /* Радиус действует немедленно: маска окна пересобирается по
+         * shape_radius в pl_apply_shape, поэтому перерисовки и пересборки
+         * кэша содержимого здесь не нужно - меняется только форма. */
+        priv->corner_radius = CLAMP(value, 0, 200);
+        value = priv->corner_radius;
     } else {
         priv->window_height = CLAMP(value, 100, 1000);
         value = priv->window_height;
@@ -1195,6 +1233,11 @@ static void pl_properties(XsPlugin *plugin, GtkNotebook *notebook)
                priv->window_width, 320, 1200);
     pl_add_int(plugin, page, "Window height", "window_height",
                priv->window_height, 100, 1000);
+    /* Радиус углов окна в пикселях, 0 = прямые углы. Формула среза та же,
+     * что у disk_monitor и acpi_battery, поэтому одинаковое значение даёт
+     * одинаковый на вид угол у соседних апплетов. */
+    pl_add_int(plugin, page, "Corner radius", "corner_radius",
+               priv->corner_radius, 0, 200);
     pl_add_font(plugin, page, "Title font", "title_font", priv->title_font);
     pl_add_font(plugin, page, "Row font", "row_font", priv->row_font);
     pl_add_color(plugin, page, "Background", "background_color",
@@ -1218,6 +1261,75 @@ static guint pl_tick(XsPlugin *plugin)
     return priv->update_ms;
 }
 
+/* Контур скруглённого окна как путь, для clip в render.
+ *
+ * Отдельная функция, потому что dm_rounded_path() в disk_monitor.c
+ * объявлена static и рисует рамку обводкой, а здесь нужен только путь:
+ * рамку applet не рисует.
+ *
+ * Отступ внутрь на пиксель: маска X-сервера режет ровно по краю окна,
+ * поэтому контур, проведённый ПО краю, терял бы половину обводки под
+ * срез. */
+static void pl_rounded_path(cairo_t *cr, int width, int height, int radius)
+{
+    const double inset = 1.0;
+    double w = width - 2 * inset, h = height - 2 * inset;
+    double r = dm_corner_radius_value(radius);
+
+    if (w <= 0 || h <= 0) {
+        cairo_rectangle(cr, 0, 0, width, height);
+        return;
+    }
+    if (!dm_corner_radius_is_rounded(r)) {
+        cairo_rectangle(cr, inset, inset, w, h);
+        return;
+    }
+    r = MIN(r, MIN(w, h) / 2.0);
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, inset + w - r, inset + r, r, -G_PI / 2.0, 0.0);
+    cairo_arc(cr, inset + w - r, inset + h - r, r, 0.0, G_PI / 2.0);
+    cairo_arc(cr, inset + r, inset + h - r, r, G_PI / 2.0, G_PI);
+    cairo_arc(cr, inset + r, inset + r, r, G_PI, 1.5 * G_PI);
+    cairo_close_path(cr);
+}
+
+/* Применить форму окна к X-серверу.
+ *
+ * dm_rounded_region() берётся из disk_monitor_core намеренно, а не
+ * копируется: одинаковый corner_radius у соседних апплетов обязан давать
+ * одинаковый на вид срез, иначе стоящие рядом окна выглядят по-разному.
+ * Та же формула в acpi_battery и network_monitor считается независимо,
+ * но идентично по построению.
+ *
+ * Именно gdk_window_shape_combine_region(), а не input_shape_:
+ * input-форма влияет только на кликабельность пикселей, но они продолжают
+ * рисоваться. Нужна shape, чтобы угловые пиксели перестали существовать.
+ *
+ * Кэш shape_radius/shape_w/shape_h: маска меняется только при смене
+ * радиуса или размера окна, пересоздавать её на каждом draw (то есть
+ * каждую секунду, update_ms по умолчанию 1000) незачем. */
+static void pl_apply_shape(PrivData *priv, XsPlugin *p, int w, int h)
+{
+    GdkWindow *window;
+    cairo_region_t *region;
+
+    if (!priv || !p || !p->win || w <= 0 || h <= 0)
+        return;
+    if (priv->shape_radius == priv->corner_radius &&
+        priv->shape_w == w && priv->shape_h == h)
+        return;
+    window = gtk_widget_get_window(p->win);
+    if (!window)
+        return;
+    region = dm_rounded_region(w, h, priv->corner_radius);
+    gdk_window_shape_combine_region(window, region, 0, 0);
+    if (region)
+        cairo_region_destroy(region);
+    priv->shape_radius = priv->corner_radius;
+    priv->shape_w = w;
+    priv->shape_h = h;
+}
+
 static void pl_draw(XsPlugin *plugin, cairo_t *cr, int width, int height)
 {
     PrivData *priv = plugin ? plugin->priv : NULL;
@@ -1232,6 +1344,7 @@ static void pl_draw(XsPlugin *plugin, cairo_t *cr, int width, int height)
         priv->cache_width = width;
         priv->cache_height = height;
     }
+    pl_apply_shape(priv, plugin, width, height);
     cairo_set_source_surface(cr, priv->cache, 0, 0);
     cairo_paint(cr);
 }
@@ -1292,6 +1405,11 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
         kf, plugin->name, "window_width", PL_WIDTH_DEFAULT), 320, 1200);
     priv->window_height = CLAMP(xs_host_api()->conf_int(
         kf, plugin->name, "window_height", PL_HEIGHT_DEFAULT), 100, 1000);
+    /* Радиус углов окна, 0 = прямые углы (поведение по умолчанию).
+     * Верхняя граница 200 осмысленна при минимальной высоте окна 100:
+     * радиус больше половины меньшей стороны всё равно срезается. */
+    priv->corner_radius = CLAMP(xs_host_api()->conf_int(
+        kf, plugin->name, "corner_radius", 0), 0, 200);
     title_font = xs_host_api()->conf_str(kf, plugin->name, "title_font",
                                          PL_TITLE_FONT_DEFAULT);
     row_font = xs_host_api()->conf_str(kf, plugin->name, "row_font",
