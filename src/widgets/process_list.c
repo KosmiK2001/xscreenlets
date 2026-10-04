@@ -10,6 +10,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -82,7 +83,9 @@ typedef struct {
     double border_width;
     char *title_font;
     char *row_font;
-    GHashTable *previous;            /* pid -> PlProcess baseline */
+    GHashTable *previous;
+    /* pid -> 1 (ядерный поток) или 2 (обычный процесс). */
+    GHashTable *kthread_cache;            /* pid -> PlProcess baseline */
     GPtrArray *snapshot;             /* all sampled processes, current sort */
     GPtrArray *rows;                 /* first row_count entries of snapshot */
     cairo_surface_t *cache;
@@ -313,10 +316,60 @@ static void pl_fill_extra(PrivData *priv, PlProcess *proc)
  * Отсутствие файла — не ошибка: процесс мог завершиться между обходом
  * каталога и чтением (на 865 pid так исчезает 31, ошибок доступа нет).
  * Такой pid просто пропускается, как и раньше. */
+/* Кэш признака «ядерный поток».
+ *
+ * Идея: applet показывает процессы пользователя, а ядерных потоков на
+ * этой машине 654 из 1076 - 61%, то есть больше половины работы была
+ * впустую: каждому всё равно создавался PlProcess, он попадал в
+ * сортировку, а в список не выводился.
+ *
+ * Признак - ppid == 2 (родитель kthreadd). Проверено на этом ядре
+ * (6.18): comm ядерных потоков идёт БЕЗ квадратных скобок
+ * ("kworker/0:0H-events_highpri", "rcu_preempt"), поэтому фильтр по
+ * скобкам, который обычно советуют, здесь не срабатывает ни разу.
+ *
+ * /proc/<pid>/stat читается ОДИН раз на процесс, при первом появлении,
+ * и дальше берётся из хеша. */
+static gboolean pl_pid_is_kthread(PrivData *priv, gint pid)
+{
+    char buf[512];
+    char path[64];
+    gint fd;
+    gssize n;
+    char *close_paren;
+    char *p;
+    gboolean kthread = FALSE;
+
+    g_snprintf(path, sizeof path, "%d/stat", pid);
+    fd = openat(priv->proc_fd, path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return FALSE;
+    n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0)
+        return FALSE;
+    buf[n] = '\0';
+    /* comm может содержать пробелы и скобки, поэтому идём от ПОСЛЕДНЕЙ
+     * закрывающей скобки, а не от первого пробела. */
+    close_paren = strrchr(buf, ')');
+    if (!close_paren)
+        return FALSE;
+    p = close_paren + 1;
+    while (*p == ' ')
+        p++;
+    while (*p && *p != ' ')   /* state */
+        p++;
+    while (*p == ' ')
+        p++;
+    if (atoi(p) == 2)
+        kthread = TRUE;
+    return kthread;
+}
+
 static PlProcess *pl_read_schedstat(PrivData *priv, const char *pid_text)
 {
     char relative[64];
-    char *data;
+    char *data = NULL;
     guint64 pid;
     guint64 cpu_ns = 0;
     PlProcess *proc;
@@ -324,6 +377,24 @@ static PlProcess *pl_read_schedstat(PrivData *priv, const char *pid_text)
     if (!g_ascii_isdigit(pid_text[0]) || !pl_number(pid_text, &pid) ||
         pid > G_MAXINT)
         return NULL;
+
+    /* Ядерные потоки пропускаем целиком: ни schedstat, ни записи в
+     * списке. Признак кэшируется, поэтому stat читается один раз. */
+    if (priv->kthread_cache) {
+        gpointer key = GINT_TO_POINTER((gint)pid);
+        gpointer mark = g_hash_table_lookup(priv->kthread_cache, key);
+
+        if (!mark) {
+            if (pl_pid_is_kthread(priv, (gint)pid))
+                mark = GINT_TO_POINTER(1);
+            else
+                mark = GINT_TO_POINTER(2);
+            g_hash_table_insert(priv->kthread_cache, key, mark);
+        }
+        if (mark == GINT_TO_POINTER(1))
+            return NULL;
+    }
+
     g_snprintf(relative, sizeof(relative), "%d/schedstat", (gint)pid);
     if (!pl_read_proc(priv, relative, &data))
         return NULL;
@@ -1745,6 +1816,7 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
         kf, plugin->name, "border_width", 0.0), 0.0, 4.0);
     priv->previous = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                             NULL, pl_process_free);
+    priv->kthread_cache = g_hash_table_new(g_direct_hash, g_direct_equal);
     priv->snapshot = g_ptr_array_new_with_free_func(pl_process_free);
     priv->rows = g_ptr_array_new_with_free_func(pl_process_free);
     x = xs_host_api()->conf_int(kf, plugin->name, "x", 300);
@@ -1784,7 +1856,11 @@ static int pl_init(XsPlugin *plugin, GKeyFile *kf)
                                              priv->window_width,
                                              priv->window_height);
     if (!plugin->win) {
-        g_hash_table_destroy(priv->previous);
+        if (priv->kthread_cache) {
+        g_hash_table_destroy(priv->kthread_cache);
+        priv->kthread_cache = NULL;
+    }
+    g_hash_table_destroy(priv->previous);
         g_ptr_array_unref(priv->snapshot);
         g_ptr_array_unref(priv->rows);
         g_free(priv->title_font);
@@ -1810,6 +1886,10 @@ static void pl_shutdown(XsPlugin *plugin)
         return;
     if (priv->cache)
         cairo_surface_destroy(priv->cache);
+    if (priv->kthread_cache) {
+        g_hash_table_destroy(priv->kthread_cache);
+        priv->kthread_cache = NULL;
+    }
     g_hash_table_destroy(priv->previous);
     g_ptr_array_unref(priv->snapshot);
     g_ptr_array_unref(priv->rows);
