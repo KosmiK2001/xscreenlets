@@ -91,9 +91,9 @@ static const struct { const char *coin; const char *addr; } tray_donates[] = {
 /* Кастомный About вместо gtk_about_dialog: штатный диалог не умеет
  * добавлять свою секцию credits («Благодарности» в нём — только
  * authors/documenters/artists/translators, donate-секции нет), а валить
- * кошельки в License семантически неверно. Делаем свой диалог: та же
- * шапка, Credits-секция «Благодарности» с адресами (выделяемыми),
- * License — настоящая MIT. */
+ * кошельки в License семантически неверно. Делаем свой диалог С ТЕМ ЖЕ
+ * видом, что у gtk_about_dialog: переключаемые вкладки Credits/License,
+ * донаты — во вкладке «Благодарности», в License — настоящая MIT. */
 static void on_about_activate(GtkMenuItem *mi, gpointer data)
 {
     (void)mi;
@@ -102,9 +102,9 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
         GtkWidget *dlg;
         GtkWidget *vbox;
         GtkWidget *lbl;
+        GtkWidget *nb;
         GtkWidget *sw;
         GtkWidget *cred;
-        GtkWidget *exp;
         GtkWidget *dbox;
         size_t i;
         char *m;
@@ -119,7 +119,7 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
         gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(
                               GTK_DIALOG(dlg))), vbox);
 
-        /* Шапка */
+        /* Шапка — как в gtk_about_dialog: имя/версия/описание/(c) */
         lbl = gtk_label_new(NULL);
         gtk_label_set_markup(GTK_LABEL(lbl),
                              "<b><span size=\"x-large\">Xscreenlets</span></b> "
@@ -131,22 +131,13 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
         gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
         gtk_box_pack_start(GTK_BOX(vbox), lbl, FALSE, FALSE, 4);
 
-        /* Благодарности / Donate: раскрывающийся список, адреса
-         * выделяются одним кликом и копируются целиком */
-        m = g_strdup_printf("<b>%s</b>",
-                            _("Thanks / Support the developer"));
-        {
-            char *e = m;
+        /* Переключаемые вкладки — как в штатном About */
+        nb = gtk_notebook_new();
+        gtk_box_pack_start(GTK_BOX(vbox), nb, TRUE, TRUE, 0);
 
-            m = e;
-        }
-        lbl = gtk_label_new(NULL);
-        gtk_label_set_markup(GTK_LABEL(lbl), m);
-        g_free(m);
-        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
-        exp = gtk_expander_new(NULL);
-        gtk_expander_set_label_widget(GTK_EXPANDER(exp), lbl);
-        dbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        /* Вкладка «Благодарности»: donate-адреса, выделяемые */
+        dbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+        gtk_container_set_border_width(GTK_CONTAINER(dbox), 8);
         for (i = 0; i < G_N_ELEMENTS(tray_donates); i++) {
             GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
             GtkWidget *cl = gtk_label_new(NULL);
@@ -162,20 +153,15 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
             gtk_label_set_selectable(GTK_LABEL(cv), TRUE);
             gtk_label_set_ellipsize(GTK_LABEL(cv), PANGO_ELLIPSIZE_END);
             gtk_label_set_max_width_chars(GTK_LABEL(cv), 40);
+            gtk_label_set_xalign(GTK_LABEL(cv), 0.0f);
             gtk_box_pack_start(GTK_BOX(row), cl, FALSE, FALSE, 0);
             gtk_box_pack_start(GTK_BOX(row), cv, TRUE, TRUE, 0);
             gtk_box_pack_start(GTK_BOX(dbox), row, FALSE, FALSE, 2);
         }
-        gtk_container_add(GTK_CONTAINER(exp), dbox);
-        gtk_box_pack_start(GTK_BOX(vbox), exp, FALSE, FALSE, 4);
+        gtk_notebook_append_page(GTK_NOTEBOOK(nb), dbox,
+                                 gtk_label_new(_("Thanks")));
 
-        /* License — настоящая MIT, прокручиваемая */
-        m = g_strdup_printf("<b>%s</b>", _("License"));
-        lbl = gtk_label_new(NULL);
-        gtk_label_set_markup(GTK_LABEL(lbl), m);
-        g_free(m);
-        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
-        gtk_box_pack_start(GTK_BOX(vbox), lbl, FALSE, FALSE, 2);
+        /* Вкладка «License»: настоящий текст MIT */
         cred = gtk_label_new(NULL);
         gtk_label_set_markup(GTK_LABEL(cred),
             "MIT License\n\n"
@@ -200,14 +186,16 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
             "OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE "
             "SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.");
         gtk_label_set_selectable(GTK_LABEL(cred), TRUE);
-        gtk_widget_set_halign(cred, GTK_ALIGN_START);
+        gtk_label_set_xalign(GTK_LABEL(cred), 0.0f);
         gtk_label_set_line_wrap(GTK_LABEL(cred), TRUE);
         sw = gtk_scrolled_window_new(NULL, NULL);
         gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
                                        GTK_POLICY_NEVER,
                                        GTK_POLICY_AUTOMATIC);
+        gtk_container_set_border_width(GTK_CONTAINER(sw), 8);
         gtk_container_add(GTK_CONTAINER(sw), cred);
-        gtk_box_pack_start(GTK_BOX(vbox), sw, TRUE, TRUE, 0);
+        gtk_notebook_append_page(GTK_NOTEBOOK(nb), sw,
+                                 gtk_label_new(_("License")));
 
         gtk_widget_show_all(vbox);
         gtk_window_present(GTK_WINDOW(dlg));

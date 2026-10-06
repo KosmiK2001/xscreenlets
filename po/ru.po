@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-06 19:56+0300\n"
+"POT-Creation-Date: 2026-10-06 20:00+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -60,7 +60,7 @@ msgstr "Удалить конфиг"
 msgid "Edit"
 msgstr "Редактировать"
 
-#: ../src/core/applet_manager.c:881 ../src/core/tray.c:427
+#: ../src/core/applet_manager.c:881 ../src/core/tray.c:415
 msgid "Applet management"
 msgstr "Управление апплетами"
 
@@ -108,7 +108,7 @@ msgstr "Поверх всех окон"
 msgid "Keep below"
 msgstr "Под всеми окнами"
 
-#: ../src/core/common.c:1771 ../src/core/tray.c:438
+#: ../src/core/common.c:1771 ../src/core/tray.c:426
 msgid "About"
 msgstr "О программе"
 
@@ -183,7 +183,7 @@ msgstr "Добавить ещё %s"
 msgid "Delete this %s"
 msgstr "Удалить %s"
 
-#: ../src/core/common.c:2098 ../src/core/tray.c:439
+#: ../src/core/common.c:2098 ../src/core/tray.c:427
 msgid "Quit"
 msgstr "Выход"
 
@@ -222,28 +222,28 @@ msgstr "Выбрать"
 msgid "About Xscreenlets"
 msgstr ""
 
-#: ../src/core/tray.c:137
-msgid "Thanks / Support the developer"
-msgstr "Благодарности / Помощь разработчику"
+#: ../src/core/tray.c:162
+msgid "Thanks"
+msgstr "Благодарности"
 
-#: ../src/core/tray.c:173
+#: ../src/core/tray.c:198
 msgid "License"
 msgstr ""
 
-#: ../src/core/tray.c:322
+#: ../src/core/tray.c:310
 #, c-format
 msgid "%1$s: %2$s"
 msgstr "%1$s: %2$s"
 
-#: ../src/core/tray.c:348 ../src/core/tray.c:356 ../src/core/tray.c:393
+#: ../src/core/tray.c:336 ../src/core/tray.c:344 ../src/core/tray.c:381
 msgid "Running Instances"
 msgstr "Запущенные апплеты"
 
-#: ../src/core/tray.c:435
+#: ../src/core/tray.c:423
 msgid "Restart Applets"
 msgstr "Перезапустить апплеты"
 
-#: ../src/core/tray.c:436
+#: ../src/core/tray.c:424
 msgid "Stop all Applets"
 msgstr "Остановить все апплеты"
 
@@ -639,6 +639,9 @@ msgstr "Раскладка"
 #: ../src/widgets/sensors.c:2231
 msgid "Sensors"
 msgstr "Сенсоры"
+
+#~ msgid "Thanks / Support the developer"
+#~ msgstr "Благодарности / Помощь разработчику"
 
 #~ msgid ""
 #~ "If you like Xscreenlets, you can support the developer:\n"
