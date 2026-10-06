@@ -1663,6 +1663,18 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
         GtkWidget *scroll;
         size_t di;
 
+        /* Почта до адресов: тоже выделяемая */
+        {
+            GtkWidget *mail = gtk_label_new("kosmik2001@gmail.com");
+
+            gtk_label_set_selectable(GTK_LABEL(mail), TRUE);
+            gtk_label_set_xalign(GTK_LABEL(mail), 0.0f);
+            gtk_box_pack_start(GTK_BOX(vbox), mail, FALSE, FALSE, 2);
+            gtk_box_pack_start(GTK_BOX(vbox), gtk_separator_new(
+                                   GTK_ORIENTATION_HORIZONTAL),
+                               FALSE, FALSE, 4);
+        }
+
         /* Заголовок экспандера — жирная разметка; сам текст не переводим:
          * "Bitcoin"/"Ethereum" и т.п. — имена валют. */
         {

@@ -138,6 +138,18 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
         /* Вкладка «Благодарности»: donate-адреса, выделяемые */
         dbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_container_set_border_width(GTK_CONTAINER(dbox), 8);
+
+        /* Почта до адресов: тоже выделяемая, чтобы можно было скопировать */
+        {
+            GtkWidget *mail = gtk_label_new("kosmik2001@gmail.com");
+
+            gtk_label_set_selectable(GTK_LABEL(mail), TRUE);
+            gtk_label_set_xalign(GTK_LABEL(mail), 0.0f);
+            gtk_box_pack_start(GTK_BOX(dbox), mail, FALSE, FALSE, 2);
+            gtk_box_pack_start(GTK_BOX(dbox), gtk_separator_new(
+                                   GTK_ORIENTATION_HORIZONTAL),
+                               FALSE, FALSE, 4);
+        }
         for (i = 0; i < G_N_ELEMENTS(tray_donates); i++) {
             GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
             GtkWidget *cl = gtk_label_new(NULL);
