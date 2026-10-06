@@ -1572,6 +1572,7 @@ static void xs_core_themes_render(GtkTreeViewColumn *col, GtkCellRenderer *cell,
 
 static GtkWidget *xs_core_about_page(XsPlugin *p)
 {
+    GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     GtkWidget *img = gtk_image_new();
     GtkWidget *label = gtk_label_new(NULL);
@@ -1707,11 +1708,14 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
         gtk_container_add(GTK_CONTAINER(scroll), vbox);
         gtk_widget_set_size_request(scroll, -1, 120);
         gtk_container_add(GTK_CONTAINER(exp), scroll);
-        gtk_widget_set_margin_top(exp, 12);
-        gtk_box_pack_start(GTK_BOX(hbox), exp, FALSE, FALSE, 0);
+        gtk_widget_set_margin_top(exp, 6);
+        /* Донат-блок — на всю ширину ПОД шапкой (иконка+имя+автор),
+         * а не рядом с ней: иначе expander раздувает hbox. */
+        gtk_box_pack_start(GTK_BOX(outer), exp, TRUE, TRUE, 0);
     }
-    gtk_widget_show_all(hbox);
-    return hbox;
+    gtk_box_pack_start(GTK_BOX(outer), hbox, FALSE, FALSE, 0);
+    gtk_widget_show_all(outer);
+    return outer;
 }
 
 static void xs_core_show_properties(XsPlugin *p)
