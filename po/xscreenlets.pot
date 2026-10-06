@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-06 19:50+0300\n"
+"POT-Creation-Date: 2026-10-06 19:56+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -53,7 +53,7 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: ../src/core/applet_manager.c:881 ../src/core/tray.c:346
+#: ../src/core/applet_manager.c:881 ../src/core/tray.c:427
 msgid "Applet management"
 msgstr ""
 
@@ -76,108 +76,108 @@ msgid ""
 "available)"
 msgstr ""
 
-#: ../src/core/common.c:1671
+#: ../src/core/common.c:1672
 msgid "<b>Donate / Support the developer</b>"
 msgstr ""
 
-#: ../src/core/common.c:1733
+#: ../src/core/common.c:1737
 msgid "Lock position"
 msgstr ""
 
-#: ../src/core/common.c:1734 ../src/core/common.c:2038
+#: ../src/core/common.c:1738 ../src/core/common.c:2042
 msgid "Sticky"
 msgstr ""
 
-#: ../src/core/common.c:1735 ../src/core/common.c:2039
+#: ../src/core/common.c:1739 ../src/core/common.c:2043
 msgid "Widget"
 msgstr ""
 
-#: ../src/core/common.c:1736 ../src/core/common.c:2040
+#: ../src/core/common.c:1740 ../src/core/common.c:2044
 msgid "Keep above"
 msgstr ""
 
-#: ../src/core/common.c:1737 ../src/core/common.c:2041
+#: ../src/core/common.c:1741 ../src/core/common.c:2045
 msgid "Keep below"
 msgstr ""
 
-#: ../src/core/common.c:1767 ../src/core/tray.c:357
+#: ../src/core/common.c:1771 ../src/core/tray.c:438
 msgid "About"
 msgstr ""
 
-#: ../src/core/common.c:1785
+#: ../src/core/common.c:1789
 msgid "Scale"
 msgstr ""
 
-#: ../src/core/common.c:1803
+#: ../src/core/common.c:1807
 msgid "Size is set by End width/height (Resize mode = end_size)"
 msgstr ""
 
-#: ../src/core/common.c:1812
+#: ../src/core/common.c:1816
 msgid "Opacity"
 msgstr ""
 
-#: ../src/core/common.c:1824
+#: ../src/core/common.c:1828
 msgid "X-Position"
 msgstr ""
 
-#: ../src/core/common.c:1840
+#: ../src/core/common.c:1844
 msgid "Y-Position"
 msgstr ""
 
-#: ../src/core/common.c:1863
+#: ../src/core/common.c:1867
 msgid "User label"
 msgstr ""
 
-#: ../src/core/common.c:1884 ../src/core/common.c:2033
+#: ../src/core/common.c:1888 ../src/core/common.c:2037
 #: ../src/widgets/conlog.c:1505 ../src/widgets/sensors.c:2208
 msgid "Window"
 msgstr ""
 
-#: ../src/core/common.c:1890
+#: ../src/core/common.c:1894
 msgid "Options"
 msgstr ""
 
-#: ../src/core/common.c:1904
+#: ../src/core/common.c:1908
 msgid ""
 "Themes allow you to easily switch the appearance of your Screenlets. On this "
 "page you find a list of all available themes for this Screenlet."
 msgstr ""
 
-#: ../src/core/common.c:1967 ../src/widgets/clearrss.c:1913
+#: ../src/core/common.c:1971 ../src/widgets/clearrss.c:1913
 msgid "Themes"
 msgstr ""
 
-#: ../src/core/common.c:2014
+#: ../src/core/common.c:2018
 msgid "Size"
 msgstr ""
 
-#: ../src/core/common.c:2037
+#: ../src/core/common.c:2041
 msgid "Lock"
 msgstr ""
 
-#: ../src/core/common.c:2059
+#: ../src/core/common.c:2063
 msgid "Properties..."
 msgstr ""
 
-#: ../src/core/common.c:2062
+#: ../src/core/common.c:2066
 msgid "Info..."
 msgstr ""
 
-#: ../src/core/common.c:2081
+#: ../src/core/common.c:2085
 #, c-format
 msgid "Add one more %s"
 msgstr ""
 
-#: ../src/core/common.c:2086
+#: ../src/core/common.c:2090
 #, c-format
 msgid "Delete this %s"
 msgstr ""
 
-#: ../src/core/common.c:2094 ../src/core/tray.c:358
+#: ../src/core/common.c:2098 ../src/core/tray.c:439
 msgid "Quit"
 msgstr ""
 
-#: ../src/core/common.c:2729
+#: ../src/core/common.c:2733
 #, c-format
 msgid ""
 "Dead symlink: %s\n"
@@ -185,46 +185,52 @@ msgid ""
 "Config not found. Delete the symlink?"
 msgstr ""
 
-#: ../src/core/common.c:2733
+#: ../src/core/common.c:2737
 msgid "Delete"
 msgstr ""
 
-#: ../src/core/common.c:2734
+#: ../src/core/common.c:2738
 msgid "Point to another config"
 msgstr ""
 
-#: ../src/core/common.c:2735 ../src/core/common.c:2741
+#: ../src/core/common.c:2739 ../src/core/common.c:2745
 msgid "Cancel"
 msgstr ""
 
-#: ../src/core/common.c:2740
+#: ../src/core/common.c:2744
 msgid "Choose a config in .plugins"
 msgstr ""
 
-#: ../src/core/common.c:2742
+#: ../src/core/common.c:2746
 msgid "Select"
 msgstr ""
 
-#: ../src/core/tray.c:98
-msgid ""
-"If you like Xscreenlets, you can support the developer:\n"
-"\n"
+#: ../src/core/tray.c:112
+msgid "About Xscreenlets"
 msgstr ""
 
-#: ../src/core/tray.c:241
+#: ../src/core/tray.c:137
+msgid "Thanks / Support the developer"
+msgstr ""
+
+#: ../src/core/tray.c:173
+msgid "License"
+msgstr ""
+
+#: ../src/core/tray.c:322
 #, c-format
 msgid "%1$s: %2$s"
 msgstr ""
 
-#: ../src/core/tray.c:267 ../src/core/tray.c:275 ../src/core/tray.c:312
+#: ../src/core/tray.c:348 ../src/core/tray.c:356 ../src/core/tray.c:393
 msgid "Running Instances"
 msgstr ""
 
-#: ../src/core/tray.c:354
+#: ../src/core/tray.c:435
 msgid "Restart Applets"
 msgstr ""
 
-#: ../src/core/tray.c:355
+#: ../src/core/tray.c:436
 msgid "Stop all Applets"
 msgstr ""
 

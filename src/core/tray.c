@@ -79,9 +79,7 @@ static void on_stop_all_activate(GtkMenuItem *mi, gpointer data)
 }
 
 /* Кошельки для донатов — общий список с About-страницей в common.c
- * (xs_core_about_page). Дублируем текстом: tray-About — это
- * gtk_about_dialog, он не принимает произвольных виджетов, но умеет
- * показывать блок license. */
+ * (xs_core_about_page). */
 static const struct { const char *coin; const char *addr; } tray_donates[] = {
     { "Bitcoin",  "bc1qfmr3ztpvsxjq0qpjd4xr4xujk5jq2jy5pntcgd" },
     { "Litecoin", "ltc1qqdnp7h4dfc5w0sj02uhpncl9qrgt57p583r3hp" },
@@ -90,45 +88,128 @@ static const struct { const char *coin; const char *addr; } tray_donates[] = {
     { "Gridcoin", "SJcosJ2xaspR7GKjFi1WZ23AerhANVmjcf" },
 };
 
-static char *tray_donate_text(void)
-{
-    GString *s;
-    size_t i;
-
-    s = g_string_new(_("If you like Xscreenlets, you can support "
-                       "the developer:\n\n"));
-    for (i = 0; i < G_N_ELEMENTS(tray_donates); i++)
-        g_string_append_printf(s, "%s: %s\n",
-                               tray_donates[i].coin, tray_donates[i].addr);
-    return g_string_free(s, FALSE);
-}
-
+/* Кастомный About вместо gtk_about_dialog: штатный диалог не умеет
+ * добавлять свою секцию credits («Благодарности» в нём — только
+ * authors/documenters/artists/translators, donate-секции нет), а валить
+ * кошельки в License семантически неверно. Делаем свой диалог: та же
+ * шапка, Credits-секция «Благодарности» с адресами (выделяемыми),
+ * License — настоящая MIT. */
 static void on_about_activate(GtkMenuItem *mi, gpointer data)
 {
     (void)mi;
     (void)data;
     {
-        GtkWidget *dlg = gtk_about_dialog_new();
-        const char *authors[] = { "kosmik2001 <kosmik2001@gmail.com>", NULL };
-        char *license;
+        GtkWidget *dlg;
+        GtkWidget *vbox;
+        GtkWidget *lbl;
+        GtkWidget *sw;
+        GtkWidget *cred;
+        GtkWidget *exp;
+        GtkWidget *dbox;
+        size_t i;
+        char *m;
 
-        gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dlg),
-                                          "Xscreenlets");
-        gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dlg), "0.2");
-        gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dlg),
-                                      "C/GTK3 replacement for python2 "
-                                      "screenlets (daemon + gmodule plugins)");
-        gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dlg), authors);
-        gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(dlg),
-                                     "kosmik2001@gmail.com");
-        /* Donate-блок: gtk_about_dialog не принимает виджетов, поэтому
-         * адреса идут в секцию License — она показывается по кнопке и
-         * текст выделяется/копируется. */
-        license = tray_donate_text();
-        gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(dlg),
-                                          GTK_LICENSE_CUSTOM);
-        gtk_about_dialog_set_license(GTK_ABOUT_DIALOG(dlg), license);
-        g_free(license);
+        dlg = gtk_dialog_new_with_buttons(_("About Xscreenlets"), NULL,
+                                          0,
+                                          "Close", GTK_RESPONSE_CLOSE,
+                                          NULL);
+        gtk_window_set_default_size(GTK_WINDOW(dlg), 420, 380);
+        gtk_container_set_border_width(GTK_CONTAINER(dlg), 10);
+        vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+        gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(
+                              GTK_DIALOG(dlg))), vbox);
+
+        /* Шапка */
+        lbl = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(lbl),
+                             "<b><span size=\"x-large\">Xscreenlets</span></b> "
+                             "<span size=\"large\">0.2</span>\n"
+                             "C/GTK3 replacement for python2 screenlets "
+                             "(daemon + gmodule plugins)\n"
+                             "<span size=\"small\">(c) kosmik2001 "
+                             "&lt;kosmik2001@gmail.com&gt;</span>");
+        gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
+        gtk_box_pack_start(GTK_BOX(vbox), lbl, FALSE, FALSE, 4);
+
+        /* Благодарности / Donate: раскрывающийся список, адреса
+         * выделяются одним кликом и копируются целиком */
+        m = g_strdup_printf("<b>%s</b>",
+                            _("Thanks / Support the developer"));
+        {
+            char *e = m;
+
+            m = e;
+        }
+        lbl = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(lbl), m);
+        g_free(m);
+        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+        exp = gtk_expander_new(NULL);
+        gtk_expander_set_label_widget(GTK_EXPANDER(exp), lbl);
+        dbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        for (i = 0; i < G_N_ELEMENTS(tray_donates); i++) {
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+            GtkWidget *cl = gtk_label_new(NULL);
+            GtkWidget *cv;
+            char *e;
+
+            e = g_markup_escape_text(tray_donates[i].coin, -1);
+            m = g_strdup_printf("<b>%s:</b>", e);
+            gtk_label_set_markup(GTK_LABEL(cl), m);
+            g_free(m);
+            g_free(e);
+            cv = gtk_label_new(tray_donates[i].addr);
+            gtk_label_set_selectable(GTK_LABEL(cv), TRUE);
+            gtk_label_set_ellipsize(GTK_LABEL(cv), PANGO_ELLIPSIZE_END);
+            gtk_label_set_max_width_chars(GTK_LABEL(cv), 40);
+            gtk_box_pack_start(GTK_BOX(row), cl, FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row), cv, TRUE, TRUE, 0);
+            gtk_box_pack_start(GTK_BOX(dbox), row, FALSE, FALSE, 2);
+        }
+        gtk_container_add(GTK_CONTAINER(exp), dbox);
+        gtk_box_pack_start(GTK_BOX(vbox), exp, FALSE, FALSE, 4);
+
+        /* License — настоящая MIT, прокручиваемая */
+        m = g_strdup_printf("<b>%s</b>", _("License"));
+        lbl = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(lbl), m);
+        g_free(m);
+        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(vbox), lbl, FALSE, FALSE, 2);
+        cred = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(cred),
+            "MIT License\n\n"
+            "Copyright (c) 2026 kosmik2001\n\n"
+            "Permission is hereby granted, free of charge, to any person "
+            "obtaining a copy of this software and associated documentation "
+            "files (the \"Software\"), to deal in the Software without "
+            "restriction, including without limitation the rights to use, "
+            "copy, modify, merge, publish, distribute, sublicense, and/or "
+            "sell copies of the Software, and to permit persons to whom the "
+            "Software is furnished to do so, subject to the following "
+            "conditions:\n\n"
+            "The above copyright notice and this permission notice shall be "
+            "included in all copies or substantial portions of the "
+            "Software.\n\n"
+            "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY "
+            "KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE "
+            "WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR "
+            "PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR "
+            "COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
+            "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR "
+            "OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE "
+            "SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.");
+        gtk_label_set_selectable(GTK_LABEL(cred), TRUE);
+        gtk_widget_set_halign(cred, GTK_ALIGN_START);
+        gtk_label_set_line_wrap(GTK_LABEL(cred), TRUE);
+        sw = gtk_scrolled_window_new(NULL, NULL);
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw),
+                                       GTK_POLICY_NEVER,
+                                       GTK_POLICY_AUTOMATIC);
+        gtk_container_add(GTK_CONTAINER(sw), cred);
+        gtk_box_pack_start(GTK_BOX(vbox), sw, TRUE, TRUE, 0);
+
+        gtk_widget_show_all(vbox);
         gtk_window_present(GTK_WINDOW(dlg));
         g_signal_connect(dlg, "response", G_CALLBACK(gtk_widget_destroy),
                          NULL);
