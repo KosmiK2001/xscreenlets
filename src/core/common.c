@@ -1646,8 +1646,71 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_widget_set_valign(label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(hbox), label, TRUE, TRUE, 5);
-    gtk_widget_show_all(hbox);
     g_string_free(mu, TRUE);
+
+    /* --- Блок "Помощь разработчику" --- */
+    {
+        static const struct { const char *coin; const char *addr; } donates[] = {
+            { "Bitcoin",  "bc1qfmr3ztpvsxjq0qpjd4xr4xujk5jq2jy5pntcgd" },
+            { "Litecoin", "ltc1qqdnp7h4dfc5w0sj02uhpncl9qrgt57p583r3hp" },
+            { "Solana",   "BDam16tXGmAqE3y8GncVCCzmiu1AxZwjYHQHGkyXNjEE" },
+            { "Ethereum", "0xc6817e25b4d4283878aec8309b8df542a342a7f4" },
+            { "Gridcoin", "SJcosJ2xaspR7GKjFi1WZ23AerhANVmjcf" },
+        };
+        GtkWidget *exp = gtk_expander_new(NULL);
+        GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        GtkWidget *scroll;
+        size_t di;
+
+        /* Заголовок экспандера — жирная разметка; сам текст не переводим:
+         * "Bitcoin"/"Ethereum" и т.п. — имена валют. */
+        {
+            GtkWidget *lbl = gtk_label_new(NULL);
+
+            gtk_label_set_markup(GTK_LABEL(lbl),
+                                 _("<b>Donate / Support the developer</b>"));
+            gtk_expander_set_label_widget(GTK_EXPANDER(exp), lbl);
+        }
+        for (di = 0; di < G_N_ELEMENTS(donates); di++) {
+            GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+            GtkWidget *cl = gtk_label_new(NULL);
+            GtkWidget *cv = gtk_label_new(NULL);
+            char *e;
+
+            gtk_widget_set_halign(cl, GTK_ALIGN_START);
+            e = g_markup_escape_text(donates[di].coin, -1);
+            {
+                char *m = g_strdup_printf("<b>%s:</b>", e);
+
+                gtk_label_set_markup(GTK_LABEL(cl), m);
+                g_free(m);
+                g_free(e);
+            }
+            gtk_widget_set_halign(cv, GTK_ALIGN_START);
+            gtk_label_set_selectable(GTK_LABEL(cv), TRUE);
+            gtk_label_set_ellipsize(GTK_LABEL(cv), PANGO_ELLIPSIZE_END);
+            /* Адреса копируются целиком: выделяемый label, ellipsize
+             * только визуально режет длинные BTC-адреса. */
+            gtk_label_set_max_width_chars(GTK_LABEL(cv), 46);
+            e = g_markup_escape_text(donates[di].addr, -1);
+            gtk_label_set_text(GTK_LABEL(cv), donates[di].addr);
+            g_free(e);
+            gtk_box_pack_start(GTK_BOX(row), cl, FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(row), cv, TRUE, TRUE, 0);
+            gtk_box_pack_start(GTK_BOX(vbox), row, FALSE, FALSE, 2);
+        }
+        gtk_widget_set_halign(vbox, GTK_ALIGN_FILL);
+        scroll = gtk_scrolled_window_new(NULL, NULL);
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                       GTK_POLICY_NEVER,
+                                       GTK_POLICY_AUTOMATIC);
+        gtk_container_add(GTK_CONTAINER(scroll), vbox);
+        gtk_widget_set_size_request(scroll, -1, 120);
+        gtk_container_add(GTK_CONTAINER(exp), scroll);
+        gtk_widget_set_margin_top(exp, 12);
+        gtk_box_pack_start(GTK_BOX(hbox), exp, FALSE, FALSE, 0);
+    }
+    gtk_widget_show_all(hbox);
     return hbox;
 }
 
