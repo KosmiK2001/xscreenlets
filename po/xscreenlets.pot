@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-06 19:39+0300\n"
+"POT-Creation-Date: 2026-10-06 19:50+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -53,7 +53,7 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: ../src/core/applet_manager.c:881 ../src/core/tray.c:312
+#: ../src/core/applet_manager.c:881 ../src/core/tray.c:346
 msgid "Applet management"
 msgstr ""
 
@@ -100,7 +100,7 @@ msgstr ""
 msgid "Keep below"
 msgstr ""
 
-#: ../src/core/common.c:1767 ../src/core/tray.c:323
+#: ../src/core/common.c:1767 ../src/core/tray.c:357
 msgid "About"
 msgstr ""
 
@@ -173,7 +173,7 @@ msgstr ""
 msgid "Delete this %s"
 msgstr ""
 
-#: ../src/core/common.c:2094 ../src/core/tray.c:324
+#: ../src/core/common.c:2094 ../src/core/tray.c:358
 msgid "Quit"
 msgstr ""
 
@@ -205,20 +205,26 @@ msgstr ""
 msgid "Select"
 msgstr ""
 
-#: ../src/core/tray.c:207
+#: ../src/core/tray.c:98
+msgid ""
+"If you like Xscreenlets, you can support the developer:\n"
+"\n"
+msgstr ""
+
+#: ../src/core/tray.c:241
 #, c-format
 msgid "%1$s: %2$s"
 msgstr ""
 
-#: ../src/core/tray.c:233 ../src/core/tray.c:241 ../src/core/tray.c:278
+#: ../src/core/tray.c:267 ../src/core/tray.c:275 ../src/core/tray.c:312
 msgid "Running Instances"
 msgstr ""
 
-#: ../src/core/tray.c:320
+#: ../src/core/tray.c:354
 msgid "Restart Applets"
 msgstr ""
 
-#: ../src/core/tray.c:321
+#: ../src/core/tray.c:355
 msgid "Stop all Applets"
 msgstr ""
 

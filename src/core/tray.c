@@ -78,6 +78,31 @@ static void on_stop_all_activate(GtkMenuItem *mi, gpointer data)
     }
 }
 
+/* Кошельки для донатов — общий список с About-страницей в common.c
+ * (xs_core_about_page). Дублируем текстом: tray-About — это
+ * gtk_about_dialog, он не принимает произвольных виджетов, но умеет
+ * показывать блок license. */
+static const struct { const char *coin; const char *addr; } tray_donates[] = {
+    { "Bitcoin",  "bc1qfmr3ztpvsxjq0qpjd4xr4xujk5jq2jy5pntcgd" },
+    { "Litecoin", "ltc1qqdnp7h4dfc5w0sj02uhpncl9qrgt57p583r3hp" },
+    { "Solana",   "BDam16tXGmAqE3y8GncVCCzmiu1AxZwjYHQHGkyXNjEE" },
+    { "Ethereum", "0xc6817e25b4d4283878aec8309b8df542a342a7f4" },
+    { "Gridcoin", "SJcosJ2xaspR7GKjFi1WZ23AerhANVmjcf" },
+};
+
+static char *tray_donate_text(void)
+{
+    GString *s;
+    size_t i;
+
+    s = g_string_new(_("If you like Xscreenlets, you can support "
+                       "the developer:\n\n"));
+    for (i = 0; i < G_N_ELEMENTS(tray_donates); i++)
+        g_string_append_printf(s, "%s: %s\n",
+                               tray_donates[i].coin, tray_donates[i].addr);
+    return g_string_free(s, FALSE);
+}
+
 static void on_about_activate(GtkMenuItem *mi, gpointer data)
 {
     (void)mi;
@@ -85,6 +110,7 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
     {
         GtkWidget *dlg = gtk_about_dialog_new();
         const char *authors[] = { "kosmik2001 <kosmik2001@gmail.com>", NULL };
+        char *license;
 
         gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dlg),
                                           "Xscreenlets");
@@ -95,6 +121,14 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
         gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dlg), authors);
         gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(dlg),
                                      "kosmik2001@gmail.com");
+        /* Donate-блок: gtk_about_dialog не принимает виджетов, поэтому
+         * адреса идут в секцию License — она показывается по кнопке и
+         * текст выделяется/копируется. */
+        license = tray_donate_text();
+        gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(dlg),
+                                          GTK_LICENSE_CUSTOM);
+        gtk_about_dialog_set_license(GTK_ABOUT_DIALOG(dlg), license);
+        g_free(license);
         gtk_window_present(GTK_WINDOW(dlg));
         g_signal_connect(dlg, "response", G_CALLBACK(gtk_widget_destroy),
                          NULL);
