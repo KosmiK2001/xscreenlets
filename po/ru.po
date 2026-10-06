@@ -222,7 +222,7 @@ msgstr "Выбрать"
 msgid ""
 "If you like Xscreenlets, you can support the developer:\n"
 "\n"
-msgstr "Если вам нравится Xscreenlets, вы можете помочь разработчику:"
+msgstr "Если вам нравится Xscreenlets, вы можете помочь разработчику:\n"
 
 #: ../src/core/tray.c:241
 #, c-format
