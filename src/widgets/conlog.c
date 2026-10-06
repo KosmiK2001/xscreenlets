@@ -1410,12 +1410,19 @@ static void cl_properties(XsPlugin *p, GtkNotebook *notebook)
         /* Примеры команд НЕ переводятся: это буквальный текст, который
          * пользователь копирует в терминал. Переводить его нельзя.
          * Переводится только первая фраза-предложение. */
-        GtkWidget *hint = gtk_label_new(_("Arguments are passed to the process directly, without a shell.\n")
+        GtkWidget *hint;
+        char *tr = _("Arguments are passed to the process directly, "
+                     "without a shell.\n");
+        char *joined = g_strconcat(tr,
             "Примеры:\n"
             "  journalctl -f -n 20\n"
             "  dmesg -w\n"
             "  tail -F /var/log/messages\n"
-            "  ip monitor link");
+            "  ip monitor link",
+            NULL);
+
+        hint = gtk_label_new(joined);
+        g_free(joined);
         gtk_label_set_xalign(GTK_LABEL(hint), 0.0);
         gtk_box_pack_start(GTK_BOX(box), hint, FALSE, FALSE, 0);
     }
