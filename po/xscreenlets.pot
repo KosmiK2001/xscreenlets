@@ -1,15 +1,14 @@
 # SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR KosmiK2001
-# This file is distributed under the same license as the xscreenlets package.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 #
-#: src/widgets/network_monitor.c:2568
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: xscreenlets\n"
+"Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 16:27+0300\n"
+"POT-Creation-Date: 2026-10-06 19:39+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,1073 +17,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/widgets/acpi_battery.c:442
-msgid ""
-"Reads /sys/class/power_supply. Works with laptop batteries and with devices "
-"that expose a battery there (e.g. a Logitech mouse when the hid-logitech-"
-"hidpp module is loaded). Shows \"No battery\" when no source is found, "
-"instead of failing."
-msgstr ""
-
-#: src/widgets/acpi_battery.c:447 src/widgets/clearrss.c:2386
-#: src/widgets/cpu_monitor.c:1186 src/widgets/disk_monitor.c:1297
-#: src/widgets/memory_monitor.c:680 src/widgets/process_list.c:1194
-msgid "Window width"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:449 src/widgets/clearrss.c:2389
-#: src/widgets/cpu_monitor.c:1191 src/widgets/disk_monitor.c:1297
-#: src/widgets/memory_monitor.c:681 src/widgets/process_list.c:1196
-msgid "Window height"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:451
-msgid "Update interval (s)"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:453
-msgid "Low battery threshold (%)"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:457
-msgid "Show percentage"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:458
-msgid "Display charge percent"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:459
-msgid "Show remaining time"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:460
-msgid "Display estimated time left"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:462
-msgid "ACPI Battery"
-msgstr ""
-
-#: src/widgets/acpi_battery.c:487
-msgid "Battery charge, remaining time and state from sysfs power_supply"
-msgstr ""
-
-#: src/widgets/calendar.c:876
-msgid "View events"
-msgstr ""
-
-#: src/widgets/calendar.c:877
-msgid "Update events"
-msgstr ""
-
-#: src/widgets/calendar.c:878
-msgid "Toggle events"
-msgstr ""
-
-#: src/widgets/calendar.c:879
-msgid "Back to today"
-msgstr ""
-
-#: src/widgets/calendar.c:904 src/widgets/clock.c:1091
-#: src/widgets/frame_launcher.c:1220
-msgid "Theme"
-msgstr ""
-
-#: src/widgets/calendar.c:1081
-msgid "Calendar specific options"
-msgstr ""
-
-#: src/widgets/calendar.c:1101
-msgid "First Weekday"
-msgstr ""
-
-#: src/widgets/calendar.c:1105
-msgid "iCalendar ics file path"
-msgstr ""
-
-#: src/widgets/calendar.c:1112
-msgid "Show iCalendar events"
-msgstr ""
-
-#: src/widgets/calendar.c:1118
-msgid "Month buttons"
-msgstr ""
-
-#: src/widgets/calendar.c:1125 src/widgets/clearrss.c:2338
-#: src/widgets/conlog_min.c:989
-msgid "Text color"
-msgstr ""
-
-#: src/widgets/calendar.c:1127
-msgid "Today color"
-msgstr ""
-
-#: src/widgets/calendar.c:1129
-msgid "Event day color"
-msgstr ""
-
-#: src/widgets/calendar.c:1131
-msgid "Today event color"
-msgstr ""
-
-#: src/widgets/calendar.c:1134
-msgid "Back color (default theme)"
-msgstr ""
-
-#: src/widgets/calendar.c:1142
-msgid "Header font"
-msgstr ""
-
-#: src/widgets/calendar.c:1149
-msgid "Day names font"
-msgstr ""
-
-#: src/widgets/calendar.c:1156
-msgid "Days font"
-msgstr ""
-
-#: src/widgets/calendar.c:1167
-msgid "iCalendar"
-msgstr ""
-
-#: src/widgets/clearrss.c:1897
-msgid "Feeds"
-msgstr ""
-
-#: src/widgets/clearrss.c:1909
-msgid "View this News"
-msgstr ""
-
-#: src/widgets/clearrss.c:1910
-msgid "Refresh"
-msgstr ""
-
-#: src/widgets/clearrss.c:1911
-msgid "Previous item"
-msgstr ""
-
-#: src/widgets/clearrss.c:1912
-msgid "Next item"
-msgstr ""
-
-#: src/widgets/clearrss.c:1913 src/core/common.c:1686
-msgid "Themes"
-msgstr ""
-
-#: src/widgets/clearrss.c:2188
-msgid "Align header left/center/right"
-msgstr ""
-
-#: src/widgets/clearrss.c:2203 src/widgets/clearrss.c:2252
-#: src/widgets/clearrss.c:2395 src/widgets/network_monitor.c:2727
-msgid "Header"
-msgstr ""
-
-#: src/widgets/clearrss.c:2227
-msgid "Header font and size"
-msgstr ""
-
-#: src/widgets/clearrss.c:2240
-msgid "Header color"
-msgstr ""
-
-#: src/widgets/clearrss.c:2276
-msgid "Published-time font and size"
-msgstr ""
-
-#: src/widgets/clearrss.c:2289
-msgid "Published-time color"
-msgstr ""
-
-#: src/widgets/clearrss.c:2301 src/widgets/cpu_monitor.c:1201
-#: src/widgets/disk_monitor.c:1323 src/widgets/memory_monitor.c:687
-#: src/widgets/network_monitor.c:2719 src/widgets/process_list.c:1205
-msgid "Text"
-msgstr ""
-
-#: src/widgets/clearrss.c:2325
-msgid "Text font and size"
-msgstr ""
-
-#: src/widgets/clearrss.c:2354
-msgid "Rss-specific settings."
-msgstr ""
-
-#: src/widgets/clearrss.c:2356
-msgid "Feed"
-msgstr ""
-
-#: src/widgets/clearrss.c:2362
-msgid "Feed name"
-msgstr ""
-
-#: src/widgets/clearrss.c:2365
-msgid "Feed URL"
-msgstr ""
-
-#: src/widgets/clearrss.c:2371
-msgid "Update interval"
-msgstr ""
-
-#: src/widgets/clearrss.c:2374
-msgid "Auto news count"
-msgstr ""
-
-#: src/widgets/clearrss.c:2377
-msgid "News count"
-msgstr ""
-
-#: src/widgets/clearrss.c:2401
-msgid "Show feed name"
-msgstr ""
-
-#: src/widgets/clearrss.c:2408
-msgid "Header align"
-msgstr ""
-
-#: src/widgets/clearrss.c:2412
-msgid "Text settings"
-msgstr ""
-
-#: src/widgets/clearrss.c:2418
-msgid "Show published time"
-msgstr ""
-
-#: src/widgets/clearrss.c:2427
-msgid "Back color"
-msgstr ""
-
-#: src/widgets/clearrss.c:2433
-msgid "Rss"
-msgstr ""
-
-#: src/widgets/clearweather.c:3130
-msgid "Weather"
-msgstr ""
-
-#: src/widgets/clearweather.c:3142
-msgid "City or index:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3148
-msgid "Alternate name:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3153
-msgid "Source:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3158
-msgid "Connection:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3164
-msgid "Proxy:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3169
-msgid "Units:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3174
-msgid "Update, min:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3179
-msgid "Forecast hours:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3192
-msgid "Forecast type:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3209
-msgid "Background:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3221
-msgid "Underlay colour (ARGB):"
-msgstr ""
-
-#: src/widgets/clearweather.c:3230
-msgid "Corner rounding, px:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3240
-msgid "Theme directory:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3246
-msgid "Width:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3252
-msgid "Height:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3254
-msgid "City colour:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3256
-msgid "Temperature colour:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3258
-msgid "Description colour:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3260
-msgid "Clock colour:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3262
-msgid "Background colour:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3265
-msgid "City font:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3267
-msgid "Temperature font:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3269
-msgid "Description font:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3271
-msgid "Clock font:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3273
-msgid "Value font on icon:"
-msgstr ""
-
-#: src/widgets/clearweather.c:3342
-msgid "Refresh now"
-msgstr ""
-
-#: src/widgets/clearweather.c:3343
-msgid "Connection: direct"
-msgstr ""
-
-#: src/widgets/clearweather.c:3344
-msgid "Connection: via proxy"
-msgstr ""
-
-#: src/widgets/clearweather.c:3574
-msgid "Погода: open-meteo и wttr.in, прямо или через прокси"
-msgstr ""
-
-#: src/widgets/clock.c:883
-msgid "Clock"
-msgstr ""
-
-#: src/widgets/clock.c:884
-msgid "Clock-specific settings."
-msgstr ""
-
-#: src/widgets/clock.c:887
-msgid "Time Zone"
-msgstr ""
-
-#: src/widgets/clock.c:894
-msgid "Time-Offset"
-msgstr ""
-
-#: src/widgets/clock.c:904
-msgid "Hour-Format"
-msgstr ""
-
-#: src/widgets/clock.c:911
-msgid "Show seconds-hand"
-msgstr ""
-
-#: src/widgets/clock.c:922
-msgid "Alarm"
-msgstr ""
-
-#: src/widgets/clock.c:923
-msgid "Settings for the Alarm-function."
-msgstr ""
-
-#: src/widgets/clock.c:933
-msgid "Activate Alarm"
-msgstr ""
-
-#: src/widgets/clock.c:941
-msgid "Alarm-Time"
-msgstr ""
-
-#: src/widgets/clock.c:956
-msgid "Alarm stops after"
-msgstr ""
-
-#: src/widgets/clock.c:966
-msgid "Run a command"
-msgstr ""
-
-#: src/widgets/clock.c:973
-msgid "Alarm command"
-msgstr ""
-
-#: src/widgets/clock.c:985
-msgid "Face"
-msgstr ""
-
-#: src/widgets/clock.c:986
-msgid "Additional settings for the face-layout ..."
-msgstr ""
-
-#: src/widgets/clock.c:990
-msgid "Face-Text"
-msgstr ""
-
-#: src/widgets/clock.c:998
-msgid "Text-Font"
-msgstr ""
-
-#: src/widgets/clock.c:1004
-msgid "Text-Color"
-msgstr ""
-
-#: src/widgets/clock.c:1011
-msgid "X-Position of Text"
-msgstr ""
-
-#: src/widgets/clock.c:1020
-msgid "Y-Position of Text"
-msgstr ""
-
-#: src/widgets/clock.c:1029
-msgid "Show today's date"
-msgstr ""
-
-#: src/widgets/clock.c:1036
-msgid "Date Format"
-msgstr ""
-
-#: src/widgets/clock.c:1062
-msgid "Get Clock Skins"
-msgstr ""
-
-#: src/widgets/conlog.c:1403 src/widgets/conlog_min.c:928
-#: src/widgets/conlog_min.c:933 src/widgets/launcher.c:852
-msgid "Command"
-msgstr ""
-
-#: src/widgets/conlog.c:1413
-msgid "Arguments are passed to the process directly, without a shell.\n"
-msgstr ""
-
-#: src/widgets/conlog.c:1425
-msgid "Window title (optional)"
-msgstr ""
-
-#: src/widgets/conlog.c:1434
-msgid "Clear output"
-msgstr ""
-
-#: src/widgets/conlog.c:1444
-msgid "Appearance: window label"
-msgstr ""
-
-#: src/widgets/conlog.c:1459
-msgid "Label font"
-msgstr ""
-
-#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2132
-msgid "Label colour"
-msgstr ""
-
-#: src/widgets/conlog.c:1464
-msgid "Offset X"
-msgstr ""
-
-#: src/widgets/conlog.c:1466
-msgid "Offset Y"
-msgstr ""
-
-#: src/widgets/conlog.c:1469
-msgid "Y offset: a negative value pulls the label up."
-msgstr ""
-
-#: src/widgets/conlog.c:1478
-msgid "Behaviour"
-msgstr ""
-
-#: src/widgets/conlog.c:1490
-msgid "Strip colours (ANSI)"
-msgstr ""
-
-#: src/widgets/conlog.c:1492
-msgid "Keep output colours"
-msgstr ""
-
-#: src/widgets/conlog.c:1494
-msgid "Per-level colours"
-msgstr ""
-
-#: src/widgets/conlog.c:1496
-msgid "Follow the tail"
-msgstr ""
-
-#: src/widgets/conlog.c:1497
-msgid "Lines in buffer"
-msgstr ""
-
-#: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
-#: src/widgets/sensors.c:2172 src/core/common.c:1603 src/core/common.c:1752
-msgid "Window"
-msgstr ""
-
-#: src/widgets/conlog.c:1513 src/widgets/conlog_min.c:1014
-#: src/widgets/network_monitor.c:2844 src/widgets/sensors.c:2174
-msgid "Width"
-msgstr ""
-
-#: src/widgets/conlog.c:1515 src/widgets/conlog_min.c:1020
-#: src/widgets/network_monitor.c:2846 src/widgets/sensors.c:2176
-msgid "Height"
-msgstr ""
-
-#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2178
-msgid "Corner rounding"
-msgstr ""
-
-#: src/widgets/conlog.c:1519
-msgid "First-line indent"
-msgstr ""
-
-#: src/widgets/conlog.c:1521 src/widgets/conlog_min.c:996
-#: src/widgets/cpu_monitor.c:1200 src/widgets/memory_monitor.c:684
-#: src/widgets/process_list.c:1200 src/widgets/sensors.c:2182
-msgid "Background"
-msgstr ""
-
-#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2184
-msgid "Border"
-msgstr ""
-
-#: src/widgets/conlog.c:1529
-msgid "Level colours"
-msgstr ""
-
-#: src/widgets/conlog.c:1547
-msgid "Normal"
-msgstr ""
-
-#: src/widgets/conlog.c:1549
-msgid "Warning"
-msgstr ""
-
-#: src/widgets/conlog.c:1551
-msgid "Error"
-msgstr ""
-
-#: src/widgets/conlog.c:1553
-msgid "Information"
-msgstr ""
-
-#: src/widgets/conlog.c:1555
-msgid "Debug"
-msgstr ""
-
-#: src/widgets/conlog.c:1564
-msgid "Conlog"
-msgstr ""
-
-#: src/widgets/conlog_min.c:943 src/widgets/process_list.c:1203
-msgid "Title"
-msgstr ""
-
-#: src/widgets/conlog_min.c:950
-msgid "Buffer and layout"
-msgstr ""
-
-#: src/widgets/conlog_min.c:952
-msgid "Max lines"
-msgstr ""
-
-#: src/widgets/conlog_min.c:961
-msgid "Line height"
-msgstr ""
-
-#: src/widgets/conlog_min.c:968
-msgid "First row offset"
-msgstr ""
-
-#: src/widgets/conlog_min.c:975
-msgid "Fonts and colours"
-msgstr ""
-
-#: src/widgets/conlog_min.c:977
-msgid "Text font"
-msgstr ""
-
-#: src/widgets/conlog_min.c:983 src/widgets/process_list.c:1198
-msgid "Title font"
-msgstr ""
-
-#: src/widgets/conlog_min.c:1004
-msgid "Title color"
-msgstr ""
-
-#: src/widgets/conlog_min.c:1012
-msgid "Window size"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1173
-msgid "One physical package per instance; topology is read from sysfs."
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1180
-msgid "Socket ID"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1196 src/widgets/memory_monitor.c:682
-#: src/widgets/network_monitor.c:2729
-msgid "Font"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1202
-msgid "Temperature"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1203
-msgid "System load"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1204
-msgid "User load"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1205
-msgid "Nice load"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1206
-msgid "I/O wait"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1207
-msgid "CPU Monitor"
-msgstr ""
-
-#: src/widgets/cpu_monitor.c:1232
-msgid "Topology-aware per-socket CPU load, frequency and temperature monitor"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1293
-msgid "Show temperature graph"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1295 src/widgets/disk_monitor.c:1301
-msgid "Graph label"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1297
-msgid "Corner radius"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1297 src/widgets/memory_monitor.c:679
-#: src/widgets/network_monitor.c:2855 src/widgets/process_list.c:1141
-msgid "Update (ms)"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1297
-msgid "Rate smoothing (samples)"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1307
-msgid "Read history"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1306
-msgid "Read text"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1312
-msgid "Write history"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1311
-msgid "Write text"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1317
-msgid "Temperature history"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1316
-msgid "Temperature text"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1322 src/widgets/memory_monitor.c:685
-#: src/widgets/network_monitor.c:2715
-msgid "Graph background"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1324 src/widgets/memory_monitor.c:688
-#: src/widgets/network_monitor.c:2720
-msgid "Graph border"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1335
-msgid "Disk Monitor"
-msgstr ""
-
-#: src/widgets/disk_monitor.c:1341
-msgid "Per-disk I/O and temperature history monitor"
-msgstr ""
-
-#: src/widgets/disk_monitor_core.c:53
-msgid "X"
-msgstr ""
-
-#: src/widgets/disk_monitor_core.c:60
-msgid "Y"
-msgstr ""
-
-#: src/widgets/disk_monitor_core.c:176 src/widgets/network_monitor.c:2735
-msgid "Position"
-msgstr ""
-
-#: src/widgets/disk_monitor_core.c:207
-msgid "Disk"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:827
-msgid "Applet type for the new guest:"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:917
-msgid "Running applet (main_daemon):"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1175
-msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1182
-msgid "Frame"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1230
-msgid "Add Applet"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1231
-msgid "Add Running"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1238
-msgid ""
-"Create a NEW applet of the selected type right inside the frame (it is not "
-"added to the daemon autostart)"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1241
-msgid ""
-"Take an already running applet: it will be stopped in the daemon, moved into "
-"the frame and removed from autostart"
-msgstr ""
-
-#: src/widgets/frame_launcher.c:1331
-msgid "Guests"
-msgstr ""
-
-#: src/widgets/launcher.c:837
-msgid "Some options related to the Launcher-Screenlet."
-msgstr ""
-
-#: src/widgets/launcher.c:843
-msgid "Starter"
-msgstr ""
-
-#: src/widgets/launcher.c:845
-msgid "Tooltip/Label"
-msgstr ""
-
-#: src/widgets/launcher.c:874
-msgid "Icon-Filename"
-msgstr ""
-
-#: src/widgets/launcher.c:894
-msgid "scale = original × Scale; end_size = fixed size in px"
-msgstr ""
-
-#: src/widgets/launcher.c:893
-msgid "Resize method"
-msgstr ""
-
-#: src/widgets/launcher.c:906
-msgid "Multiplier of the image natural size"
-msgstr ""
-
-#: src/widgets/launcher.c:905 src/core/common.c:1504
-msgid "Scale"
-msgstr ""
-
-#: src/widgets/launcher.c:933
-msgid "Fixed size of the picture"
-msgstr ""
-
-#: src/widgets/launcher.c:932
-msgid "End size (px)"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:678
-msgid ""
-"RAM and swap histories are sampled from /proc/meminfo; each tick scrolls "
-"both graphs right-to-left."
-msgstr ""
-
-#: src/widgets/memory_monitor.c:689
-msgid "RAM user/apps"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:690
-msgid "RAM shared"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:691
-msgid "RAM buffers"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:692
-msgid "RAM cache"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:693
-msgid "Swap history"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:694
-msgid "Memory Monitor"
-msgstr ""
-
-#: src/widgets/memory_monitor.c:719
-msgid "System RAM and swap monitor with independent scrolling histories"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2366 src/widgets/network_monitor.c:2418
-msgid "/"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2603 src/widgets/network_monitor.c:2620
-msgid "Interface"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2627
-msgid "Graph"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2632
-msgid "Graph max (KiB/s, 0=auto)"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2674 src/widgets/network_monitor.c:2808
-#: src/widgets/sensors.c:2131
-msgid "Label"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2678 src/widgets/network_monitor.c:2811
-msgid "Label X/Y"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2686 src/widgets/network_monitor.c:2742
-#: src/widgets/network_monitor.c:2818
-msgid "Placement"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2692 src/widgets/network_monitor.c:2825
-#: src/widgets/sensors.c:2134
-msgid "Value"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2698 src/widgets/network_monitor.c:2830
-msgid "Value X/Y"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2705
-msgid "Graph color"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2129
-msgid "Appearance"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2717
-msgid "Window background"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2755
-msgid "Name"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2762
-msgid "IP"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2849
-msgid "Graph corner"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2853
-msgid "Window corner"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2857
-msgid "Smoothing"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2883
-msgid "Network Monitor"
-msgstr ""
-
-#: src/widgets/network_monitor.c:2914
-msgid "Per-interface up/down speed and history monitor"
-msgstr ""
-
-#: src/widgets/process_list.c:1140
-msgid ""
-"Process list sampled directly from /proc; default layout "
-"follows .conkyrc_proc."
-msgstr ""
-
-#: src/widgets/process_list.c:1143
-msgid "Rows"
-msgstr ""
-
-#: src/widgets/process_list.c:1147
-msgid "Default sort"
-msgstr ""
-
-#: src/widgets/process_list.c:1152
-msgid "NAME"
-msgstr ""
-
-#: src/widgets/process_list.c:1153
-msgid "PID"
-msgstr ""
-
-#: src/widgets/process_list.c:1154
-msgid "CPU"
-msgstr ""
-
-#: src/widgets/process_list.c:1155
-msgid "MEM"
-msgstr ""
-
-#: src/widgets/process_list.c:1156
-msgid "I/O"
-msgstr ""
-
-#: src/widgets/process_list.c:1165
-msgid "Default direction"
-msgstr ""
-
-#: src/widgets/process_list.c:1170
-msgid "Descending"
-msgstr ""
-
-#: src/widgets/process_list.c:1171
-msgid "Ascending"
-msgstr ""
-
-#: src/widgets/process_list.c:1180
-msgid "CPU mode"
-msgstr ""
-
-#: src/widgets/process_list.c:1186
-msgid "Per core (100% = one thread)"
-msgstr ""
-
-#: src/widgets/process_list.c:1188
-msgid "Conky (${top cpu} — 100% = all online threads)"
-msgstr ""
-
-#: src/widgets/process_list.c:1199
-msgid "Row font"
-msgstr ""
-
-#: src/widgets/process_list.c:1202
-msgid "Accent"
-msgstr ""
-
-#: src/widgets/process_list.c:1204
-msgid "Column headers"
-msgstr ""
-
-#: src/widgets/process_list.c:1206
-msgid "Process List"
-msgstr ""
-
-#: src/widgets/process_list.c:1464
-msgid "Top processes sampled directly from /proc"
-msgstr ""
-
-#: src/widgets/sensors.c:1908
-msgid "No sensors found"
-msgstr ""
-
-#: src/widgets/sensors.c:2114
-msgid "Show"
-msgstr ""
-
-#: src/widgets/sensors.c:2135
-msgid "Value colour"
-msgstr ""
-
-#: src/widgets/sensors.c:2144
-msgid "Celsius"
-msgstr ""
-
-#: src/widgets/sensors.c:2145
-msgid "Fahrenheit"
-msgstr ""
-
-#: src/widgets/sensors.c:2150
-msgid "Units"
-msgstr ""
-
-#: src/widgets/sensors.c:2156
-msgid "Layout"
-msgstr ""
-
-#: src/widgets/sensors.c:2158
-msgid "Label position"
-msgstr ""
-
-#: src/widgets/sensors.c:2160
-msgid "Value position"
-msgstr ""
-
-#: src/widgets/sensors.c:2162
-msgid "Value right-aligned"
-msgstr ""
-
-#: src/widgets/sensors.c:2164
-msgid "First line"
-msgstr ""
-
-#: src/widgets/sensors.c:2166
-msgid "Line step"
-msgstr ""
-
-#: src/widgets/sensors.c:2180
-msgid "Refresh, ms"
-msgstr ""
-
-#: src/widgets/sensors.c:2195
-msgid "Sensors"
-msgstr ""
-
-#: src/core/applet_manager.c:243
+#: ../src/core/applet_manager.c:229
 #, c-format
 msgid ""
 "Reset the settings of all instances of type %s (%d in total)?\n"
@@ -1092,142 +25,159 @@ msgid ""
 "settings."
 msgstr ""
 
-#: src/core/applet_manager.c:249 src/core/applet_manager.c:329
+#: ../src/core/applet_manager.c:235 ../src/core/applet_manager.c:315
 msgid "Reset settings"
 msgstr ""
 
-#: src/core/applet_manager.c:322
+#: ../src/core/applet_manager.c:308
 msgid "Start"
 msgstr ""
 
-#: src/core/applet_manager.c:673
+#: ../src/core/applet_manager.c:659
 #, c-format
 msgid "«%s» is a guest instance: its autostart is managed by its frame host."
 msgstr ""
 
-#: src/core/applet_manager.c:708
+#: ../src/core/applet_manager.c:694
 #, c-format
 msgid ""
 "Delete config «%s»?\n"
 "The instance will be stopped and deleted."
 msgstr ""
 
-#: src/core/applet_manager.c:838
+#: ../src/core/applet_manager.c:824
 msgid "Delete config"
 msgstr ""
 
-#: src/core/applet_manager.c:842
+#: ../src/core/applet_manager.c:828
 msgid "Edit"
 msgstr ""
 
-#: src/core/applet_manager.c:895 src/core/tray.c:265
+#: ../src/core/applet_manager.c:881 ../src/core/tray.c:312
 msgid "Applet management"
 msgstr ""
 
-#: src/core/applet_manager.c:904
+#: ../src/core/applet_manager.c:890
 msgid "Applets"
 msgstr ""
 
-#: src/core/applet_manager.c:907
+#: ../src/core/applet_manager.c:893
 msgid "Running"
 msgstr ""
 
-#: src/core/applet_manager.c:910
+#: ../src/core/applet_manager.c:896
 msgid "Configs"
 msgstr ""
 
-#: src/core/common.c:1333
+#: ../src/core/common.c:1549
 #, c-format
 msgid ""
 "<b><span weight=\"ultrabold\" size=\"large\">%s</span></b> (no info "
 "available)"
 msgstr ""
 
-#: src/core/common.c:1452
+#: ../src/core/common.c:1671
+msgid "<b>Donate / Support the developer</b>"
+msgstr ""
+
+#: ../src/core/common.c:1733
 msgid "Lock position"
 msgstr ""
 
-#: src/core/common.c:1453 src/core/common.c:1757
+#: ../src/core/common.c:1734 ../src/core/common.c:2038
 msgid "Sticky"
 msgstr ""
 
-#: src/core/common.c:1454 src/core/common.c:1758
+#: ../src/core/common.c:1735 ../src/core/common.c:2039
 msgid "Widget"
 msgstr ""
 
-#: src/core/common.c:1455 src/core/common.c:1759
+#: ../src/core/common.c:1736 ../src/core/common.c:2040
 msgid "Keep above"
 msgstr ""
 
-#: src/core/common.c:1456 src/core/common.c:1760
+#: ../src/core/common.c:1737 ../src/core/common.c:2041
 msgid "Keep below"
 msgstr ""
 
-#: src/core/common.c:1486 src/core/tray.c:276
+#: ../src/core/common.c:1767 ../src/core/tray.c:323
 msgid "About"
 msgstr ""
 
-#: src/core/common.c:1522
+#: ../src/core/common.c:1785
+msgid "Scale"
+msgstr ""
+
+#: ../src/core/common.c:1803
 msgid "Size is set by End width/height (Resize mode = end_size)"
 msgstr ""
 
-#: src/core/common.c:1531
+#: ../src/core/common.c:1812
 msgid "Opacity"
 msgstr ""
 
-#: src/core/common.c:1543
+#: ../src/core/common.c:1824
 msgid "X-Position"
 msgstr ""
 
-#: src/core/common.c:1559
+#: ../src/core/common.c:1840
 msgid "Y-Position"
 msgstr ""
 
-#: src/core/common.c:1582
+#: ../src/core/common.c:1863
 msgid "User label"
 msgstr ""
 
-#: src/core/common.c:1609
+#: ../src/core/common.c:1884 ../src/core/common.c:2033
+#: ../src/widgets/conlog.c:1505 ../src/widgets/sensors.c:2208
+msgid "Window"
+msgstr ""
+
+#: ../src/core/common.c:1890
 msgid "Options"
 msgstr ""
 
-#: src/core/common.c:1623
+#: ../src/core/common.c:1904
 msgid ""
 "Themes allow you to easily switch the appearance of your Screenlets. On this "
 "page you find a list of all available themes for this Screenlet."
 msgstr ""
 
-#: src/core/common.c:1733
+#: ../src/core/common.c:1967 ../src/widgets/clearrss.c:1913
+msgid "Themes"
+msgstr ""
+
+#: ../src/core/common.c:2014
 msgid "Size"
 msgstr ""
 
-#: src/core/common.c:1756
+#: ../src/core/common.c:2037
 msgid "Lock"
 msgstr ""
 
-#: src/core/common.c:1778
+#: ../src/core/common.c:2059
 msgid "Properties..."
 msgstr ""
 
-#: src/core/common.c:1781
+#: ../src/core/common.c:2062
 msgid "Info..."
 msgstr ""
 
-#: src/core/common.c:1800
+#: ../src/core/common.c:2081
 #, c-format
 msgid "Add one more %s"
 msgstr ""
 
-#: src/core/common.c:1805
+#: ../src/core/common.c:2086
 #, c-format
 msgid "Delete this %s"
 msgstr ""
 
-#: src/core/common.c:1813 src/core/tray.c:277
+#: ../src/core/common.c:2094 ../src/core/tray.c:324
 msgid "Quit"
 msgstr ""
 
-#: src/core/common.c:2448
+#: ../src/core/common.c:2729
 #, c-format
 msgid ""
 "Dead symlink: %s\n"
@@ -1235,39 +185,425 @@ msgid ""
 "Config not found. Delete the symlink?"
 msgstr ""
 
-#: src/core/common.c:2452
+#: ../src/core/common.c:2733
 msgid "Delete"
 msgstr ""
 
-#: src/core/common.c:2453
+#: ../src/core/common.c:2734
 msgid "Point to another config"
 msgstr ""
 
-#: src/core/common.c:2454 src/core/common.c:2460
+#: ../src/core/common.c:2735 ../src/core/common.c:2741
 msgid "Cancel"
 msgstr ""
 
-#: src/core/common.c:2459
+#: ../src/core/common.c:2740
 msgid "Choose a config in .plugins"
 msgstr ""
 
-#: src/core/common.c:2461
+#: ../src/core/common.c:2742
 msgid "Select"
 msgstr ""
 
-#: src/core/tray.c:160
+#: ../src/core/tray.c:207
 #, c-format
 msgid "%1$s: %2$s"
 msgstr ""
 
-#: src/core/tray.c:186 src/core/tray.c:194 src/core/tray.c:231
+#: ../src/core/tray.c:233 ../src/core/tray.c:241 ../src/core/tray.c:278
 msgid "Running Instances"
 msgstr ""
 
-#: src/core/tray.c:273
+#: ../src/core/tray.c:320
 msgid "Restart Applets"
 msgstr ""
 
-#: src/core/tray.c:274
+#: ../src/core/tray.c:321
 msgid "Stop all Applets"
+msgstr ""
+
+#: ../src/widgets/acpi_battery.c:1463 ../src/widgets/calendar.c:1040
+#: ../src/widgets/clock.c:1104
+msgid "Theme"
+msgstr ""
+
+#: ../src/widgets/acpi_battery.c:1597
+msgid "Show percentage"
+msgstr ""
+
+#: ../src/widgets/acpi_battery.c:1599
+msgid "Show remaining time"
+msgstr ""
+
+#: ../src/widgets/acpi_battery.c:1602
+msgid "ACPI Battery"
+msgstr ""
+
+#: ../src/widgets/acpi_battery.c:1627
+msgid "Battery charge, remaining time and state from sysfs power_supply"
+msgstr ""
+
+#: ../src/widgets/calendar.c:1221
+msgid "Calendar specific options"
+msgstr ""
+
+#: ../src/widgets/calendar.c:1307
+msgid "iCalendar"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:1897
+msgid "Feeds"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2190
+msgid "Align header left/center/right"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2205 ../src/widgets/clearrss.c:2254
+#: ../src/widgets/clearrss.c:2397
+msgid "Header"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2229
+msgid "Header font and size"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2242
+msgid "Header color"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2278
+msgid "Published-time font and size"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2291
+msgid "Published-time color"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2303
+msgid "Text"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2327
+msgid "Text font and size"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2340
+msgid "Text color"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2358
+msgid "Feed"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2414
+msgid "Text settings"
+msgstr ""
+
+#: ../src/widgets/clearrss.c:2435
+msgid "Rss"
+msgstr ""
+
+#: ../src/widgets/clearweather.c:3128
+msgid "Weather"
+msgstr ""
+
+#: ../src/widgets/clearweather.c:3572
+msgid "Погода: open-meteo и wttr.in, прямо или через прокси"
+msgstr ""
+
+#: ../src/widgets/clock.c:892
+msgid "Clock"
+msgstr ""
+
+#: ../src/widgets/clock.c:893
+msgid "Clock-specific settings."
+msgstr ""
+
+#: ../src/widgets/clock.c:931
+msgid "Alarm"
+msgstr ""
+
+#: ../src/widgets/clock.c:932
+msgid "Settings for the Alarm-function."
+msgstr ""
+
+#: ../src/widgets/clock.c:950
+msgid "Alarm-Time"
+msgstr ""
+
+#: ../src/widgets/clock.c:994
+msgid "Face"
+msgstr ""
+
+#: ../src/widgets/clock.c:995
+msgid "Additional settings for the face-layout ..."
+msgstr ""
+
+#: ../src/widgets/clock.c:1071
+msgid "Get Clock Skins"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1403
+msgid "Command"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1413
+msgid "Arguments are passed to the process directly, without a shell.\n"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1425
+msgid "Window title (optional)"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1434
+msgid "Clear output"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1444
+msgid "Appearance: window label"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1469
+msgid "Y offset: a negative value pulls the label up."
+msgstr ""
+
+#: ../src/widgets/conlog.c:1478
+msgid "Behaviour"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1529
+msgid "Level colours"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1547
+msgid "Normal"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1549
+msgid "Warning"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1551
+msgid "Error"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1553
+msgid "Information"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1555
+msgid "Debug"
+msgstr ""
+
+#: ../src/widgets/conlog.c:1564
+msgid "Conlog"
+msgstr ""
+
+#: ../src/widgets/conlog_min.c:950
+msgid "Buffer and layout"
+msgstr ""
+
+#: ../src/widgets/conlog_min.c:975
+msgid "Fonts and colours"
+msgstr ""
+
+#: ../src/widgets/conlog_min.c:1012
+msgid "Window size"
+msgstr ""
+
+#: ../src/widgets/cpu_monitor.c:1476
+msgid "CPU Monitor"
+msgstr ""
+
+#: ../src/widgets/cpu_monitor.c:1501
+msgid "Topology-aware per-socket CPU load, frequency and temperature monitor"
+msgstr ""
+
+#: ../src/widgets/disk_monitor.c:1315
+msgid "Read history"
+msgstr ""
+
+#: ../src/widgets/disk_monitor.c:1320
+msgid "Write history"
+msgstr ""
+
+#: ../src/widgets/disk_monitor.c:1325
+msgid "Temperature history"
+msgstr ""
+
+#: ../src/widgets/disk_monitor.c:1343
+msgid "Disk Monitor"
+msgstr ""
+
+#: ../src/widgets/disk_monitor.c:1349
+msgid "Per-disk I/O and temperature history monitor"
+msgstr ""
+
+#: ../src/widgets/disk_monitor_core.c:53
+msgid "X"
+msgstr ""
+
+#: ../src/widgets/disk_monitor_core.c:60
+msgid "Y"
+msgstr ""
+
+#: ../src/widgets/disk_monitor_core.c:207
+msgid "Disk"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:827
+msgid "Applet type for the new guest:"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:917
+msgid "Running applet (main_daemon):"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:1181
+msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:1188
+msgid "Frame"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:1236
+msgid "Add Applet"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:1237
+msgid "Add Running"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:1244
+msgid ""
+"Create a NEW applet of the selected type right inside the frame (it is not "
+"added to the daemon autostart)"
+msgstr ""
+
+#: ../src/widgets/frame_launcher.c:1247
+msgid ""
+"Take an already running applet: it will be stopped in the daemon, moved into "
+"the frame and removed from autostart"
+msgstr ""
+
+#: ../src/widgets/launcher.c:841
+msgid "Some options related to the Launcher-Screenlet."
+msgstr ""
+
+#: ../src/widgets/launcher.c:847
+msgid "Starter"
+msgstr ""
+
+#: ../src/widgets/launcher.c:898
+msgid "scale = original × Scale; end_size = fixed size in px"
+msgstr ""
+
+#: ../src/widgets/launcher.c:910
+msgid "Multiplier of the image natural size"
+msgstr ""
+
+#: ../src/widgets/launcher.c:937
+msgid "Fixed size of the picture"
+msgstr ""
+
+#: ../src/widgets/memory_monitor.c:1069
+msgid "Memory Monitor"
+msgstr ""
+
+#: ../src/widgets/memory_monitor.c:1094
+msgid "System RAM and swap monitor with independent scrolling histories"
+msgstr ""
+
+#: ../src/widgets/network_monitor.c:2366 ../src/widgets/network_monitor.c:2418
+msgid "/"
+msgstr ""
+
+#: ../src/widgets/network_monitor.c:2755
+msgid "Name"
+msgstr ""
+
+#: ../src/widgets/network_monitor.c:2762
+msgid "IP"
+msgstr ""
+
+#: ../src/widgets/network_monitor.c:2883
+msgid "Network Monitor"
+msgstr ""
+
+#: ../src/widgets/network_monitor.c:2914
+msgid "Per-interface up/down speed and history monitor"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1353
+msgid "NAME"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1354
+msgid "PID"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1355
+msgid "CPU"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1356
+msgid "MEM"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1357
+msgid "I/O"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1371
+msgid "Descending"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1372
+msgid "Ascending"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1387
+msgid "Per core (100% = one thread)"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1389
+msgid "Conky (${top cpu} — 100% = all online threads)"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1431
+msgid "Process List"
+msgstr ""
+
+#: ../src/widgets/process_list.c:1988
+msgid "Top processes sampled directly from /proc"
+msgstr ""
+
+#: ../src/widgets/sensors.c:1944
+msgid "No sensors found"
+msgstr ""
+
+#: ../src/widgets/sensors.c:2150
+msgid "Show"
+msgstr ""
+
+#: ../src/widgets/sensors.c:2165
+msgid "Appearance"
+msgstr ""
+
+#: ../src/widgets/sensors.c:2180
+msgid "Celsius"
+msgstr ""
+
+#: ../src/widgets/sensors.c:2181
+msgid "Fahrenheit"
+msgstr ""
+
+#: ../src/widgets/sensors.c:2192
+msgid "Layout"
+msgstr ""
+
+#: ../src/widgets/sensors.c:2231
+msgid "Sensors"
 msgstr ""

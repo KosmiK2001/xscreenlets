@@ -5,12 +5,11 @@
 # Английский - исходный язык проекта, русский - перевод. Строки в C пишутся
 # по-английски; русский вариант живёт здесь. Чтобы добавить перевод строки,
 # откройте нужное свойство в настройках апплета и найдите его в этом файле.
-#: src/widgets/network_monitor.c:2568
 msgid ""
 msgstr ""
 "Project-Id-Version: xscreenlets\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 16:27+0300\n"
+"POT-Creation-Date: 2026-10-06 19:39+0300\n"
 "PO-Revision-Date: 2026-10-02 00:00+0300\n"
 "Last-Translator: KosmiK2001\n"
 "Language-Team: Russian\n"
@@ -21,1087 +20,7 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-#: src/widgets/acpi_battery.c:442
-msgid ""
-"Reads /sys/class/power_supply. Works with laptop batteries and with devices "
-"that expose a battery there (e.g. a Logitech mouse when the hid-logitech-"
-"hidpp module is loaded). Shows \"No battery\" when no source is found, "
-"instead of failing."
-msgstr ""
-"Читает /sys/class/power_supply. Работает с батареями ноутбуков и с "
-"устройствами, которые предоставляют батарею там (например, мышь Logitech, "
-"если загружен модуль hid-logitech-hidpp). Если источник не найден, "
-"показывает «Батарея отсутствует» вместо ошибки."
-
-#: src/widgets/acpi_battery.c:447 src/widgets/clearrss.c:2386
-#: src/widgets/cpu_monitor.c:1186 src/widgets/disk_monitor.c:1297
-#: src/widgets/memory_monitor.c:680 src/widgets/process_list.c:1194
-msgid "Window width"
-msgstr "Ширина окна"
-
-#: src/widgets/acpi_battery.c:449 src/widgets/clearrss.c:2389
-#: src/widgets/cpu_monitor.c:1191 src/widgets/disk_monitor.c:1297
-#: src/widgets/memory_monitor.c:681 src/widgets/process_list.c:1196
-msgid "Window height"
-msgstr "Высота окна"
-
-#: src/widgets/acpi_battery.c:451
-msgid "Update interval (s)"
-msgstr "Интервал обновления, с"
-
-#: src/widgets/acpi_battery.c:453
-msgid "Low battery threshold (%)"
-msgstr "Порог низкого заряда, %"
-
-#: src/widgets/acpi_battery.c:457
-msgid "Show percentage"
-msgstr "Показывать процент"
-
-#: src/widgets/acpi_battery.c:458
-msgid "Display charge percent"
-msgstr "Показывать заряд в процентах"
-
-#: src/widgets/acpi_battery.c:459
-msgid "Show remaining time"
-msgstr "Показывать оставшееся время"
-
-#: src/widgets/acpi_battery.c:460
-msgid "Display estimated time left"
-msgstr "Показывать оценку оставшегося времени"
-
-#: src/widgets/acpi_battery.c:462
-msgid "ACPI Battery"
-msgstr "Батарея"
-
-#: src/widgets/acpi_battery.c:487
-msgid "Battery charge, remaining time and state from sysfs power_supply"
-msgstr "Заряд, оставшееся время и состояние из sysfs power_supply"
-
-#: src/widgets/calendar.c:876
-msgid "View events"
-msgstr "Показать события"
-
-#: src/widgets/calendar.c:877
-msgid "Update events"
-msgstr "Обновить события"
-
-#: src/widgets/calendar.c:878
-msgid "Toggle events"
-msgstr "Переключить события"
-
-#: src/widgets/calendar.c:879
-msgid "Back to today"
-msgstr "Вернуться к сегодняшнему дню"
-
-#: src/widgets/calendar.c:904 src/widgets/clock.c:1091
-#: src/widgets/frame_launcher.c:1220
-msgid "Theme"
-msgstr "Тема"
-
-#: src/widgets/calendar.c:1081
-msgid "Calendar specific options"
-msgstr "Настройки календаря"
-
-#: src/widgets/calendar.c:1101
-msgid "First Weekday"
-msgstr "Первый день недели"
-
-#: src/widgets/calendar.c:1105
-msgid "iCalendar ics file path"
-msgstr "Путь к файлу iCalendar (.ics)"
-
-#: src/widgets/calendar.c:1112
-msgid "Show iCalendar events"
-msgstr "Показывать события iCalendar"
-
-#: src/widgets/calendar.c:1118
-msgid "Month buttons"
-msgstr "Кнопки месяца"
-
-#: src/widgets/calendar.c:1125 src/widgets/clearrss.c:2338
-#: src/widgets/conlog_min.c:989
-msgid "Text color"
-msgstr "Цвет текста"
-
-#: src/widgets/calendar.c:1127
-msgid "Today color"
-msgstr "Цвет сегодняшнего дня"
-
-#: src/widgets/calendar.c:1129
-msgid "Event day color"
-msgstr "Цвет дня с событием"
-
-#: src/widgets/calendar.c:1131
-msgid "Today event color"
-msgstr "Цвет события на сегодня"
-
-#: src/widgets/calendar.c:1134
-msgid "Back color (default theme)"
-msgstr "Цвет фона (тема по умолчанию)"
-
-#: src/widgets/calendar.c:1142
-msgid "Header font"
-msgstr "Шрифт заголовка"
-
-#: src/widgets/calendar.c:1149
-msgid "Day names font"
-msgstr "Шрифт названий дней"
-
-#: src/widgets/calendar.c:1156
-msgid "Days font"
-msgstr "Шрифт дней"
-
-#: src/widgets/calendar.c:1167
-msgid "iCalendar"
-msgstr "iCalendar"
-
-#: src/widgets/clearrss.c:1897
-msgid "Feeds"
-msgstr "Ленты"
-
-#: src/widgets/clearrss.c:1909
-msgid "View this News"
-msgstr "Показать эту новость"
-
-#: src/widgets/clearrss.c:1910
-msgid "Refresh"
-msgstr "Обновить"
-
-#: src/widgets/clearrss.c:1911
-msgid "Previous item"
-msgstr "Предыдущая запись"
-
-#: src/widgets/clearrss.c:1912
-msgid "Next item"
-msgstr "Следующая запись"
-
-#: src/widgets/clearrss.c:1913 src/core/common.c:1686
-msgid "Themes"
-msgstr "Темы"
-
-#: src/widgets/clearrss.c:2188
-msgid "Align header left/center/right"
-msgstr "Выравнивание заголовка: по левому краю / по центру / по правому краю"
-
-#: src/widgets/clearrss.c:2203 src/widgets/clearrss.c:2252
-#: src/widgets/clearrss.c:2395 src/widgets/network_monitor.c:2727
-msgid "Header"
-msgstr "Заголовок"
-
-#: src/widgets/clearrss.c:2227
-msgid "Header font and size"
-msgstr "Шрифт и размер заголовка"
-
-#: src/widgets/clearrss.c:2240
-msgid "Header color"
-msgstr "Цвет заголовка"
-
-#: src/widgets/clearrss.c:2276
-msgid "Published-time font and size"
-msgstr "Шрифт и размер времени публикации"
-
-#: src/widgets/clearrss.c:2289
-msgid "Published-time color"
-msgstr "Цвет времени публикации"
-
-#: src/widgets/clearrss.c:2301 src/widgets/cpu_monitor.c:1201
-#: src/widgets/disk_monitor.c:1323 src/widgets/memory_monitor.c:687
-#: src/widgets/network_monitor.c:2719 src/widgets/process_list.c:1205
-msgid "Text"
-msgstr "Текст"
-
-#: src/widgets/clearrss.c:2325
-msgid "Text font and size"
-msgstr "Шрифт и размер текста"
-
-#: src/widgets/clearrss.c:2354
-msgid "Rss-specific settings."
-msgstr "Настройки RSS-ленты."
-
-#: src/widgets/clearrss.c:2356
-msgid "Feed"
-msgstr "Лента"
-
-#: src/widgets/clearrss.c:2362
-msgid "Feed name"
-msgstr "Название ленты"
-
-#: src/widgets/clearrss.c:2365
-msgid "Feed URL"
-msgstr "URL ленты"
-
-#: src/widgets/clearrss.c:2371
-msgid "Update interval"
-msgstr "Интервал обновления"
-
-#: src/widgets/clearrss.c:2374
-msgid "Auto news count"
-msgstr "Число новостей автоматически"
-
-#: src/widgets/clearrss.c:2377
-msgid "News count"
-msgstr "Число новостей"
-
-#: src/widgets/clearrss.c:2401
-msgid "Show feed name"
-msgstr "Показывать название ленты"
-
-#: src/widgets/clearrss.c:2408
-msgid "Header align"
-msgstr "Выравнивание заголовка"
-
-#: src/widgets/clearrss.c:2412
-msgid "Text settings"
-msgstr "Настройки текста"
-
-#: src/widgets/clearrss.c:2418
-msgid "Show published time"
-msgstr "Показывать время публикации"
-
-#: src/widgets/clearrss.c:2427
-msgid "Back color"
-msgstr "Цвет фона"
-
-#: src/widgets/clearrss.c:2433
-msgid "Rss"
-msgstr "Лента"
-
-#: src/widgets/clearweather.c:3130
-msgid "Weather"
-msgstr "Погода"
-
-#: src/widgets/clearweather.c:3142
-msgid "City or index:"
-msgstr "Город или индекс:"
-
-#: src/widgets/clearweather.c:3148
-msgid "Alternate name:"
-msgstr "Запасное название:"
-
-#: src/widgets/clearweather.c:3153
-msgid "Source:"
-msgstr "Источник:"
-
-#: src/widgets/clearweather.c:3158
-msgid "Connection:"
-msgstr "Соединение:"
-
-#: src/widgets/clearweather.c:3164
-msgid "Proxy:"
-msgstr "Прокси:"
-
-#: src/widgets/clearweather.c:3169
-msgid "Units:"
-msgstr "Единицы:"
-
-#: src/widgets/clearweather.c:3174
-msgid "Update, min:"
-msgstr "Обновлять, мин:"
-
-#: src/widgets/clearweather.c:3179
-msgid "Forecast hours:"
-msgstr "Часов в прогнозе:"
-
-#: src/widgets/clearweather.c:3192
-msgid "Forecast type:"
-msgstr "Вид прогноза:"
-
-#: src/widgets/clearweather.c:3209
-msgid "Background:"
-msgstr "Фон:"
-
-#: src/widgets/clearweather.c:3221
-msgid "Underlay colour (ARGB):"
-msgstr "Цвет подложки (ARGB):"
-
-#: src/widgets/clearweather.c:3230
-msgid "Corner rounding, px:"
-msgstr "Скругление углов, px:"
-
-#: src/widgets/clearweather.c:3240
-msgid "Theme directory:"
-msgstr "Каталог темы:"
-
-#: src/widgets/clearweather.c:3246
-msgid "Width:"
-msgstr "Ширина:"
-
-#: src/widgets/clearweather.c:3252
-msgid "Height:"
-msgstr "Высота:"
-
-#: src/widgets/clearweather.c:3254
-msgid "City colour:"
-msgstr "Цвет города:"
-
-#: src/widgets/clearweather.c:3256
-msgid "Temperature colour:"
-msgstr "Цвет температуры:"
-
-#: src/widgets/clearweather.c:3258
-msgid "Description colour:"
-msgstr "Цвет описания:"
-
-#: src/widgets/clearweather.c:3260
-msgid "Clock colour:"
-msgstr "Цвет часов:"
-
-#: src/widgets/clearweather.c:3262
-msgid "Background colour:"
-msgstr "Цвет фона:"
-
-#: src/widgets/clearweather.c:3265
-msgid "City font:"
-msgstr "Шрифт города:"
-
-#: src/widgets/clearweather.c:3267
-msgid "Temperature font:"
-msgstr "Шрифт температуры:"
-
-#: src/widgets/clearweather.c:3269
-msgid "Description font:"
-msgstr "Шрифт описания:"
-
-#: src/widgets/clearweather.c:3271
-msgid "Clock font:"
-msgstr "Шрифт часов:"
-
-#: src/widgets/clearweather.c:3273
-msgid "Value font on icon:"
-msgstr "Шрифт значений у иконки:"
-
-#: src/widgets/clearweather.c:3342
-msgid "Refresh now"
-msgstr "Обновить сейчас"
-
-#: src/widgets/clearweather.c:3343
-msgid "Connection: direct"
-msgstr "Соединение: напрямую"
-
-#: src/widgets/clearweather.c:3344
-msgid "Connection: via proxy"
-msgstr "Соединение: через прокси"
-
-#: src/widgets/clearweather.c:3574
-msgid "Погода: open-meteo и wttr.in, прямо или через прокси"
-msgstr "Погода: open-meteo и wttr.in, напрямую или через прокси"
-
-#: src/widgets/clock.c:883
-msgid "Clock"
-msgstr "Часы"
-
-#: src/widgets/clock.c:884
-msgid "Clock-specific settings."
-msgstr "Настройки часов"
-
-#: src/widgets/clock.c:887
-msgid "Time Zone"
-msgstr "Часовой пояс"
-
-#: src/widgets/clock.c:894
-msgid "Time-Offset"
-msgstr "Смещение времени"
-
-#: src/widgets/clock.c:904
-msgid "Hour-Format"
-msgstr "Формат времени"
-
-#: src/widgets/clock.c:911
-msgid "Show seconds-hand"
-msgstr "Показывать секундную стрелку"
-
-#: src/widgets/clock.c:922
-msgid "Alarm"
-msgstr "Будильник"
-
-#: src/widgets/clock.c:923
-msgid "Settings for the Alarm-function."
-msgstr "Настройки будильника."
-
-#: src/widgets/clock.c:933
-msgid "Activate Alarm"
-msgstr "Включить будильник"
-
-#: src/widgets/clock.c:941
-msgid "Alarm-Time"
-msgstr "Время будильника"
-
-#: src/widgets/clock.c:956
-msgid "Alarm stops after"
-msgstr "Будильник звенит, с"
-
-#: src/widgets/clock.c:966
-msgid "Run a command"
-msgstr "Выполнить команду"
-
-#: src/widgets/clock.c:973
-msgid "Alarm command"
-msgstr "Команда будильника"
-
-#: src/widgets/clock.c:985
-msgid "Face"
-msgstr "Циферблат"
-
-#: src/widgets/clock.c:986
-msgid "Additional settings for the face-layout ..."
-msgstr "Дополнительные настройки циферблата..."
-
-#: src/widgets/clock.c:990
-msgid "Face-Text"
-msgstr "Текст на циферблате"
-
-#: src/widgets/clock.c:998
-msgid "Text-Font"
-msgstr "Шрифт текста"
-
-#: src/widgets/clock.c:1004
-msgid "Text-Color"
-msgstr "Цвет текста"
-
-#: src/widgets/clock.c:1011
-msgid "X-Position of Text"
-msgstr "Позиция текста по X"
-
-#: src/widgets/clock.c:1020
-msgid "Y-Position of Text"
-msgstr "Позиция текста по Y"
-
-#: src/widgets/clock.c:1029
-msgid "Show today's date"
-msgstr "Показывать сегодняшнюю дату"
-
-#: src/widgets/clock.c:1036
-msgid "Date Format"
-msgstr "Формат даты"
-
-#: src/widgets/clock.c:1062
-msgid "Get Clock Skins"
-msgstr "Получить скины часов"
-
-#: src/widgets/conlog.c:1403 src/widgets/conlog_min.c:928
-#: src/widgets/conlog_min.c:933 src/widgets/launcher.c:852
-msgid "Command"
-msgstr "Команда"
-
-#: src/widgets/conlog.c:1413
-msgid "Arguments are passed to the process directly, without a shell.\n"
-msgstr "Аргументы передаются процессу напрямую, без оболочки.\n"
-
-#: src/widgets/conlog.c:1425
-msgid "Window title (optional)"
-msgstr "Заголовок окна (необязательно)"
-
-#: src/widgets/conlog.c:1434
-msgid "Clear output"
-msgstr "Очистить вывод"
-
-#: src/widgets/conlog.c:1444
-msgid "Appearance: window label"
-msgstr "Вид: метка окна"
-
-#: src/widgets/conlog.c:1459
-msgid "Label font"
-msgstr "Шрифт метки"
-
-#: src/widgets/conlog.c:1461 src/widgets/sensors.c:2132
-msgid "Label colour"
-msgstr "Цвет метки"
-
-#: src/widgets/conlog.c:1464
-msgid "Offset X"
-msgstr "Смещение по X"
-
-#: src/widgets/conlog.c:1466
-msgid "Offset Y"
-msgstr "Смещение по Y"
-
-#: src/widgets/conlog.c:1469
-msgid "Y offset: a negative value pulls the label up."
-msgstr "Смещение по Y: отрицательное значение подтягивает метку вверх."
-
-#: src/widgets/conlog.c:1478
-msgid "Behaviour"
-msgstr "Поведение"
-
-#: src/widgets/conlog.c:1490
-msgid "Strip colours (ANSI)"
-msgstr "Вырезать цвета (ANSI)"
-
-#: src/widgets/conlog.c:1492
-msgid "Keep output colours"
-msgstr "Сохранять цвета вывода"
-
-#: src/widgets/conlog.c:1494
-msgid "Per-level colours"
-msgstr "Цвета по уровню"
-
-#: src/widgets/conlog.c:1496
-msgid "Follow the tail"
-msgstr "Следовать за хвостом"
-
-#: src/widgets/conlog.c:1497
-msgid "Lines in buffer"
-msgstr "Строк в буфере"
-
-#: src/widgets/conlog.c:1505 src/widgets/network_monitor.c:2839
-#: src/widgets/sensors.c:2172 src/core/common.c:1603 src/core/common.c:1752
-msgid "Window"
-msgstr "Окно"
-
-#: src/widgets/conlog.c:1513 src/widgets/conlog_min.c:1014
-#: src/widgets/network_monitor.c:2844 src/widgets/sensors.c:2174
-msgid "Width"
-msgstr "Ширина"
-
-#: src/widgets/conlog.c:1515 src/widgets/conlog_min.c:1020
-#: src/widgets/network_monitor.c:2846 src/widgets/sensors.c:2176
-msgid "Height"
-msgstr "Высота"
-
-#: src/widgets/conlog.c:1517 src/widgets/sensors.c:2178
-msgid "Corner rounding"
-msgstr "Скругление"
-
-#: src/widgets/conlog.c:1519
-msgid "First-line indent"
-msgstr "Отступ первой строки"
-
-#: src/widgets/conlog.c:1521 src/widgets/conlog_min.c:996
-#: src/widgets/cpu_monitor.c:1200 src/widgets/memory_monitor.c:684
-#: src/widgets/process_list.c:1200 src/widgets/sensors.c:2182
-msgid "Background"
-msgstr "Фон"
-
-#: src/widgets/conlog.c:1523 src/widgets/sensors.c:2184
-msgid "Border"
-msgstr "Рамка"
-
-#: src/widgets/conlog.c:1529
-msgid "Level colours"
-msgstr "Цвета уровней"
-
-#: src/widgets/conlog.c:1547
-msgid "Normal"
-msgstr "Обычный"
-
-#: src/widgets/conlog.c:1549
-msgid "Warning"
-msgstr "Предупреждение"
-
-#: src/widgets/conlog.c:1551
-msgid "Error"
-msgstr "Ошибка"
-
-#: src/widgets/conlog.c:1553
-msgid "Information"
-msgstr "Информация"
-
-#: src/widgets/conlog.c:1555
-msgid "Debug"
-msgstr "Отладка"
-
-#: src/widgets/conlog.c:1564
-msgid "Conlog"
-msgstr "Conlog"
-
-#: src/widgets/conlog_min.c:943 src/widgets/process_list.c:1203
-msgid "Title"
-msgstr "Заголовок"
-
-#: src/widgets/conlog_min.c:950
-msgid "Buffer and layout"
-msgstr "Буфер и разметка"
-
-#: src/widgets/conlog_min.c:952
-msgid "Max lines"
-msgstr "Строк в буфере"
-
-#: src/widgets/conlog_min.c:961
-msgid "Line height"
-msgstr "Высота строки"
-
-#: src/widgets/conlog_min.c:968
-msgid "First row offset"
-msgstr "Отступ первой строки"
-
-#: src/widgets/conlog_min.c:975
-msgid "Fonts and colours"
-msgstr "Шрифты и цвета"
-
-#: src/widgets/conlog_min.c:977
-msgid "Text font"
-msgstr "Шрифт текста"
-
-#: src/widgets/conlog_min.c:983 src/widgets/process_list.c:1198
-msgid "Title font"
-msgstr "Шрифт заголовка"
-
-#: src/widgets/conlog_min.c:1004
-msgid "Title color"
-msgstr "Цвет заголовка"
-
-#: src/widgets/conlog_min.c:1012
-msgid "Window size"
-msgstr "Размер окна"
-
-#: src/widgets/cpu_monitor.c:1173
-msgid "One physical package per instance; topology is read from sysfs."
-msgstr "Один физический пакет на экземпляр; топология читается из sysfs."
-
-#: src/widgets/cpu_monitor.c:1180
-msgid "Socket ID"
-msgstr "ID сокета"
-
-#: src/widgets/cpu_monitor.c:1196 src/widgets/memory_monitor.c:682
-#: src/widgets/network_monitor.c:2729
-msgid "Font"
-msgstr "Шрифт"
-
-#: src/widgets/cpu_monitor.c:1202
-msgid "Temperature"
-msgstr "Температура"
-
-#: src/widgets/cpu_monitor.c:1203
-msgid "System load"
-msgstr "Нагрузка системы"
-
-#: src/widgets/cpu_monitor.c:1204
-msgid "User load"
-msgstr "Нагрузка пользователя"
-
-#: src/widgets/cpu_monitor.c:1205
-msgid "Nice load"
-msgstr "Нагрузка nice"
-
-#: src/widgets/cpu_monitor.c:1206
-msgid "I/O wait"
-msgstr "Ожидание ввода-вывода"
-
-#: src/widgets/cpu_monitor.c:1207
-msgid "CPU Monitor"
-msgstr "Монитор ЦП"
-
-#: src/widgets/cpu_monitor.c:1232
-msgid "Topology-aware per-socket CPU load, frequency and temperature monitor"
-msgstr "Монитор загрузки, частоты и температуры CPU по сокетам с учётом топологии"
-
-#: src/widgets/disk_monitor.c:1293
-msgid "Show temperature graph"
-msgstr "Показывать график температуры"
-
-#: src/widgets/disk_monitor.c:1295 src/widgets/disk_monitor.c:1301
-msgid "Graph label"
-msgstr "Подпись графика"
-
-#: src/widgets/disk_monitor.c:1297
-msgid "Corner radius"
-msgstr "Скругление углов"
-
-#: src/widgets/disk_monitor.c:1297 src/widgets/memory_monitor.c:679
-#: src/widgets/network_monitor.c:2855 src/widgets/process_list.c:1141
-msgid "Update (ms)"
-msgstr "Обновление, мс"
-
-#: src/widgets/disk_monitor.c:1297
-msgid "Rate smoothing (samples)"
-msgstr "Сглаживание, отсчёты"
-
-#: src/widgets/disk_monitor.c:1307
-msgid "Read history"
-msgstr "История чтения"
-
-#: src/widgets/disk_monitor.c:1306
-msgid "Read text"
-msgstr "Текст чтения"
-
-#: src/widgets/disk_monitor.c:1312
-msgid "Write history"
-msgstr "История записи"
-
-#: src/widgets/disk_monitor.c:1311
-msgid "Write text"
-msgstr "Текст записи"
-
-#: src/widgets/disk_monitor.c:1317
-msgid "Temperature history"
-msgstr "История температуры"
-
-#: src/widgets/disk_monitor.c:1316
-msgid "Temperature text"
-msgstr "Текст температуры"
-
-#: src/widgets/disk_monitor.c:1322 src/widgets/memory_monitor.c:685
-#: src/widgets/network_monitor.c:2715
-msgid "Graph background"
-msgstr "Фон графика"
-
-#: src/widgets/disk_monitor.c:1324 src/widgets/memory_monitor.c:688
-#: src/widgets/network_monitor.c:2720
-msgid "Graph border"
-msgstr "Рамка графика"
-
-#: src/widgets/disk_monitor.c:1335
-msgid "Disk Monitor"
-msgstr "Монитор диска"
-
-#: src/widgets/disk_monitor.c:1341
-msgid "Per-disk I/O and temperature history monitor"
-msgstr "Монитор диска: ввод-вывод и история температуры по каждому диску"
-
-#: src/widgets/disk_monitor_core.c:53
-msgid "X"
-msgstr "X"
-
-#: src/widgets/disk_monitor_core.c:60
-msgid "Y"
-msgstr "Y"
-
-#: src/widgets/disk_monitor_core.c:176 src/widgets/network_monitor.c:2735
-msgid "Position"
-msgstr "Позиция"
-
-#: src/widgets/disk_monitor_core.c:207
-msgid "Disk"
-msgstr "Диск"
-
-#: src/widgets/frame_launcher.c:827
-msgid "Applet type for the new guest:"
-msgstr "Тип апплета для нового гостя:"
-
-#: src/widgets/frame_launcher.c:917
-msgid "Running applet (main_daemon):"
-msgstr "Запущенный апплет (main_daemon):"
-
-#: src/widgets/frame_launcher.c:1175
-msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
-msgstr "Фрейм-лаунчер: рамка-хост для других апплетов (в стиле Vista Sidebar)."
-
-#: src/widgets/frame_launcher.c:1182
-msgid "Frame"
-msgstr "Рамка"
-
-#: src/widgets/frame_launcher.c:1230
-msgid "Add Applet"
-msgstr "Добавить апплет"
-
-#: src/widgets/frame_launcher.c:1231
-msgid "Add Running"
-msgstr "Добавить запущенный"
-
-#: src/widgets/frame_launcher.c:1238
-msgid ""
-"Create a NEW applet of the selected type right inside the frame (it is not "
-"added to the daemon autostart)"
-msgstr ""
-"Создать НОВЫЙ апплет выбранного типа сразу внутри рамки (в автостарт демона "
-"не попадает)"
-
-#: src/widgets/frame_launcher.c:1241
-msgid ""
-"Take an already running applet: it will be stopped in the daemon, moved into "
-"the frame and removed from autostart"
-msgstr ""
-"Забрать уже запущенный апплет: он остановится в демоне, будет перенесён в "
-"рамку и убран из автостарта"
-
-#: src/widgets/frame_launcher.c:1331
-msgid "Guests"
-msgstr "Гости"
-
-#: src/widgets/launcher.c:837
-msgid "Some options related to the Launcher-Screenlet."
-msgstr "Параметры апплета Launcher."
-
-#: src/widgets/launcher.c:843
-msgid "Starter"
-msgstr "Запуск"
-
-#: src/widgets/launcher.c:845
-msgid "Tooltip/Label"
-msgstr "Подсказка/Метка"
-
-#: src/widgets/launcher.c:874
-msgid "Icon-Filename"
-msgstr "Имя файла значка"
-
-#: src/widgets/launcher.c:894
-msgid "scale = original × Scale; end_size = fixed size in px"
-msgstr "scale = оригинал × Scale; end_size = жёсткий размер в px"
-
-#: src/widgets/launcher.c:893
-msgid "Resize method"
-msgstr "Способ изменения размера"
-
-#: src/widgets/launcher.c:906
-msgid "Multiplier of the image natural size"
-msgstr "Множитель к natural-размеру изображения"
-
-#: src/widgets/launcher.c:905 src/core/common.c:1504
-msgid "Scale"
-msgstr "Масштаб"
-
-#: src/widgets/launcher.c:933
-msgid "Fixed size of the picture"
-msgstr "Жёсткий размер картинки"
-
-#: src/widgets/launcher.c:932
-msgid "End size (px)"
-msgstr "Конечный размер (px)"
-
-#: src/widgets/memory_monitor.c:678
-msgid ""
-"RAM and swap histories are sampled from /proc/meminfo; each tick scrolls "
-"both graphs right-to-left."
-msgstr ""
-"RAM и своп берутся из /proc/meminfo; каждый тик сдвигает оба графика вправо "
-"налево."
-
-#: src/widgets/memory_monitor.c:689
-msgid "RAM user/apps"
-msgstr "ОЗУ: процессы"
-
-#: src/widgets/memory_monitor.c:690
-msgid "RAM shared"
-msgstr "ОЗУ: общая"
-
-#: src/widgets/memory_monitor.c:691
-msgid "RAM buffers"
-msgstr "ОЗУ: буферы"
-
-#: src/widgets/memory_monitor.c:692
-msgid "RAM cache"
-msgstr "ОЗУ: кэш"
-
-#: src/widgets/memory_monitor.c:693
-msgid "Swap history"
-msgstr "История свопа"
-
-#: src/widgets/memory_monitor.c:694
-msgid "Memory Monitor"
-msgstr "Монитор памяти"
-
-#: src/widgets/memory_monitor.c:719
-msgid "System RAM and swap monitor with independent scrolling histories"
-msgstr "Монитор памяти и свопа с независимыми прокручиваемыми историями"
-
-# Разделитель "скачано/всего" в сетевом мониторе. Не переводится:
-# это символ, а не слово.
-#: src/widgets/network_monitor.c:2366 src/widgets/network_monitor.c:2418
-msgid "/"
-msgstr "/"
-
-#: src/widgets/network_monitor.c:2603 src/widgets/network_monitor.c:2620
-msgid "Interface"
-msgstr "Интерфейс"
-
-#: src/widgets/network_monitor.c:2627
-msgid "Graph"
-msgstr "График"
-
-#: src/widgets/network_monitor.c:2632
-msgid "Graph max (KiB/s, 0=auto)"
-msgstr "Максимум графика (КиБ/с, 0=авто)"
-
-#: src/widgets/network_monitor.c:2674 src/widgets/network_monitor.c:2808
-#: src/widgets/sensors.c:2131
-msgid "Label"
-msgstr "Метка"
-
-#: src/widgets/network_monitor.c:2678 src/widgets/network_monitor.c:2811
-msgid "Label X/Y"
-msgstr "Позиция подписи X/Y"
-
-#: src/widgets/network_monitor.c:2686 src/widgets/network_monitor.c:2742
-#: src/widgets/network_monitor.c:2818
-msgid "Placement"
-msgstr "Размещение"
-
-#: src/widgets/network_monitor.c:2692 src/widgets/network_monitor.c:2825
-#: src/widgets/sensors.c:2134
-msgid "Value"
-msgstr "Число"
-
-#: src/widgets/network_monitor.c:2698 src/widgets/network_monitor.c:2830
-msgid "Value X/Y"
-msgstr "Позиция значения X/Y"
-
-#: src/widgets/network_monitor.c:2705
-msgid "Graph color"
-msgstr "Цвет графика"
-
-#: src/widgets/network_monitor.c:2713 src/widgets/sensors.c:2129
-msgid "Appearance"
-msgstr "Вид"
-
-#: src/widgets/network_monitor.c:2717
-msgid "Window background"
-msgstr "Фон окна"
-
-#: src/widgets/network_monitor.c:2755
-msgid "Name"
-msgstr "Имя"
-
-#: src/widgets/network_monitor.c:2762
-msgid "IP"
-msgstr "IP"
-
-#: src/widgets/network_monitor.c:2849
-msgid "Graph corner"
-msgstr "Скругление графика, px"
-
-#: src/widgets/network_monitor.c:2853
-msgid "Window corner"
-msgstr "Скругление окна, px"
-
-#: src/widgets/network_monitor.c:2857
-msgid "Smoothing"
-msgstr "Сглаживание"
-
-#: src/widgets/network_monitor.c:2883
-msgid "Network Monitor"
-msgstr "Сетевой монитор"
-
-#: src/widgets/network_monitor.c:2914
-msgid "Per-interface up/down speed and history monitor"
-msgstr "Монитор сети: скорость вверх/вниз и история по каждому интерфейсу"
-
-#: src/widgets/process_list.c:1140
-msgid ""
-"Process list sampled directly from /proc; default layout "
-"follows .conkyrc_proc."
-msgstr ""
-"Список процессов снимается прямо из /proc; раскладка по умолчанию "
-"соответствует .conkyrc_proc."
-
-#: src/widgets/process_list.c:1143
-msgid "Rows"
-msgstr "Строки"
-
-#: src/widgets/process_list.c:1147
-msgid "Default sort"
-msgstr "Сортировка по умолчанию"
-
-#: src/widgets/process_list.c:1152
-msgid "NAME"
-msgstr "ИМЯ"
-
-#: src/widgets/process_list.c:1153
-msgid "PID"
-msgstr "PID"
-
-#: src/widgets/process_list.c:1154
-msgid "CPU"
-msgstr "ЦП"
-
-#: src/widgets/process_list.c:1155
-msgid "MEM"
-msgstr "ПАМЯТЬ"
-
-#: src/widgets/process_list.c:1156
-msgid "I/O"
-msgstr "ВВОД/ВЫВОД"
-
-#: src/widgets/process_list.c:1165
-msgid "Default direction"
-msgstr "Направление по умолчанию"
-
-#: src/widgets/process_list.c:1170
-msgid "Descending"
-msgstr "По убыванию"
-
-#: src/widgets/process_list.c:1171
-msgid "Ascending"
-msgstr "По возрастанию"
-
-#: src/widgets/process_list.c:1180
-msgid "CPU mode"
-msgstr "Режим ЦП"
-
-#: src/widgets/process_list.c:1186
-msgid "Per core (100% = one thread)"
-msgstr "По ядрам (100% = один поток)"
-
-#: src/widgets/process_list.c:1188
-msgid "Conky (${top cpu} — 100% = all online threads)"
-msgstr "Conky (${top cpu} — 100% = все активные потоки)"
-
-#: src/widgets/process_list.c:1199
-msgid "Row font"
-msgstr "Шрифт строк"
-
-#: src/widgets/process_list.c:1202
-msgid "Accent"
-msgstr "Акцент"
-
-#: src/widgets/process_list.c:1204
-msgid "Column headers"
-msgstr "Заголовки столбцов"
-
-#: src/widgets/process_list.c:1206
-msgid "Process List"
-msgstr "Список процессов"
-
-#: src/widgets/process_list.c:1464
-msgid "Top processes sampled directly from /proc"
-msgstr "Список процессов, снимаемый прямо из /proc"
-
-#: src/widgets/sensors.c:1908
-msgid "No sensors found"
-msgstr "Сенсоры не найдены"
-
-#: src/widgets/sensors.c:2114
-msgid "Show"
-msgstr "Показывать"
-
-#: src/widgets/sensors.c:2135
-msgid "Value colour"
-msgstr "Цвет числа"
-
-#: src/widgets/sensors.c:2144
-msgid "Celsius"
-msgstr "Цельсий"
-
-#: src/widgets/sensors.c:2145
-msgid "Fahrenheit"
-msgstr "Фаренгейт"
-
-#: src/widgets/sensors.c:2150
-msgid "Units"
-msgstr "Единицы"
-
-#: src/widgets/sensors.c:2156
-msgid "Layout"
-msgstr "Раскладка"
-
-#: src/widgets/sensors.c:2158
-msgid "Label position"
-msgstr "Позиция метки"
-
-#: src/widgets/sensors.c:2160
-msgid "Value position"
-msgstr "Позиция числа"
-
-#: src/widgets/sensors.c:2162
-msgid "Value right-aligned"
-msgstr "Число вправо"
-
-#: src/widgets/sensors.c:2164
-msgid "First line"
-msgstr "Первая строка"
-
-#: src/widgets/sensors.c:2166
-msgid "Line step"
-msgstr "Шаг строк"
-
-#: src/widgets/sensors.c:2180
-msgid "Refresh, ms"
-msgstr "Обновление, мс"
-
-#: src/widgets/sensors.c:2195
-msgid "Sensors"
-msgstr "Сенсоры"
-
-#: src/core/applet_manager.c:243
+#: ../src/core/applet_manager.c:229
 #, c-format
 msgid ""
 "Reset the settings of all instances of type %s (%d in total)?\n"
@@ -1111,20 +30,20 @@ msgstr ""
 "Сбросить настройки всех инстансов типа %s (%d шт.)?\n"
 "Конфиги будут удалены, инстансы перезапущены с настройками по умолчанию."
 
-#: src/core/applet_manager.c:249 src/core/applet_manager.c:329
+#: ../src/core/applet_manager.c:235 ../src/core/applet_manager.c:315
 msgid "Reset settings"
 msgstr "Сброс настроек"
 
-#: src/core/applet_manager.c:322
+#: ../src/core/applet_manager.c:308
 msgid "Start"
 msgstr "Запустить"
 
-#: src/core/applet_manager.c:673
+#: ../src/core/applet_manager.c:659
 #, c-format
 msgid "«%s» is a guest instance: its autostart is managed by its frame host."
 msgstr "«%s» — гостевой инстанс: автозапуском управляет его frame-хост."
 
-#: src/core/applet_manager.c:708
+#: ../src/core/applet_manager.c:694
 #, c-format
 msgid ""
 "Delete config «%s»?\n"
@@ -1133,31 +52,31 @@ msgstr ""
 "Удалить конфиг «%s»?\n"
 "Инстанс будет остановлен и удалён."
 
-#: src/core/applet_manager.c:838
+#: ../src/core/applet_manager.c:824
 msgid "Delete config"
 msgstr "Удалить конфиг"
 
-#: src/core/applet_manager.c:842
+#: ../src/core/applet_manager.c:828
 msgid "Edit"
 msgstr "Редактировать"
 
-#: src/core/applet_manager.c:895 src/core/tray.c:265
+#: ../src/core/applet_manager.c:881 ../src/core/tray.c:312
 msgid "Applet management"
 msgstr "Управление апплетами"
 
-#: src/core/applet_manager.c:904
+#: ../src/core/applet_manager.c:890
 msgid "Applets"
 msgstr "Апплеты"
 
-#: src/core/applet_manager.c:907
+#: ../src/core/applet_manager.c:893
 msgid "Running"
 msgstr "Запущенные"
 
-#: src/core/applet_manager.c:910
+#: ../src/core/applet_manager.c:896
 msgid "Configs"
 msgstr "Конфигурации"
 
-#: src/core/common.c:1333
+#: ../src/core/common.c:1549
 #, c-format
 msgid ""
 "<b><span weight=\"ultrabold\" size=\"large\">%s</span></b> (no info "
@@ -1165,55 +84,68 @@ msgid ""
 msgstr ""
 "<b><span weight=\"ultrabold\" size=\"large\">%s</span></b> (нет данных)"
 
-#: src/core/common.c:1452
+#: ../src/core/common.c:1671
+msgid "<b>Donate / Support the developer</b>"
+msgstr "<b>Донат / Помощь разработчику</b>"
+
+#: ../src/core/common.c:1733
 msgid "Lock position"
 msgstr "Закрепить положение"
 
-#: src/core/common.c:1453 src/core/common.c:1757
+#: ../src/core/common.c:1734 ../src/core/common.c:2038
 msgid "Sticky"
 msgstr "Липкий"
 
-#: src/core/common.c:1454 src/core/common.c:1758
+#: ../src/core/common.c:1735 ../src/core/common.c:2039
 msgid "Widget"
 msgstr "Виджет"
 
-#: src/core/common.c:1455 src/core/common.c:1759
+#: ../src/core/common.c:1736 ../src/core/common.c:2040
 msgid "Keep above"
 msgstr "Поверх всех окон"
 
-#: src/core/common.c:1456 src/core/common.c:1760
+#: ../src/core/common.c:1737 ../src/core/common.c:2041
 msgid "Keep below"
 msgstr "Под всеми окнами"
 
-#: src/core/common.c:1486 src/core/tray.c:276
+#: ../src/core/common.c:1767 ../src/core/tray.c:323
 msgid "About"
 msgstr "О программе"
 
-#: src/core/common.c:1522
+#: ../src/core/common.c:1785
+msgid "Scale"
+msgstr "Масштаб"
+
+#: ../src/core/common.c:1803
 msgid "Size is set by End width/height (Resize mode = end_size)"
 msgstr "Размер задаётся End width/height (Resize mode = end_size)"
 
-#: src/core/common.c:1531
+#: ../src/core/common.c:1812
 msgid "Opacity"
 msgstr "Прозрачность"
 
-#: src/core/common.c:1543
+#: ../src/core/common.c:1824
 msgid "X-Position"
 msgstr "Позиция по X"
 
-#: src/core/common.c:1559
+#: ../src/core/common.c:1840
 msgid "Y-Position"
 msgstr "Позиция по Y"
 
-#: src/core/common.c:1582
+#: ../src/core/common.c:1863
 msgid "User label"
 msgstr "Метка"
 
-#: src/core/common.c:1609
+#: ../src/core/common.c:1884 ../src/core/common.c:2033
+#: ../src/widgets/conlog.c:1505 ../src/widgets/sensors.c:2208
+msgid "Window"
+msgstr "Окно"
+
+#: ../src/core/common.c:1890
 msgid "Options"
 msgstr "Параметры"
 
-#: src/core/common.c:1623
+#: ../src/core/common.c:1904
 msgid ""
 "Themes allow you to easily switch the appearance of your Screenlets. On this "
 "page you find a list of all available themes for this Screenlet."
@@ -1221,37 +153,41 @@ msgstr ""
 "Темы позволяют легко менять внешний вид апплетов. На этой странице "
 "перечислены все доступные темы для данного апплета."
 
-#: src/core/common.c:1733
+#: ../src/core/common.c:1967 ../src/widgets/clearrss.c:1913
+msgid "Themes"
+msgstr "Темы"
+
+#: ../src/core/common.c:2014
 msgid "Size"
 msgstr "Размер"
 
-#: src/core/common.c:1756
+#: ../src/core/common.c:2037
 msgid "Lock"
 msgstr "Закрепить"
 
-#: src/core/common.c:1778
+#: ../src/core/common.c:2059
 msgid "Properties..."
 msgstr "Свойства..."
 
-#: src/core/common.c:1781
+#: ../src/core/common.c:2062
 msgid "Info..."
 msgstr "Сведения..."
 
-#: src/core/common.c:1800
+#: ../src/core/common.c:2081
 #, c-format
 msgid "Add one more %s"
 msgstr "Добавить ещё %s"
 
-#: src/core/common.c:1805
+#: ../src/core/common.c:2086
 #, c-format
 msgid "Delete this %s"
 msgstr "Удалить %s"
 
-#: src/core/common.c:1813 src/core/tray.c:277
+#: ../src/core/common.c:2094 ../src/core/tray.c:324
 msgid "Quit"
 msgstr "Выход"
 
-#: src/core/common.c:2448
+#: ../src/core/common.c:2729
 #, c-format
 msgid ""
 "Dead symlink: %s\n"
@@ -1262,42 +198,931 @@ msgstr ""
 "\n"
 "Конфиг не найден. Удалить symlink?"
 
-#: src/core/common.c:2452
+#: ../src/core/common.c:2733
 msgid "Delete"
 msgstr "Удалить"
 
-#: src/core/common.c:2453
+#: ../src/core/common.c:2734
 msgid "Point to another config"
 msgstr "Указать другой конфиг"
 
-#: src/core/common.c:2454 src/core/common.c:2460
+#: ../src/core/common.c:2735 ../src/core/common.c:2741
 msgid "Cancel"
 msgstr "Отмена"
 
-#: src/core/common.c:2459
+#: ../src/core/common.c:2740
 msgid "Choose a config in .plugins"
 msgstr "Выберите конфиг в .plugins"
 
-#: src/core/common.c:2461
+#: ../src/core/common.c:2742
 msgid "Select"
 msgstr "Выбрать"
 
-#: src/core/tray.c:160
+#: ../src/core/tray.c:207
 #, c-format
 msgid "%1$s: %2$s"
 msgstr "%1$s: %2$s"
 
-#: src/core/tray.c:186 src/core/tray.c:194 src/core/tray.c:231
+#: ../src/core/tray.c:233 ../src/core/tray.c:241 ../src/core/tray.c:278
 msgid "Running Instances"
 msgstr "Запущенные апплеты"
 
-#: src/core/tray.c:273
+#: ../src/core/tray.c:320
 msgid "Restart Applets"
 msgstr "Перезапустить апплеты"
 
-#: src/core/tray.c:274
+#: ../src/core/tray.c:321
 msgid "Stop all Applets"
 msgstr "Остановить все апплеты"
+
+#: ../src/widgets/acpi_battery.c:1463 ../src/widgets/calendar.c:1040
+#: ../src/widgets/clock.c:1104
+msgid "Theme"
+msgstr "Тема"
+
+#: ../src/widgets/acpi_battery.c:1597
+msgid "Show percentage"
+msgstr "Показывать процент"
+
+#: ../src/widgets/acpi_battery.c:1599
+msgid "Show remaining time"
+msgstr "Показывать оставшееся время"
+
+#: ../src/widgets/acpi_battery.c:1602
+msgid "ACPI Battery"
+msgstr "Батарея"
+
+#: ../src/widgets/acpi_battery.c:1627
+msgid "Battery charge, remaining time and state from sysfs power_supply"
+msgstr "Заряд, оставшееся время и состояние из sysfs power_supply"
+
+#: ../src/widgets/calendar.c:1221
+msgid "Calendar specific options"
+msgstr "Настройки календаря"
+
+#: ../src/widgets/calendar.c:1307
+msgid "iCalendar"
+msgstr "iCalendar"
+
+#: ../src/widgets/clearrss.c:1897
+msgid "Feeds"
+msgstr "Ленты"
+
+#: ../src/widgets/clearrss.c:2190
+msgid "Align header left/center/right"
+msgstr "Выравнивание заголовка: по левому краю / по центру / по правому краю"
+
+#: ../src/widgets/clearrss.c:2205 ../src/widgets/clearrss.c:2254
+#: ../src/widgets/clearrss.c:2397
+msgid "Header"
+msgstr "Заголовок"
+
+#: ../src/widgets/clearrss.c:2229
+msgid "Header font and size"
+msgstr "Шрифт и размер заголовка"
+
+#: ../src/widgets/clearrss.c:2242
+msgid "Header color"
+msgstr "Цвет заголовка"
+
+#: ../src/widgets/clearrss.c:2278
+msgid "Published-time font and size"
+msgstr "Шрифт и размер времени публикации"
+
+#: ../src/widgets/clearrss.c:2291
+msgid "Published-time color"
+msgstr "Цвет времени публикации"
+
+#: ../src/widgets/clearrss.c:2303
+msgid "Text"
+msgstr "Текст"
+
+#: ../src/widgets/clearrss.c:2327
+msgid "Text font and size"
+msgstr "Шрифт и размер текста"
+
+#: ../src/widgets/clearrss.c:2340
+msgid "Text color"
+msgstr "Цвет текста"
+
+#: ../src/widgets/clearrss.c:2358
+msgid "Feed"
+msgstr "Лента"
+
+#: ../src/widgets/clearrss.c:2414
+msgid "Text settings"
+msgstr "Настройки текста"
+
+#: ../src/widgets/clearrss.c:2435
+msgid "Rss"
+msgstr "Лента"
+
+#: ../src/widgets/clearweather.c:3128
+msgid "Weather"
+msgstr "Погода"
+
+#: ../src/widgets/clearweather.c:3572
+msgid "Погода: open-meteo и wttr.in, прямо или через прокси"
+msgstr "Погода: open-meteo и wttr.in, напрямую или через прокси"
+
+#: ../src/widgets/clock.c:892
+msgid "Clock"
+msgstr "Часы"
+
+#: ../src/widgets/clock.c:893
+msgid "Clock-specific settings."
+msgstr "Настройки часов"
+
+#: ../src/widgets/clock.c:931
+msgid "Alarm"
+msgstr "Будильник"
+
+#: ../src/widgets/clock.c:932
+msgid "Settings for the Alarm-function."
+msgstr "Настройки будильника."
+
+#: ../src/widgets/clock.c:950
+msgid "Alarm-Time"
+msgstr "Время будильника"
+
+#: ../src/widgets/clock.c:994
+msgid "Face"
+msgstr "Циферблат"
+
+#: ../src/widgets/clock.c:995
+msgid "Additional settings for the face-layout ..."
+msgstr "Дополнительные настройки циферблата..."
+
+#: ../src/widgets/clock.c:1071
+msgid "Get Clock Skins"
+msgstr "Получить скины часов"
+
+#: ../src/widgets/conlog.c:1403
+msgid "Command"
+msgstr "Команда"
+
+#: ../src/widgets/conlog.c:1413
+msgid "Arguments are passed to the process directly, without a shell.\n"
+msgstr "Аргументы передаются процессу напрямую, без оболочки.\n"
+
+#: ../src/widgets/conlog.c:1425
+msgid "Window title (optional)"
+msgstr "Заголовок окна (необязательно)"
+
+#: ../src/widgets/conlog.c:1434
+msgid "Clear output"
+msgstr "Очистить вывод"
+
+#: ../src/widgets/conlog.c:1444
+msgid "Appearance: window label"
+msgstr "Вид: метка окна"
+
+#: ../src/widgets/conlog.c:1469
+msgid "Y offset: a negative value pulls the label up."
+msgstr "Смещение по Y: отрицательное значение подтягивает метку вверх."
+
+#: ../src/widgets/conlog.c:1478
+msgid "Behaviour"
+msgstr "Поведение"
+
+#: ../src/widgets/conlog.c:1529
+msgid "Level colours"
+msgstr "Цвета уровней"
+
+#: ../src/widgets/conlog.c:1547
+msgid "Normal"
+msgstr "Обычный"
+
+#: ../src/widgets/conlog.c:1549
+msgid "Warning"
+msgstr "Предупреждение"
+
+#: ../src/widgets/conlog.c:1551
+msgid "Error"
+msgstr "Ошибка"
+
+#: ../src/widgets/conlog.c:1553
+msgid "Information"
+msgstr "Информация"
+
+#: ../src/widgets/conlog.c:1555
+msgid "Debug"
+msgstr "Отладка"
+
+#: ../src/widgets/conlog.c:1564
+msgid "Conlog"
+msgstr "Conlog"
+
+#: ../src/widgets/conlog_min.c:950
+msgid "Buffer and layout"
+msgstr "Буфер и разметка"
+
+#: ../src/widgets/conlog_min.c:975
+msgid "Fonts and colours"
+msgstr "Шрифты и цвета"
+
+#: ../src/widgets/conlog_min.c:1012
+msgid "Window size"
+msgstr "Размер окна"
+
+#: ../src/widgets/cpu_monitor.c:1476
+msgid "CPU Monitor"
+msgstr "Монитор ЦП"
+
+#: ../src/widgets/cpu_monitor.c:1501
+msgid "Topology-aware per-socket CPU load, frequency and temperature monitor"
+msgstr ""
+"Монитор загрузки, частоты и температуры CPU по сокетам с учётом топологии"
+
+#: ../src/widgets/disk_monitor.c:1315
+msgid "Read history"
+msgstr "История чтения"
+
+#: ../src/widgets/disk_monitor.c:1320
+msgid "Write history"
+msgstr "История записи"
+
+#: ../src/widgets/disk_monitor.c:1325
+msgid "Temperature history"
+msgstr "История температуры"
+
+#: ../src/widgets/disk_monitor.c:1343
+msgid "Disk Monitor"
+msgstr "Монитор диска"
+
+#: ../src/widgets/disk_monitor.c:1349
+msgid "Per-disk I/O and temperature history monitor"
+msgstr "Монитор диска: ввод-вывод и история температуры по каждому диску"
+
+#: ../src/widgets/disk_monitor_core.c:53
+msgid "X"
+msgstr "X"
+
+#: ../src/widgets/disk_monitor_core.c:60
+msgid "Y"
+msgstr "Y"
+
+#: ../src/widgets/disk_monitor_core.c:207
+msgid "Disk"
+msgstr "Диск"
+
+#: ../src/widgets/frame_launcher.c:827
+msgid "Applet type for the new guest:"
+msgstr "Тип апплета для нового гостя:"
+
+#: ../src/widgets/frame_launcher.c:917
+msgid "Running applet (main_daemon):"
+msgstr "Запущенный апплет (main_daemon):"
+
+#: ../src/widgets/frame_launcher.c:1181
+msgid "Frame Launcher: host frame for other applets (Vista Sidebar style)."
+msgstr "Фрейм-лаунчер: рамка-хост для других апплетов (в стиле Vista Sidebar)."
+
+#: ../src/widgets/frame_launcher.c:1188
+msgid "Frame"
+msgstr "Рамка"
+
+#: ../src/widgets/frame_launcher.c:1236
+msgid "Add Applet"
+msgstr "Добавить апплет"
+
+#: ../src/widgets/frame_launcher.c:1237
+msgid "Add Running"
+msgstr "Добавить запущенный"
+
+#: ../src/widgets/frame_launcher.c:1244
+msgid ""
+"Create a NEW applet of the selected type right inside the frame (it is not "
+"added to the daemon autostart)"
+msgstr ""
+"Создать НОВЫЙ апплет выбранного типа сразу внутри рамки (в автостарт демона "
+"не попадает)"
+
+#: ../src/widgets/frame_launcher.c:1247
+msgid ""
+"Take an already running applet: it will be stopped in the daemon, moved into "
+"the frame and removed from autostart"
+msgstr ""
+"Забрать уже запущенный апплет: он остановится в демоне, будет перенесён в "
+"рамку и убран из автостарта"
+
+#: ../src/widgets/launcher.c:841
+msgid "Some options related to the Launcher-Screenlet."
+msgstr "Параметры апплета Launcher."
+
+#: ../src/widgets/launcher.c:847
+msgid "Starter"
+msgstr "Запуск"
+
+#: ../src/widgets/launcher.c:898
+msgid "scale = original × Scale; end_size = fixed size in px"
+msgstr "scale = оригинал × Scale; end_size = жёсткий размер в px"
+
+#: ../src/widgets/launcher.c:910
+msgid "Multiplier of the image natural size"
+msgstr "Множитель к natural-размеру изображения"
+
+#: ../src/widgets/launcher.c:937
+msgid "Fixed size of the picture"
+msgstr "Жёсткий размер картинки"
+
+#: ../src/widgets/memory_monitor.c:1069
+msgid "Memory Monitor"
+msgstr "Монитор памяти"
+
+#: ../src/widgets/memory_monitor.c:1094
+msgid "System RAM and swap monitor with independent scrolling histories"
+msgstr "Монитор памяти и свопа с независимыми прокручиваемыми историями"
+
+# Разделитель "скачано/всего" в сетевом мониторе. Не переводится:
+# это символ, а не слово.
+#: ../src/widgets/network_monitor.c:2366 ../src/widgets/network_monitor.c:2418
+msgid "/"
+msgstr "/"
+
+#: ../src/widgets/network_monitor.c:2755
+msgid "Name"
+msgstr "Имя"
+
+#: ../src/widgets/network_monitor.c:2762
+msgid "IP"
+msgstr "IP"
+
+#: ../src/widgets/network_monitor.c:2883
+msgid "Network Monitor"
+msgstr "Сетевой монитор"
+
+#: ../src/widgets/network_monitor.c:2914
+msgid "Per-interface up/down speed and history monitor"
+msgstr "Монитор сети: скорость вверх/вниз и история по каждому интерфейсу"
+
+#: ../src/widgets/process_list.c:1353
+msgid "NAME"
+msgstr "ИМЯ"
+
+#: ../src/widgets/process_list.c:1354
+msgid "PID"
+msgstr "PID"
+
+#: ../src/widgets/process_list.c:1355
+msgid "CPU"
+msgstr "ЦП"
+
+#: ../src/widgets/process_list.c:1356
+msgid "MEM"
+msgstr "ПАМЯТЬ"
+
+#: ../src/widgets/process_list.c:1357
+msgid "I/O"
+msgstr "ВВОД/ВЫВОД"
+
+#: ../src/widgets/process_list.c:1371
+msgid "Descending"
+msgstr "По убыванию"
+
+#: ../src/widgets/process_list.c:1372
+msgid "Ascending"
+msgstr "По возрастанию"
+
+#: ../src/widgets/process_list.c:1387
+msgid "Per core (100% = one thread)"
+msgstr "По ядрам (100% = один поток)"
+
+#: ../src/widgets/process_list.c:1389
+msgid "Conky (${top cpu} — 100% = all online threads)"
+msgstr "Conky (${top cpu} — 100% = все активные потоки)"
+
+#: ../src/widgets/process_list.c:1431
+msgid "Process List"
+msgstr "Список процессов"
+
+#: ../src/widgets/process_list.c:1988
+msgid "Top processes sampled directly from /proc"
+msgstr "Список процессов, снимаемый прямо из /proc"
+
+#: ../src/widgets/sensors.c:1944
+msgid "No sensors found"
+msgstr "Сенсоры не найдены"
+
+#: ../src/widgets/sensors.c:2150
+msgid "Show"
+msgstr "Показывать"
+
+#: ../src/widgets/sensors.c:2165
+msgid "Appearance"
+msgstr "Вид"
+
+#: ../src/widgets/sensors.c:2180
+msgid "Celsius"
+msgstr "Цельсий"
+
+#: ../src/widgets/sensors.c:2181
+msgid "Fahrenheit"
+msgstr "Фаренгейт"
+
+#: ../src/widgets/sensors.c:2192
+msgid "Layout"
+msgstr "Раскладка"
+
+#: ../src/widgets/sensors.c:2231
+msgid "Sensors"
+msgstr "Сенсоры"
+
+#~ msgid ""
+#~ "Reads /sys/class/power_supply. Works with laptop batteries and with "
+#~ "devices that expose a battery there (e.g. a Logitech mouse when the hid-"
+#~ "logitech-hidpp module is loaded). Shows \"No battery\" when no source is "
+#~ "found, instead of failing."
+#~ msgstr ""
+#~ "Читает /sys/class/power_supply. Работает с батареями ноутбуков и с "
+#~ "устройствами, которые предоставляют батарею там (например, мышь Logitech, "
+#~ "если загружен модуль hid-logitech-hidpp). Если источник не найден, "
+#~ "показывает «Батарея отсутствует» вместо ошибки."
+
+#~ msgid "Window width"
+#~ msgstr "Ширина окна"
+
+#~ msgid "Window height"
+#~ msgstr "Высота окна"
+
+#~ msgid "Update interval (s)"
+#~ msgstr "Интервал обновления, с"
+
+#~ msgid "Low battery threshold (%)"
+#~ msgstr "Порог низкого заряда, %"
+
+#~ msgid "Display charge percent"
+#~ msgstr "Показывать заряд в процентах"
+
+#~ msgid "Display estimated time left"
+#~ msgstr "Показывать оценку оставшегося времени"
+
+#~ msgid "View events"
+#~ msgstr "Показать события"
+
+#~ msgid "Update events"
+#~ msgstr "Обновить события"
+
+#~ msgid "Toggle events"
+#~ msgstr "Переключить события"
+
+#~ msgid "Back to today"
+#~ msgstr "Вернуться к сегодняшнему дню"
+
+#~ msgid "First Weekday"
+#~ msgstr "Первый день недели"
+
+#~ msgid "iCalendar ics file path"
+#~ msgstr "Путь к файлу iCalendar (.ics)"
+
+#~ msgid "Show iCalendar events"
+#~ msgstr "Показывать события iCalendar"
+
+#~ msgid "Month buttons"
+#~ msgstr "Кнопки месяца"
+
+#~ msgid "Today color"
+#~ msgstr "Цвет сегодняшнего дня"
+
+#~ msgid "Event day color"
+#~ msgstr "Цвет дня с событием"
+
+#~ msgid "Today event color"
+#~ msgstr "Цвет события на сегодня"
+
+#~ msgid "Back color (default theme)"
+#~ msgstr "Цвет фона (тема по умолчанию)"
+
+#~ msgid "Header font"
+#~ msgstr "Шрифт заголовка"
+
+#~ msgid "Day names font"
+#~ msgstr "Шрифт названий дней"
+
+#~ msgid "Days font"
+#~ msgstr "Шрифт дней"
+
+#~ msgid "View this News"
+#~ msgstr "Показать эту новость"
+
+#~ msgid "Refresh"
+#~ msgstr "Обновить"
+
+#~ msgid "Previous item"
+#~ msgstr "Предыдущая запись"
+
+#~ msgid "Next item"
+#~ msgstr "Следующая запись"
+
+#~ msgid "Rss-specific settings."
+#~ msgstr "Настройки RSS-ленты."
+
+#~ msgid "Feed name"
+#~ msgstr "Название ленты"
+
+#~ msgid "Feed URL"
+#~ msgstr "URL ленты"
+
+#~ msgid "Update interval"
+#~ msgstr "Интервал обновления"
+
+#~ msgid "Auto news count"
+#~ msgstr "Число новостей автоматически"
+
+#~ msgid "News count"
+#~ msgstr "Число новостей"
+
+#~ msgid "Show feed name"
+#~ msgstr "Показывать название ленты"
+
+#~ msgid "Header align"
+#~ msgstr "Выравнивание заголовка"
+
+#~ msgid "Show published time"
+#~ msgstr "Показывать время публикации"
+
+#~ msgid "Back color"
+#~ msgstr "Цвет фона"
+
+#~ msgid "City or index:"
+#~ msgstr "Город или индекс:"
+
+#~ msgid "Alternate name:"
+#~ msgstr "Запасное название:"
+
+#~ msgid "Source:"
+#~ msgstr "Источник:"
+
+#~ msgid "Connection:"
+#~ msgstr "Соединение:"
+
+#~ msgid "Proxy:"
+#~ msgstr "Прокси:"
+
+#~ msgid "Units:"
+#~ msgstr "Единицы:"
+
+#~ msgid "Update, min:"
+#~ msgstr "Обновлять, мин:"
+
+#~ msgid "Forecast hours:"
+#~ msgstr "Часов в прогнозе:"
+
+#~ msgid "Forecast type:"
+#~ msgstr "Вид прогноза:"
+
+#~ msgid "Background:"
+#~ msgstr "Фон:"
+
+#~ msgid "Underlay colour (ARGB):"
+#~ msgstr "Цвет подложки (ARGB):"
+
+#~ msgid "Corner rounding, px:"
+#~ msgstr "Скругление углов, px:"
+
+#~ msgid "Theme directory:"
+#~ msgstr "Каталог темы:"
+
+#~ msgid "Width:"
+#~ msgstr "Ширина:"
+
+#~ msgid "Height:"
+#~ msgstr "Высота:"
+
+#~ msgid "City colour:"
+#~ msgstr "Цвет города:"
+
+#~ msgid "Temperature colour:"
+#~ msgstr "Цвет температуры:"
+
+#~ msgid "Description colour:"
+#~ msgstr "Цвет описания:"
+
+#~ msgid "Clock colour:"
+#~ msgstr "Цвет часов:"
+
+#~ msgid "Background colour:"
+#~ msgstr "Цвет фона:"
+
+#~ msgid "City font:"
+#~ msgstr "Шрифт города:"
+
+#~ msgid "Temperature font:"
+#~ msgstr "Шрифт температуры:"
+
+#~ msgid "Description font:"
+#~ msgstr "Шрифт описания:"
+
+#~ msgid "Clock font:"
+#~ msgstr "Шрифт часов:"
+
+#~ msgid "Value font on icon:"
+#~ msgstr "Шрифт значений у иконки:"
+
+#~ msgid "Refresh now"
+#~ msgstr "Обновить сейчас"
+
+#~ msgid "Connection: direct"
+#~ msgstr "Соединение: напрямую"
+
+#~ msgid "Connection: via proxy"
+#~ msgstr "Соединение: через прокси"
+
+#~ msgid "Time Zone"
+#~ msgstr "Часовой пояс"
+
+#~ msgid "Time-Offset"
+#~ msgstr "Смещение времени"
+
+#~ msgid "Hour-Format"
+#~ msgstr "Формат времени"
+
+#~ msgid "Show seconds-hand"
+#~ msgstr "Показывать секундную стрелку"
+
+#~ msgid "Activate Alarm"
+#~ msgstr "Включить будильник"
+
+#~ msgid "Alarm stops after"
+#~ msgstr "Будильник звенит, с"
+
+#~ msgid "Run a command"
+#~ msgstr "Выполнить команду"
+
+#~ msgid "Alarm command"
+#~ msgstr "Команда будильника"
+
+#~ msgid "Face-Text"
+#~ msgstr "Текст на циферблате"
+
+#~ msgid "Text-Font"
+#~ msgstr "Шрифт текста"
+
+#~ msgid "Text-Color"
+#~ msgstr "Цвет текста"
+
+#~ msgid "X-Position of Text"
+#~ msgstr "Позиция текста по X"
+
+#~ msgid "Y-Position of Text"
+#~ msgstr "Позиция текста по Y"
+
+#~ msgid "Show today's date"
+#~ msgstr "Показывать сегодняшнюю дату"
+
+#~ msgid "Date Format"
+#~ msgstr "Формат даты"
+
+#~ msgid "Label font"
+#~ msgstr "Шрифт метки"
+
+#~ msgid "Label colour"
+#~ msgstr "Цвет метки"
+
+#~ msgid "Offset X"
+#~ msgstr "Смещение по X"
+
+#~ msgid "Offset Y"
+#~ msgstr "Смещение по Y"
+
+#~ msgid "Strip colours (ANSI)"
+#~ msgstr "Вырезать цвета (ANSI)"
+
+#~ msgid "Keep output colours"
+#~ msgstr "Сохранять цвета вывода"
+
+#~ msgid "Per-level colours"
+#~ msgstr "Цвета по уровню"
+
+#~ msgid "Follow the tail"
+#~ msgstr "Следовать за хвостом"
+
+#~ msgid "Lines in buffer"
+#~ msgstr "Строк в буфере"
+
+#~ msgid "Width"
+#~ msgstr "Ширина"
+
+#~ msgid "Height"
+#~ msgstr "Высота"
+
+#~ msgid "Corner rounding"
+#~ msgstr "Скругление"
+
+#~ msgid "First-line indent"
+#~ msgstr "Отступ первой строки"
+
+#~ msgid "Background"
+#~ msgstr "Фон"
+
+#~ msgid "Border"
+#~ msgstr "Рамка"
+
+#~ msgid "Title"
+#~ msgstr "Заголовок"
+
+#~ msgid "Max lines"
+#~ msgstr "Строк в буфере"
+
+#~ msgid "Line height"
+#~ msgstr "Высота строки"
+
+#~ msgid "First row offset"
+#~ msgstr "Отступ первой строки"
+
+#~ msgid "Text font"
+#~ msgstr "Шрифт текста"
+
+#~ msgid "Title font"
+#~ msgstr "Шрифт заголовка"
+
+#~ msgid "Title color"
+#~ msgstr "Цвет заголовка"
+
+#~ msgid "One physical package per instance; topology is read from sysfs."
+#~ msgstr "Один физический пакет на экземпляр; топология читается из sysfs."
+
+#~ msgid "Socket ID"
+#~ msgstr "ID сокета"
+
+#~ msgid "Font"
+#~ msgstr "Шрифт"
+
+#~ msgid "Temperature"
+#~ msgstr "Температура"
+
+#~ msgid "System load"
+#~ msgstr "Нагрузка системы"
+
+#~ msgid "User load"
+#~ msgstr "Нагрузка пользователя"
+
+#~ msgid "Nice load"
+#~ msgstr "Нагрузка nice"
+
+#~ msgid "I/O wait"
+#~ msgstr "Ожидание ввода-вывода"
+
+#~ msgid "Show temperature graph"
+#~ msgstr "Показывать график температуры"
+
+#~ msgid "Graph label"
+#~ msgstr "Подпись графика"
+
+#~ msgid "Corner radius"
+#~ msgstr "Скругление углов"
+
+#~ msgid "Update (ms)"
+#~ msgstr "Обновление, мс"
+
+#~ msgid "Rate smoothing (samples)"
+#~ msgstr "Сглаживание, отсчёты"
+
+#~ msgid "Read text"
+#~ msgstr "Текст чтения"
+
+#~ msgid "Write text"
+#~ msgstr "Текст записи"
+
+#~ msgid "Temperature text"
+#~ msgstr "Текст температуры"
+
+#~ msgid "Graph background"
+#~ msgstr "Фон графика"
+
+#~ msgid "Graph border"
+#~ msgstr "Рамка графика"
+
+#~ msgid "Position"
+#~ msgstr "Позиция"
+
+#~ msgid "Guests"
+#~ msgstr "Гости"
+
+#~ msgid "Tooltip/Label"
+#~ msgstr "Подсказка/Метка"
+
+#~ msgid "Icon-Filename"
+#~ msgstr "Имя файла значка"
+
+#~ msgid "Resize method"
+#~ msgstr "Способ изменения размера"
+
+#~ msgid "End size (px)"
+#~ msgstr "Конечный размер (px)"
+
+#~ msgid ""
+#~ "RAM and swap histories are sampled from /proc/meminfo; each tick scrolls "
+#~ "both graphs right-to-left."
+#~ msgstr ""
+#~ "RAM и своп берутся из /proc/meminfo; каждый тик сдвигает оба графика "
+#~ "вправо налево."
+
+#~ msgid "RAM user/apps"
+#~ msgstr "ОЗУ: процессы"
+
+#~ msgid "RAM shared"
+#~ msgstr "ОЗУ: общая"
+
+#~ msgid "RAM buffers"
+#~ msgstr "ОЗУ: буферы"
+
+#~ msgid "RAM cache"
+#~ msgstr "ОЗУ: кэш"
+
+#~ msgid "Swap history"
+#~ msgstr "История свопа"
+
+#~ msgid "Interface"
+#~ msgstr "Интерфейс"
+
+#~ msgid "Graph"
+#~ msgstr "График"
+
+#~ msgid "Graph max (KiB/s, 0=auto)"
+#~ msgstr "Максимум графика (КиБ/с, 0=авто)"
+
+#~ msgid "Label"
+#~ msgstr "Метка"
+
+#~ msgid "Label X/Y"
+#~ msgstr "Позиция подписи X/Y"
+
+#~ msgid "Placement"
+#~ msgstr "Размещение"
+
+#~ msgid "Value"
+#~ msgstr "Число"
+
+#~ msgid "Value X/Y"
+#~ msgstr "Позиция значения X/Y"
+
+#~ msgid "Graph color"
+#~ msgstr "Цвет графика"
+
+#~ msgid "Window background"
+#~ msgstr "Фон окна"
+
+#~ msgid "Graph corner"
+#~ msgstr "Скругление графика, px"
+
+#~ msgid "Window corner"
+#~ msgstr "Скругление окна, px"
+
+#~ msgid "Smoothing"
+#~ msgstr "Сглаживание"
+
+#~ msgid ""
+#~ "Process list sampled directly from /proc; default layout "
+#~ "follows .conkyrc_proc."
+#~ msgstr ""
+#~ "Список процессов снимается прямо из /proc; раскладка по умолчанию "
+#~ "соответствует .conkyrc_proc."
+
+#~ msgid "Rows"
+#~ msgstr "Строки"
+
+#~ msgid "Default sort"
+#~ msgstr "Сортировка по умолчанию"
+
+#~ msgid "Default direction"
+#~ msgstr "Направление по умолчанию"
+
+#~ msgid "CPU mode"
+#~ msgstr "Режим ЦП"
+
+#~ msgid "Row font"
+#~ msgstr "Шрифт строк"
+
+#~ msgid "Accent"
+#~ msgstr "Акцент"
+
+#~ msgid "Column headers"
+#~ msgstr "Заголовки столбцов"
+
+#~ msgid "Value colour"
+#~ msgstr "Цвет числа"
+
+#~ msgid "Units"
+#~ msgstr "Единицы"
+
+#~ msgid "Label position"
+#~ msgstr "Позиция метки"
+
+#~ msgid "Value position"
+#~ msgstr "Позиция числа"
+
+#~ msgid "Value right-aligned"
+#~ msgstr "Число вправо"
+
+#~ msgid "First line"
+#~ msgstr "Первая строка"
+
+#~ msgid "Line step"
+#~ msgstr "Шаг строк"
+
+#~ msgid "Refresh, ms"
+#~ msgstr "Обновление, мс"
 
 #, fuzzy
 #~ msgid "read_color"
