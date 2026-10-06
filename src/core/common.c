@@ -1721,11 +1721,13 @@ static GtkWidget *xs_core_about_page(XsPlugin *p)
         gtk_widget_set_size_request(scroll, -1, 120);
         gtk_container_add(GTK_CONTAINER(exp), scroll);
         gtk_widget_set_margin_top(exp, 6);
-        /* Донат-блок — на всю ширину ПОД шапкой (иконка+имя+автор),
-         * а не рядом с ней: иначе expander раздувает hbox. */
-        gtk_box_pack_start(GTK_BOX(outer), exp, TRUE, TRUE, 0);
+        /* Донат-блок — ВНИЗУ страницы: сначала шапка (иконка+имя+описание
+         * +(c) автор), потом экспандер. expander без expand (FALSE) не
+         * растягивается на свободное место, поэтому гигантских пустых
+         * блоков между описанием и донатами нет. */
+        gtk_box_pack_end(GTK_BOX(outer), exp, FALSE, FALSE, 0);
     }
-    gtk_box_pack_start(GTK_BOX(outer), hbox, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(outer), hbox, TRUE, TRUE, 0);
     gtk_widget_show_all(outer);
     return outer;
 }
