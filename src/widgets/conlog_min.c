@@ -82,8 +82,18 @@ struct _ConlogPriv {
     int           refresh_interval; /* сек; 0 = запустить один раз */
     gboolean      running;
     gboolean      dirty;        /* есть новые строки, пора перерисовать */
+    gboolean      collecting;   /* режим перезапуска: строки идут в
+                                 * stage_lines, а на экран попадают ОДНИМ
+                                 * атомарным снимком при завершении
+                                 * запуска (cl_commit_staging). Без этого
+                                 * стримящая команда (awk с fflush, в
+                                 * отличие от хвостового tail -n N,
+                                 * отдающего всё пачкой на EOF) ловится
+                                 * 100-мс перерисовкой на полувыводке —
+                                 * снаружи это моргание/прыжок. */
 
     GPtrArray    *lines;        /* g_free-строки, от старых к новым */
+    GPtrArray    *stage_lines;  /* снимок текущего запуска (collecting) */
     guint         max_lines;
     GString      *pending;      /* недописанная строка с прошлого чтения */
 
@@ -139,13 +149,33 @@ static gboolean cl_redraw_cb(gpointer data)
 
 static void cl_push_line(ConlogPriv *priv, char *line)
 {
+    /* В режиме сбора строки идут в stage_lines: на экран они попадут
+     * только целиком, при завершении запуска (cl_commit_staging). */
+    GPtrArray *arr = priv->collecting ? priv->stage_lines : priv->lines;
+
     /* ВНИМАНИЕ: у массива стоит free func (g_free), поэтому
      * g_ptr_array_remove_index() освобождает элемент САМ. Свой g_free
      * перед ним давал double free — демон падал с «double free or
      * corruption» при первом же вытеснении старой строки. */
-    if (priv->lines->len >= priv->max_lines)
-        g_ptr_array_remove_index(priv->lines, 0);
-    g_ptr_array_add(priv->lines, line);
+    if (arr->len >= priv->max_lines)
+        g_ptr_array_remove_index(arr, 0);
+    g_ptr_array_add(arr, line);
+    priv->dirty = TRUE;
+}
+
+/* Атомарно показать снимок завершившегося запуска: обмен массивами за
+ * O(1), старый видимый буфер освобождается целиком. Пустой запуск НИЧЕГО
+ * не меняет — экран хранит прошний снимок, а не моргает пустотой. */
+static void cl_commit_staging(ConlogPriv *priv)
+{
+    GPtrArray *tmp;
+
+    if (!priv->collecting || priv->stage_lines->len == 0)
+        return;
+    tmp = priv->lines;
+    priv->lines = priv->stage_lines;
+    priv->stage_lines = tmp;
+    g_ptr_array_set_size(priv->stage_lines, 0);
     priv->dirty = TRUE;
 }
 
@@ -224,6 +254,8 @@ static gboolean cl_on_io(GIOChannel *chan, GIOCondition cond, gpointer data)
             cl_push_line(priv, g_strdup(priv->pending->str));
             g_string_truncate(priv->pending, 0);
         }
+        /* Запуск завершён: показать его снимок целиком одной перерисовкой. */
+        cl_commit_staging(priv);
         priv->running = FALSE;
         priv->watch_id = 0;   /* источник сейчас умрёт: сбрось id,
                                * иначе следующий cl_stop() дёрнет
@@ -404,6 +436,11 @@ static void cl_start(ConlogPriv *priv)
                                     G_IO_IN | G_IO_HUP | G_IO_ERR,
                                     cl_on_io, priv);
     priv->running = TRUE;
+    /* В режиме перезапуска вывод этого запуска копится в stage и попадает
+     * на экран только атомарно (HUP или cl_refresh_cb). Моргания нет:
+     * перерисовка никогда не ловит полувыводку и не рисует пустоту. */
+    priv->collecting = (priv->refresh_interval > 0);
+    g_ptr_array_set_size(priv->stage_lines, 0);
 }
 
 /* Периодический перезапуск команды («режим conky»): каждый тик старый
@@ -419,17 +456,15 @@ static gboolean cl_refresh_cb(gpointer data)
     if (!priv)
         return G_SOURCE_REMOVE;
     if (priv->refresh_interval > 0) {
-        cl_stop(priv);
-        /* Вывод нового запуска ЗАМЕНЯЕТ окно (семантика conky):
-         * set_size с free-функцией освобождает элементы сам, свой
-         * g_free здесь не нужен (двойное освобождение). */
-        g_ptr_array_set_size(priv->lines, 0);
+        /* Убить недописанную строку прошлого запуска: без этого её хвост
+         * приклеился бы к первой строке нового (cl_stop не трогает
+         * pending, а watch к этому моменту уже снят — HUP не придёт). */
         g_string_truncate(priv->pending, 0);
+        /* Что прошлый запуск успел выдать — показать; ничего не выдал —
+         * экран остаётся со старым снимком. Затем перезапуск. */
+        cl_commit_staging(priv);
+        cl_stop(priv);
         cl_start(priv);
-        /* Честное «пусто»: если команда ничего не выдаст до следующего
-         * тика, окно покажет фон, а не вчерашние строки. Перерисовку
-         * гонит dirty-флаг, так что без новых данных лишних кадров нет. */
-        priv->dirty = TRUE;
     }
     return G_SOURCE_CONTINUE;
 }
@@ -625,6 +660,7 @@ static void cl_shutdown(XsPlugin *p)
         priv->refresh_id = 0;
     }
     g_ptr_array_free(priv->lines, TRUE);
+    g_ptr_array_free(priv->stage_lines, TRUE);
     g_string_free(priv->pending, TRUE);
     g_free(priv->command);
     g_free(priv->title);
@@ -745,6 +781,7 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     priv->plugin = p;
     priv->kf = kf;
     priv->lines = g_ptr_array_new_with_free_func(g_free);
+    priv->stage_lines = g_ptr_array_new_with_free_func(g_free);
     priv->pending = g_string_new(NULL);
 
     priv->max_lines = (guint) xs_host_api()->conf_int(kf, p->name, "max_lines",
@@ -817,6 +854,7 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
             priv->refresh_id = 0;
         }
         g_ptr_array_free(priv->lines, TRUE);
+        g_ptr_array_free(priv->stage_lines, TRUE);
         g_string_free(priv->pending, TRUE);
         g_free(priv->command);
         g_free(priv->title);
