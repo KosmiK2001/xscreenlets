@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <gio/gio.h>
 #include <unistd.h>
+#include <signal.h>
 #include <gio/gfiledescriptorbased.h>
 
 #define CONLOG_DEFAULT_COMMAND  "journalctl -f -n 20"
@@ -77,6 +78,8 @@ struct _ConlogPriv {
     GIOChannel   *chan;
     guint         watch_id;
     guint         redraw_id;
+    guint         refresh_id;
+    int           refresh_interval; /* сек; 0 = запустить один раз */
     gboolean      running;
     gboolean      dirty;        /* есть новые строки, пора перерисовать */
 
@@ -236,6 +239,16 @@ static gboolean cl_on_io(GIOChannel *chan, GIOCondition cond, gpointer data)
 
 /* ---------------------------------------------------------------- запуск */
 
+/* Ребёнок становится лидером своей процесс-группы ДО exec. Потомки
+ * /bin/sh -c (tail, grep, awk) наследуют pgid = pid shell'а, поэтому
+ * cl_stop() убивает всю группу одним kill(-pid, SIGKILL). Без этого
+ * убивается только shell, а tail-сироты живут вечно (см. cl_stop). */
+static void cl_child_setup(gpointer user_data)
+{
+    (void) user_data;
+    setpgid(0, 0);
+}
+
 static void cl_stop(ConlogPriv *priv)
 {
     /* Порядок и владение здесь критичны.
@@ -265,6 +278,23 @@ static void cl_stop(ConlogPriv *priv)
     }
     priv->in_stream = NULL;
     if (priv->proc) {
+        const char *idstr = g_subprocess_get_identifier(priv->proc);
+        GPid pid = 0;
+
+        if (idstr && idstr[0])
+            pid = (GPid) g_ascii_strtoll(idstr, NULL, 10);
+        /* Убиваем ВСЮ процесс-группу, а не только shell. cl_child_setup()
+         * делает ребёнка лидером своей группы ДО exec, поэтому tail/grep/awk
+         * наследуют pgid = pid shell'а, и kill(-pid) достаёт всех разом.
+         * g_subprocess_force_exit() валит лишь /bin/sh -c: его дети остаются
+         * сиротами, а tail -f на нерастущем файле не пишет -> не рвётся по
+         * SIGPIPE и висит НАВСЕГДА. В периодическом режиме без группового
+         * kill сироты плодились бы на каждый тик перезапуска. */
+        if (pid > 0)
+            kill(-pid, SIGKILL);
+        /* Страховка на случай, если setpgid в ребёнке не сработал
+         * (kill(-pid) тогда вернул ESRCH — группа с таким pgid не
+         * существует): shell убиваем вручную, как и раньше. */
         g_subprocess_force_exit(priv->proc);
         /* g_subprocess_newv() — transfer full, ссылка наша: unref
          * обязателен, иначе процесс и его каналы текут на каждом
@@ -278,6 +308,7 @@ static void cl_stop(ConlogPriv *priv)
 static void cl_start(ConlogPriv *priv)
 {
     GError *err = NULL;
+    GSubprocessLauncher *launcher;
     char *argv[4];
     char *sh;
     int fd;
@@ -297,11 +328,21 @@ static void cl_start(ConlogPriv *priv)
     argv[2] = priv->command;
     argv[3] = NULL;
 
-    priv->proc = g_subprocess_newv((const char * const *) argv,
-                                   G_SUBPROCESS_FLAGS_STDIN_PIPE |
-                                   G_SUBPROCESS_FLAGS_STDOUT_PIPE |
-                                   G_SUBPROCESS_FLAGS_STDERR_SILENCE,
-                                   &err);
+    /* Через launcher, а не g_subprocess_newv(): child_setup выполняется
+     * в ребёнке МЕЖДУ fork и exec, что позволяет сделать его лидером
+     * собственной процесс-группы ДО того, как /bin/sh породит детей.
+     * Иначе в cl_stop() нечем убить tail/grep/awk — они остаются
+     * сиротами (см. cl_stop). setpgid — async-signal-safe, в child
+     * setup можно. */
+    launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDIN_PIPE |
+                                         G_SUBPROCESS_FLAGS_STDOUT_PIPE |
+                                         G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    g_subprocess_launcher_set_child_setup(launcher, cl_child_setup,
+                                          NULL, NULL);
+    priv->proc = g_subprocess_launcher_spawnv(launcher,
+                                              (const char * const *) argv,
+                                              &err);
+    g_object_unref(launcher);
     g_free(sh);
     if (!priv->proc) {
         if (priv->plugin && priv->plugin->host)
@@ -363,6 +404,34 @@ static void cl_start(ConlogPriv *priv)
                                     G_IO_IN | G_IO_HUP | G_IO_ERR,
                                     cl_on_io, priv);
     priv->running = TRUE;
+}
+
+/* Периодический перезапуск команды («режим conky»): каждый тик старый
+ * процесс убивается группой, буфер очищается и команда стартует заново.
+ * Свежий запуск сам открывает источники по имени — ротация файлов не
+ * важна, смерть команды самоизлечивается следующим тиком.
+ * ОДИН источник на всё время жизни апплета (снимается в cl_shutdown,
+ * НЕ в cl_stop/cl_start — они вызываются на каждый тик). */
+static gboolean cl_refresh_cb(gpointer data)
+{
+    ConlogPriv *priv = data;
+
+    if (!priv)
+        return G_SOURCE_REMOVE;
+    if (priv->refresh_interval > 0) {
+        cl_stop(priv);
+        /* Вывод нового запуска ЗАМЕНЯЕТ окно (семантика conky):
+         * set_size с free-функцией освобождает элементы сам, свой
+         * g_free здесь не нужен (двойное освобождение). */
+        g_ptr_array_set_size(priv->lines, 0);
+        g_string_truncate(priv->pending, 0);
+        cl_start(priv);
+        /* Честное «пусто»: если команда ничего не выдаст до следующего
+         * тика, окно покажет фон, а не вчерашние строки. Перерисовку
+         * гонит dirty-флаг, так что без новых данных лишних кадров нет. */
+        priv->dirty = TRUE;
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 /* ---------------------------------------------------------------- рисование */
@@ -551,6 +620,10 @@ static void cl_shutdown(XsPlugin *p)
         g_source_remove(priv->redraw_id);
         priv->redraw_id = 0;
     }
+    if (priv->refresh_id) {
+        g_source_remove(priv->refresh_id);
+        priv->refresh_id = 0;
+    }
     g_ptr_array_free(priv->lines, TRUE);
     g_string_free(priv->pending, TRUE);
     g_free(priv->command);
@@ -692,6 +765,13 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
      * давать разумные числа, а не окно в -5000 пикселей. */
     priv->line_step = CLAMP(xs_host_api()->conf_int(kf, p->name, "line_step", 0),
                             0, 60);
+    /* refresh_interval: 0 = сегодняшнее поведение (один запуск команды,
+     * чтение до конца вывода). >0 = перезапускать команду раз в N секунд
+     * («как conky»): свежее переоткрытие источников, ротация логов не
+     * важна, смерть команды самоизлечивается. */
+    priv->refresh_interval = CLAMP(xs_host_api()->conf_int(kf, p->name,
+                                                           "refresh_interval", 0),
+                                   0, 86400);
     priv->first_row_y = CLAMP(xs_host_api()->conf_int(kf, p->name,
                                                       "first_row_y", 6), 0, 60);
     priv->width = CLAMP(xs_host_api()->conf_int(kf, p->name, "window_width",
@@ -709,6 +789,12 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
     p->priv = priv;
     /* Единственный таймер отрисовки на всё время жизни applet-а. */
     priv->redraw_id = g_timeout_add(CONLOG_REDRAW_MS, cl_redraw_cb, priv);
+    /* Таймер перезапуска команды — тоже ОДИН и на всё время жизни.
+     * cl_refresh_cb снимается только в cl_shutdown: в cl_stop его
+     * снимать нельзя, cl_stop зовётся на каждом тике. */
+    if (priv->refresh_interval > 0)
+        priv->refresh_id = g_timeout_add_seconds((guint) priv->refresh_interval,
+                                                cl_refresh_cb, priv);
     cl_start(priv);
 
     /* Окно обязан создать плагин: демон после init проверяет p->win и
@@ -725,6 +811,10 @@ static int cl_init(XsPlugin *p, GKeyFile *kf)
         if (priv->redraw_id) {
             g_source_remove(priv->redraw_id);
             priv->redraw_id = 0;
+        }
+        if (priv->refresh_id) {
+            g_source_remove(priv->refresh_id);
+            priv->refresh_id = 0;
         }
         g_ptr_array_free(priv->lines, TRUE);
         g_string_free(priv->pending, TRUE);
@@ -803,6 +893,29 @@ static void cl_spin_changed(GtkSpinButton *spin, gpointer data)
         priv->line_step = CLAMP(v, 0, 60);
     else if (strcmp(key, "first_row_y") == 0)
         priv->first_row_y = CLAMP(v, 0, 60);
+    else if (strcmp(key, "refresh_interval") == 0) {
+        /* Пересоздаём таймер только на реальном изменении, и это
+         * ОБЯЗАТЕЛЬНО: cl_save() зовётся здесь же, а продублированный
+         * g_timeout_add на каждое значение спиннера (стрелки, ввод, шаг)
+         * дал бы ту же утечку таймеров, что уже ловили на отрисовке. */
+        if (v < 0)
+            v = 0;
+        if (v != priv->refresh_interval) {
+            if (priv->refresh_id) {
+                g_source_remove(priv->refresh_id);
+                priv->refresh_id = 0;
+            }
+            priv->refresh_interval = v;
+            /* 0 — источника нет: апплет возвращается к разовому запуску. */
+            if (priv->refresh_interval > 0)
+                priv->refresh_id =
+                    g_timeout_add_seconds((guint) priv->refresh_interval,
+                                          cl_refresh_cb, priv);
+        }
+        g_key_file_set_integer(priv->kf, p->name, key, priv->refresh_interval);
+        cl_save(p);
+        return;
+    }
     g_key_file_set_integer(priv->kf, p->name, key, v);
     cl_save(p);
 }
@@ -970,6 +1083,21 @@ static void cl_properties(XsPlugin *p, GtkNotebook *nb)
                         priv->first_row_y, 0, 60, 1);
     g_object_set_data_full(G_OBJECT(w), "xs-key", g_strdup("first_row_y"),
                            g_free);
+    g_signal_connect(w, "value-changed", G_CALLBACK(cl_spin_changed), p);
+
+    /* «Режим conky»: 0 — команда запускается один раз (как раньше);
+     * N — перезапускать её каждые N секунд, свежий снимок заменяет окно.
+     * Ротация логов при этом не важна, а смерть команды лечится
+     * следующим тиком, поэтому фид не может «зависнуть». */
+    w = xs_prop_add_int(box, "Refresh interval",
+                        "Секунды. 0 — команда запускается один раз и "
+                        "показывает весь свой вывод. N — перезапускать "
+                        "команду каждые N секунд (свежий снимок). Для "
+                        "файлового хвоста используйте N и команду без "
+                        "слежения за файлом: tail -n 24 -F не нужен.",
+                        priv->refresh_interval, 0, 3600, 1);
+    g_object_set_data_full(G_OBJECT(w), "xs-key",
+                           g_strdup("refresh_interval"), g_free);
     g_signal_connect(w, "value-changed", G_CALLBACK(cl_spin_changed), p);
 
     xs_prop_add_group_header(box, _("Fonts and colours"));
