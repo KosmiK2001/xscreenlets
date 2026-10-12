@@ -1082,8 +1082,8 @@ static cairo_surface_t *pl_render(PrivData *priv, int width, int height)
     }
 
     g_object_unref(layout);
-    g_free(title_font);
-    g_free(row_font);
+    pango_font_description_free(title_font);
+    pango_font_description_free(row_font);
     cairo_destroy(cr);
     cairo_surface_mark_dirty(surface);
     return surface;
