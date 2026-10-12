@@ -403,6 +403,9 @@ static void nm_sample(PrivData *priv)
     }
     priv->prev_time_us = now;
     priv->prev_valid = TRUE;
+    /* nm_parse_netdev() дублирует имя через g_strdup() — освободить,
+     * иначе каждый тик каждого из 4 интерфейсов утекает ~6 байт. */
+    g_free(sample.ifname);
 }
 
 /* ------------------------------------------------------------------ */
