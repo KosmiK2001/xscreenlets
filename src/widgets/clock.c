@@ -242,7 +242,9 @@ static int clock_init(XsPlugin *p, GKeyFile *kf)
 		g_printerr("clock: available themes:\n");
 		for (gsize i = 0; i < G_N_ELEMENTS(search_dirs); i++) {
 			const char *dir_path = search_dirs[i];
-			if (dir_path[0] == '\0') continue;
+			/* sys_dir_dbg == NULL, когда themedir не задан (локальная
+			 * сборка с XS_THEME_DIR=""): чтение [0] по NULL — сегфолт. */
+			if (!dir_path || dir_path[0] == '\0') continue;
 			DIR *dir = opendir(dir_path);
 			if (!dir) continue;
 			struct dirent *entry;
@@ -816,7 +818,8 @@ static void clock_fill_themes(XsPlugin *p, GtkListStore *store)
     if (!p || !p->priv || !store)
         return;
     for (di = 0; di < G_N_ELEMENTS(search_dirs); di++) {
-        GDir *d = g_dir_open(search_dirs[di], 0, NULL);
+        /* sys_dir может быть NULL при незаданном themedir. */
+        GDir *d = search_dirs[di] ? g_dir_open(search_dirs[di], 0, NULL) : NULL;
         const char *fn;
 
         if (!d)
