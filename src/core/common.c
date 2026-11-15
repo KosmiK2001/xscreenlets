@@ -755,6 +755,11 @@ static void xs_core_apply_window_flags(XsWinState *state)
 
     if (!state || !state->win)
         return;
+    /* Layer-поверхность живёт по правилам слоя: keep_above/keep_below,
+     * sticky и X-свойства к ней неприменимы, а gdk_property_* на
+     * Wayland-окне ругается assertion'ом. */
+    if (state->layer)
+        return;
     if (state->keep_above && state->keep_below)
         state->keep_below = FALSE;
     if (state->sticky)
@@ -4573,11 +4578,27 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
                               (gpointer)host->name);
             /* гость позиционируется ВНУТРИ content-зоны по своим x/y
              * (оффсеты), иначе все гости лягут в одну точку */
-            XReparentWindow(gdk_x11_display_get_xdisplay(
-                                gtk_widget_get_display(g->win)),
-                            gdk_x11_window_get_xid(gw),
-                            gdk_x11_window_get_xid(cw),
-                            cx + gs->x, cy + gs->y);
+            if (GDK_IS_X11_DISPLAY(gtk_widget_get_display(g->win))) {
+                XReparentWindow(gdk_x11_display_get_xdisplay(
+                                    gtk_widget_get_display(g->win)),
+                                gdk_x11_window_get_xid(gw),
+                                gdk_x11_window_get_xid(cw),
+                                cx + gs->x, cy + gs->y);
+            } else {
+                /* Wayland: XReparentWindow не существует, а gdk_x11_* на
+                 * Wayland-окне читает чужую структуру. Встроить окно гостя
+                 * в рамку невозможно — ставим его отдельным окном по
+                 * координатам рамки (визуально рядом, без встраивания). */
+                XsWinState *hs2 = g_object_get_data(G_OBJECT(host->win),
+                                                    "xs-state");
+
+                xs_window_move_at(g->win,
+                                  (hs2 ? hs2->x : 0) + cx + gs->x,
+                                  (hs2 ? hs2->y : 0) + cy + gs->y);
+                xs_log_impl("guest '%s': Wayland — встраивание в рамку "
+                            "недоступно, окно поставлено отдельно",
+                            g->name);
+            }
             /* синхронизировать GTK-кэш позиции: первый configure после
              * репарента несёт СТАРЫЕ (экранные) координаты, из-за них
              * кламп уносил гостя в угол. Явный move + флаг первого
@@ -4667,11 +4688,27 @@ XsPlugin *xs_core_start_guest_instance(XsPlugin *host,
              * репарента успеет записать позицию в конфиг */
             g_object_set_data(G_OBJECT(g->win), "xs-guest-host",
                               (gpointer)host->name);
-            XReparentWindow(gdk_x11_display_get_xdisplay(
-                                gtk_widget_get_display(g->win)),
-                            gdk_x11_window_get_xid(gw),
-                            gdk_x11_window_get_xid(cw),
-                            cx + gs->x, cy + gs->y);
+            if (GDK_IS_X11_DISPLAY(gtk_widget_get_display(g->win))) {
+                XReparentWindow(gdk_x11_display_get_xdisplay(
+                                    gtk_widget_get_display(g->win)),
+                                gdk_x11_window_get_xid(gw),
+                                gdk_x11_window_get_xid(cw),
+                                cx + gs->x, cy + gs->y);
+            } else {
+                /* Wayland: XReparentWindow не существует, а gdk_x11_* на
+                 * Wayland-окне читает чужую структуру. Встроить окно гостя
+                 * в рамку невозможно — ставим его отдельным окном по
+                 * координатам рамки (визуально рядом, без встраивания). */
+                XsWinState *hs2 = g_object_get_data(G_OBJECT(host->win),
+                                                    "xs-state");
+
+                xs_window_move_at(g->win,
+                                  (hs2 ? hs2->x : 0) + cx + gs->x,
+                                  (hs2 ? hs2->y : 0) + cy + gs->y);
+                xs_log_impl("guest '%s': Wayland — встраивание в рамку "
+                            "недоступно, окно поставлено отдельно",
+                            g->name);
+            }
             /* синхронизировать GTK-кэш позиции: первый configure после
              * репарента несёт СТАРЫЕ (экранные) координаты, из-за них
              * кламп уносил гостя в угол. Явный move + флаг первого
