@@ -14,6 +14,7 @@
 #include <X11/Xatom.h>
 #include <glib.h>
 #include <gtk/gtk.h>
+#include <gdk/gdkwayland.h>
 #include <librsvg/rsvg.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -3967,6 +3968,14 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     gtk_widget_set_size_request(area, width, height);
     gtk_container_add(GTK_CONTAINER(window), area);
     gtk_window_move(GTK_WINDOW(window), x, y);
+
+    /* Wayfire's decoration plugin matches native Wayland windows by app_id.
+     * Give all Xscreenlets windows one stable identity so a compositor rule
+     * can disable its titlebar without affecting ordinary applications. */
+    gtk_widget_realize(window);
+    if (GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(window)))
+        gdk_wayland_window_set_application_id(
+            gtk_widget_get_window(window), "xscreenlets");
 
     state = g_new0(XsWinState, 1);
     state->opacity = 1.0;
