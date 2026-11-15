@@ -1,18 +1,85 @@
 #include "tray.h"
 #include "common.h"
 
-/* Tray intentionally uses the deprecated GtkStatusIcon API as required by the
- * specification; silence the corresponding -Wdeprecated-declarations warnings
- * for this translation unit so the build stays clean under -Wall -Wextra. */
+/* X11 uses the deprecated GtkStatusIcon API; Wayland uses an optional
+ * StatusNotifierItem provider loaded at runtime. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 #include <gtk/gtk.h>
 #include <glib.h>
+#include <gmodule.h>
 
 #include "i18n.h"
+
+typedef struct _AppIndicator AppIndicator;
+typedef AppIndicator *(*XsIndicatorNewWithPath)(const gchar *, const gchar *, gint, const gchar *);
+typedef void (*XsIndicatorSetTitle)(AppIndicator *, const gchar *);
+typedef void (*XsIndicatorSetMenu)(AppIndicator *, GtkMenu *);
+typedef void (*XsIndicatorSetStatus)(AppIndicator *, gint);
+
+enum {
+    XS_INDICATOR_STATUS_PASSIVE = 0,
+    XS_INDICATOR_STATUS_ACTIVE = 1,
+    XS_INDICATOR_CATEGORY_APPLICATION_STATUS = 0
+};
+
 static GtkStatusIcon *g_tray = NULL;
 static GtkMenu *g_menu = NULL;
+static AppIndicator *g_indicator = NULL;
+static GModule *g_indicator_module = NULL;
+static XsIndicatorSetStatus g_indicator_set_status = NULL;
+
+static gboolean xs_tray_wayland_session(void)
+{
+    const char *session = g_getenv("XDG_SESSION_TYPE");
+
+    return g_strcmp0(session, "wayland") == 0 ||
+           g_getenv("WAYLAND_DISPLAY") != NULL;
+}
+
+static gboolean xs_tray_load_indicator(void)
+{
+    XsIndicatorNewWithPath new_with_path;
+    XsIndicatorSetTitle set_title;
+    XsIndicatorSetMenu set_menu;
+    const char *names[] = {
+        "libayatana-appindicator3.so.1",
+        "libappindicator3.so.1",
+        NULL
+    };
+
+    for (gsize i = 0; names[i] && !g_indicator_module; i++)
+        g_indicator_module = g_module_open(names[i], G_MODULE_BIND_LAZY);
+    if (!g_indicator_module)
+        return FALSE;
+    if (!g_module_symbol(g_indicator_module, "app_indicator_new_with_path",
+                         (gpointer *)&new_with_path) ||
+        !g_module_symbol(g_indicator_module, "app_indicator_set_title",
+                         (gpointer *)&set_title) ||
+        !g_module_symbol(g_indicator_module, "app_indicator_set_menu",
+                         (gpointer *)&set_menu) ||
+        !g_module_symbol(g_indicator_module, "app_indicator_set_status",
+                         (gpointer *)&g_indicator_set_status)) {
+        g_module_close(g_indicator_module);
+        g_indicator_module = NULL;
+        g_indicator_set_status = NULL;
+        return FALSE;
+    }
+    g_indicator = new_with_path("xscreenlets", "screenlets-tray",
+                                XS_INDICATOR_CATEGORY_APPLICATION_STATUS,
+                                "/usr/share/icons/xscreenlets");
+    if (!g_indicator) {
+        g_module_close(g_indicator_module);
+        g_indicator_module = NULL;
+        g_indicator_set_status = NULL;
+        return FALSE;
+    }
+    set_title(g_indicator, "Xscreenlets");
+    set_menu(g_indicator, g_menu);
+    g_indicator_set_status(g_indicator, XS_INDICATOR_STATUS_ACTIVE);
+    return TRUE;
+}
 
 /* --- callbacks --- */
 
@@ -30,16 +97,6 @@ static void on_toggle_activate(GtkMenuItem *mi, gpointer data)
 
     xs_core_show_plugin(p,
                         gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(mi)));
-}
-
-/* Launch <тип>: создать инстанс типа (как launch_screenlet в оригинале) */
-static void on_launch_activate(GtkMenuItem *mi, gpointer data)
-{
-    const char *type = g_object_get_data(G_OBJECT(mi), "xs-type");
-
-    (void)data;
-    if (type)
-        xs_core_add_instance(type);
 }
 
 /* Restart all: пересоздать все инстансы из [instances] (как
@@ -233,6 +290,20 @@ void xs_tray_init(void)
 {
     gboolean g_tray_icon_set = FALSE;
 
+    g_menu = GTK_MENU(gtk_menu_new());
+    g_object_ref_sink(g_menu);
+
+    if (xs_tray_wayland_session()) {
+        /* GtkStatusIcon uses XEmbed and has no Wayland representation.  Load
+         * an optional StatusNotifierItem provider at runtime; the same binary
+         * remains usable on systems without AppIndicator. */
+        if (xs_tray_load_indicator()) {
+            xs_log_impl("tray: using Wayland StatusNotifierItem backend");
+            return;
+        }
+        xs_log_impl("tray: Wayland backend unavailable; no tray provider found");
+    }
+
     g_tray = gtk_status_icon_new();
     if (!g_tray) {
         xs_log_impl("tray: failed to create GtkStatusIcon, continuing without tray");
@@ -252,11 +323,11 @@ void xs_tray_init(void)
         static const char *tray_icons[] = {
             "/usr/share/icons/xscreenlets/screenlets-tray.png",
             /* Обёртка того же значка: ebuild ставит иконки циклом
-             * icons/*.svg, поэтому растр в пакет не попадает, а
+             * icons-SVG, поэтому растр в пакет не попадает, а
              * положить его в git можно только в виде SVG. Правку
              * ebuild вносит пользователь, поэтому демон сначала
              * пробует .png, а если его нет — эту обёртку.
-             * Когда ebuild начнёт ставить *.png, её можно убрать. */
+             * Когда ebuild начнёт ставить PNG, её можно убрать. */
             "/usr/share/icons/xscreenlets/screenlets-tray.svg",
             "/usr/share/icons/screenlets.svg",
             NULL
@@ -292,8 +363,6 @@ void xs_tray_init(void)
     }
     gtk_status_icon_set_tooltip_text(g_tray, "Xscreenlets");
     g_object_ref_sink(g_tray);
-    g_menu = GTK_MENU(gtk_menu_new());
-    g_object_ref_sink(g_menu);
     gtk_status_icon_set_visible(g_tray, TRUE);
     g_signal_connect(g_tray, "popup-menu", G_CALLBACK(on_popup_menu), 0);
 }
@@ -455,6 +524,16 @@ void xs_tray_rebuild(void)
 
 void xs_tray_shutdown(void)
 {
+    if (g_indicator) {
+        g_indicator_set_status(g_indicator, XS_INDICATOR_STATUS_PASSIVE);
+        g_object_unref(g_indicator);
+        g_indicator = NULL;
+    }
+    if (g_indicator_module) {
+        g_module_close(g_indicator_module);
+        g_indicator_module = NULL;
+        g_indicator_set_status = NULL;
+    }
     if (g_tray) {
         g_object_unref(g_tray);
         g_tray = NULL;
