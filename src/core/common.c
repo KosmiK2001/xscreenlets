@@ -15,6 +15,7 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gdk/gdkwayland.h>
+#include <gtk-layer-shell.h>
 #include <librsvg/rsvg.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -647,6 +648,7 @@ static gboolean on_draw_frame(GtkWidget *area, cairo_t *cr, gpointer d);
 static gboolean on_configure_event(GtkWidget *w, GdkEventConfigure *ev, gpointer d);
 static void on_window_destroy(GtkWidget *w, gpointer d);
 static GtkWidget *make_window(XsPlugin *p, int x, int y, int w, int h);
+static void xs_window_move_at(GtkWidget *win, int x, int y);
 static void xs_core_save_plugin_position(XsPlugin *p);
 static gboolean xs_core_input_shape_idle(XsPlugin *p);
 
@@ -1256,9 +1258,9 @@ static void xs_core_prop_pos_changed(GtkSpinButton *spin, gpointer data)
                 g_timeout_add(500, host_update_guest_backdrop_idle, c2);
             }
         } else {
-            gtk_window_move(GTK_WINDOW(p->win),
-                            strcmp(key, "x") == 0 ? v : state->x,
-                            strcmp(key, "x") == 0 ? state->y : v);
+            xs_window_move_at(p->win,
+                              strcmp(key, "x") == 0 ? v : state->x,
+                              strcmp(key, "x") == 0 ? state->y : v);
         }
     }
 }
@@ -2142,6 +2144,24 @@ static gboolean on_button(GtkWidget *widget, GdkEventButton *event,
      * click-анимация лаунчера завершается на release.
      * ОДИН вызов на событие — иначе launch срабатывает дважды. */
     handled = p->ops && p->ops->button ? p->ops->button(p, event) : FALSE;
+    /* Перетаскивание layer-окна: композитор такие поверхности не двигает,
+     * поэтому тянем сами — по дельте курсора внутри окна. Начинаем только
+     * если плагин событие не обработал (иначе ломаются кнопки календаря,
+     * клики лаунчера и т.п.). */
+    if (!handled && state->layer && event->type == GDK_BUTTON_PRESS &&
+        event->button == 1 &&
+        (event->state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_MOD1_MASK)) == 0) {
+        state->dragging = TRUE;
+        state->drag_px = event->x;
+        state->drag_py = event->y;
+        return TRUE;
+    }
+    if (!handled && state->layer && event->type == GDK_BUTTON_RELEASE &&
+        event->button == 1 && state->dragging) {
+        state->dragging = FALSE;
+        xs_core_save_plugin_position(p);
+        return TRUE;
+    }
     if (!handled && event->button == 3) {
         xs_core_popup_menu(p, event);
         return TRUE;
@@ -2203,6 +2223,37 @@ static gboolean on_motion(GtkWidget *widget, GdkEventMotion *event,
     state = g_object_get_data(G_OBJECT(p->win), "xs-state");
     if (!state)
         return FALSE;
+    if (state->dragging) {
+        double dx = event->x - state->drag_px;
+        double dy = event->y - state->drag_py;
+        GdkDisplay *dpy = gtk_widget_get_display(p->win);
+        GdkMonitor *mon;
+        GdkRectangle g = { 0, 0, 0, 0 };
+        int nx, ny;
+
+        state->drag_px = event->x;
+        state->drag_py = event->y;
+        if (dx == 0 && dy == 0)
+            return TRUE;
+        nx = state->x + (int)dx;
+        ny = state->y + (int)dy;
+        /* держим окно в пределах монитора, на котором оно сейчас лежит */
+        mon = gdk_display_get_monitor_at_point(dpy, state->x + state->w / 2,
+                                               state->y + state->h / 2);
+        if (mon) {
+            gdk_monitor_get_geometry(mon, &g);
+            if (nx < g.x) nx = g.x;
+            if (ny < g.y) ny = g.y;
+            if (nx + state->w > g.x + g.width)
+                nx = g.x + g.width - state->w;
+            if (ny + state->h > g.y + g.height)
+                ny = g.y + g.height - state->h;
+        }
+        state->x = nx;
+        state->y = ny;
+        xs_window_move_at(p->win, nx, ny);
+        return TRUE;
+    }
     if (p->ops && p->ops->motion && p->ops->motion(p, event))
         return TRUE;
     return FALSE;
@@ -3935,6 +3986,58 @@ static void conf_set_str(GKeyFile *kf, const char *section, const char *key,
     g_key_file_set_string(kf, section, key, value);
 }
 
+/* Поставить окно в абсолютные экранные координаты.
+ *
+ * Обычный toplevel двигается gtk_window_move (на X11 работает, на Wayland —
+ * нет, поэтому там окно создаётся как layer-surface). Для layer-surface
+ * позиция задаётся парой anchor+margins относительно монитора, в который
+ * попадает точка: сначала находим монитор, затем margin = координата минус
+ * начало монитора. Якоря LEFT/TOP включаются, RIGHT/BOTTOM — выключаются,
+ * иначе композитор растягивает surface вместо позиционирования. */
+static void xs_window_move_at(GtkWidget *win, int x, int y)
+{
+    GdkDisplay *dpy;
+    GdkMonitor *mon = NULL;
+    GdkRectangle geom = { 0, 0, 0, 0 };
+    int n, i;
+
+    if (!win)
+        return;
+    if (!gtk_layer_is_layer_window(GTK_WINDOW(win))) {
+        gtk_window_move(GTK_WINDOW(win), x, y);
+        return;
+    }
+    dpy = gtk_widget_get_display(win);
+    n = gdk_display_get_n_monitors(dpy);
+    for (i = 0; i < n; i++) {
+        GdkMonitor *m = gdk_display_get_monitor(dpy, i);
+
+        gdk_monitor_get_geometry(m, &geom);
+        if (x >= geom.x && x < geom.x + geom.width &&
+            y >= geom.y && y < geom.y + geom.height) {
+            mon = m;
+            break;
+        }
+    }
+    if (!mon) {
+        mon = gdk_display_get_primary_monitor(dpy);
+        if (!mon && n > 0)
+            mon = gdk_display_get_monitor(dpy, 0);
+        if (!mon)
+            return;
+        gdk_monitor_get_geometry(mon, &geom);
+    }
+    gtk_layer_set_monitor(GTK_WINDOW(win), mon);
+    gtk_layer_set_anchor(GTK_WINDOW(win), GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(GTK_WINDOW(win), GTK_LAYER_SHELL_EDGE_RIGHT, FALSE);
+    gtk_layer_set_anchor(GTK_WINDOW(win), GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    gtk_layer_set_anchor(GTK_WINDOW(win), GTK_LAYER_SHELL_EDGE_BOTTOM, FALSE);
+    gtk_layer_set_margin(GTK_WINDOW(win), GTK_LAYER_SHELL_EDGE_LEFT,
+                         x - geom.x);
+    gtk_layer_set_margin(GTK_WINDOW(win), GTK_LAYER_SHELL_EDGE_TOP,
+                         y - geom.y);
+}
+
 static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
 {
     GtkWidget *window;
@@ -3944,6 +4047,7 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     XsWinState *state;
     GdkWindowTypeHint type_hint = conf_window_type(xs_core_conf());
     gboolean keep_below = conf_bool(xs_core_conf(), "global", "keep_below", TRUE);
+    gboolean layer = FALSE;
 
     if (!p || width <= 0 || height <= 0)
         return NULL;
@@ -3951,11 +4055,29 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
     gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), TRUE);
     gtk_window_set_skip_pager_hint(GTK_WINDOW(window), TRUE);
-    gtk_window_set_type_hint(GTK_WINDOW(window), type_hint);
-    gtk_window_set_keep_below(GTK_WINDOW(window), keep_below);
     gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
     gtk_window_set_default_size(GTK_WINDOW(window), width, height);
     gtk_widget_set_size_request(window, width, height);
+
+    /* Wayland не даёт поставить обычный toplevel в заданную точку
+     * (gtk_window_move — no-op), поэтому апплет создаётся как
+     * wlr-layer-shell surface: позиция задаётся anchors+margins, декораций
+     * нет по определению, а слой BOTTOM держит окно под обычными окнами.
+     * Если композитор layer-shell не поддерживает (или это X11) — прежний
+     * путь: toplevel + gtk_window_move. */
+    if (GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(window)) &&
+        gtk_layer_is_supported()) {
+        gtk_layer_init_for_window(GTK_WINDOW(window));
+        gtk_layer_set_namespace(GTK_WINDOW(window), "xscreenlets");
+        gtk_layer_set_layer(GTK_WINDOW(window), GTK_LAYER_SHELL_LAYER_BOTTOM);
+        gtk_layer_set_exclusive_zone(GTK_WINDOW(window), 0);
+        gtk_layer_set_keyboard_mode(GTK_WINDOW(window),
+                                    GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+        layer = TRUE;
+    } else {
+        gtk_window_set_type_hint(GTK_WINDOW(window), type_hint);
+        gtk_window_set_keep_below(GTK_WINDOW(window), keep_below);
+    }
 
     screen = gtk_window_get_screen(GTK_WINDOW(window));
     visual = gdk_screen_get_rgba_visual(screen);
@@ -3967,17 +4089,14 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     area = gtk_drawing_area_new();
     gtk_widget_set_size_request(area, width, height);
     gtk_container_add(GTK_CONTAINER(window), area);
-    gtk_window_move(GTK_WINDOW(window), x, y);
+    xs_window_move_at(window, x, y);
 
-    /* Wayfire's decoration plugin adds a titlebar and buttons to native
-     * Wayland toplevels even when GTK is told decorated=FALSE: GTK3 never
-     * negotiated a decoration mode, so the compositor assumed server-side
-     * decoration. announce_csd() states the client-side mode explicitly,
-     * after which no compositor-side titlebar is drawn — verified on
-     * Wayfire with a probe: 34 px titlebar band present without it,
-     * absent with it. Harmless on X11 (guarded by the display type). */
+    /* Обычный Wayland-toplevel композитор декорирует сам (Wayfire decoration
+     * plugin: titlebar 30 px + border 4 px), потому что GTK3 не согласует
+     * режим декорации. announce_csd объявляет client-side режим, и рамка
+     * исчезает. Layer-surface декораций не имеет по определению. */
     gtk_widget_realize(window);
-    if (GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(window))) {
+    if (!layer && GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(window))) {
         GdkWindow *gdkwin = gtk_widget_get_window(window);
 
         gdk_wayland_window_set_application_id(gdkwin, "xscreenlets");
@@ -4001,6 +4120,7 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     state->last_shape_us = 0;
     state->last_conf_save_us = 0;
     state->frame_dirty = TRUE;
+    state->layer = layer;
     p->win = window;
     g_object_set_data_full(G_OBJECT(window), "xs-state", state, g_free);
 
@@ -4014,7 +4134,7 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
                      G_CALLBACK(on_enter_notify), p);
     g_signal_connect(window, "leave-notify-event",
                      G_CALLBACK(on_leave_notify), p);
-    if (p->ops && p->ops->motion)
+    if (layer || (p->ops && p->ops->motion))
 	g_signal_connect(window, "motion-notify-event",
 	                 G_CALLBACK(on_motion), p);
     {
@@ -4023,7 +4143,7 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
 	                      GDK_SCROLL_MASK |
 	                      GDK_ENTER_NOTIFY_MASK |
 	                      GDK_LEAVE_NOTIFY_MASK;
-	if (p->ops && p->ops->motion)
+	if (layer || (p->ops && p->ops->motion))
 	    events |= GDK_POINTER_MOTION_MASK |
 	              GDK_POINTER_MOTION_HINT_MASK;
 	gtk_widget_add_events(window, events);

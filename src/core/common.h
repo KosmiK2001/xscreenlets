@@ -50,6 +50,9 @@ typedef struct _XsWinState {
 	gboolean freed;            /* ресурсы уже освобождены */
 	gboolean occluded;         /* окно перекрыто другим окном (paint можно гасить) */
 	gboolean ever_drawn;       /* кадр уже отдавался хотя бы раз */
+	gboolean layer;            /* окно создано как wlr-layer-shell surface */
+	gboolean dragging;         /* идёт перетаскивание мышью (layer-shell) */
+	double drag_px, drag_py;   /* последняя позиция курсора внутри окна */
 } XsWinState;
 
 /* Отложенная команда меню (выполняется в idle после закрытия меню) */

@@ -4,7 +4,7 @@ CC = gcc
 # soft-debug USE-флаг (напр. "debug"), потому что ловец на каждый
 # аварийный сигнал пишет стек в файл и завершает процесс — в обычной
 # сборке пользователю это не нужно. Включать при расследовании падений.
-CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0 json-glib-1.0 gio-2.0)
+CFLAGS = -O2 -g3 -Wall -Wextra -I./include -I./src/core -I./src/widgets -std=gnu11 $(shell pkg-config --cflags gtk+-3.0 librsvg-2.0 gmodule-2.0 gtk-layer-shell-0) $(shell pkg-config --cflags libsoup-3.0 libxml-2.0 json-glib-1.0 gio-2.0)
 
 # Дополнительные флаги сборки задаются снаружи:
 #   make EXTRA_CFLAGS="-DXS_MEM_DEBUG -O0 -g3" all
@@ -49,11 +49,11 @@ CFLAGS += $(XS_I18N_CFLAGS)
 # продолжает собираться.
 EXTRA_CFLAGS += -DXS_PLUGIN_DIR='"$(PLUGIN_DIR)"' -DXS_THEME_DIR='"$(THEME_DIR)"' 
 
-LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0) -lX11
+LDFLAGS_DAEMON = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 gmodule-2.0 gtk-layer-shell-0) -lX11
 LDFLAGS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0) -lm
 LDFLAGS_RSS_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 libxml-2.0) -lm
 LDFLAGS_WEATHER_PLUGIN = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 libsoup-3.0 json-glib-1.0 gio-2.0) -lm
-LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 gmodule-2.0) -lm -lX11
+LDFLAGS_STANDALONE = $(shell pkg-config --libs gtk+-3.0 librsvg-2.0 glib-2.0 gmodule-2.0 gtk-layer-shell-0) -lm -lX11
 
 PREFIX ?= $(HOME)
 DESTDIR ?=
