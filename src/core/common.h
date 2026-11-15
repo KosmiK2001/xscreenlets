@@ -52,7 +52,7 @@ typedef struct _XsWinState {
 	gboolean ever_drawn;       /* кадр уже отдавался хотя бы раз */
 	gboolean layer;            /* окно создано как wlr-layer-shell surface */
 	gboolean dragging;         /* идёт перетаскивание мышью (layer-shell) */
-	double drag_px, drag_py;   /* последняя позиция курсора внутри окна */
+	double drag_px, drag_py;   /* точка захвата курсора внутри окна */
 } XsWinState;
 
 /* Отложенная команда меню (выполняется в idle после закрытия меню) */

@@ -2152,6 +2152,7 @@ static gboolean on_button(GtkWidget *widget, GdkEventButton *event,
         event->button == 1 &&
         (event->state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_MOD1_MASK)) == 0) {
         state->dragging = TRUE;
+        /* запоминаем точку захвата: за неё окно «держится» под курсором */
         state->drag_px = event->x;
         state->drag_py = event->y;
         return TRUE;
@@ -2224,22 +2225,26 @@ static gboolean on_motion(GtkWidget *widget, GdkEventMotion *event,
     if (!state)
         return FALSE;
     if (state->dragging) {
-        double dx = event->x - state->drag_px;
-        double dy = event->y - state->drag_py;
+        /* Позиция курсора на экране = позиция окна + координата внутри
+         * поверхности. Считать дельту как (event->x - предыдущий event->x)
+         * НЕЛЬЗЯ: сдвинув окно, мы меняем систему координат события, и
+         * композитор присылает следующее событие уже со сдвинутой
+         * координатой — окно уезжает второй раз, дёргается и отрывается
+         * от курсора. Восстановленная экранная позиция от сдвига окна не
+         * зависит, поэтому дрожания нет. */
+        int px = state->x + (int)event->x;
+        int py = state->y + (int)event->y;
         GdkDisplay *dpy = gtk_widget_get_display(p->win);
         GdkMonitor *mon;
         GdkRectangle g = { 0, 0, 0, 0 };
-        int nx, ny;
+        int nx = px - (int)state->drag_px;
+        int ny = py - (int)state->drag_py;
 
-        state->drag_px = event->x;
-        state->drag_py = event->y;
-        if (dx == 0 && dy == 0)
+        if (nx == state->x && ny == state->y)
             return TRUE;
-        nx = state->x + (int)dx;
-        ny = state->y + (int)dy;
         /* держим окно в пределах монитора, на котором оно сейчас лежит */
-        mon = gdk_display_get_monitor_at_point(dpy, state->x + state->w / 2,
-                                               state->y + state->h / 2);
+        mon = gdk_display_get_monitor_at_point(dpy, nx + state->w / 2,
+                                               ny + state->h / 2);
         if (mon) {
             gdk_monitor_get_geometry(mon, &g);
             if (nx < g.x) nx = g.x;
