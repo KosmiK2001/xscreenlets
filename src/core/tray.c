@@ -180,7 +180,7 @@ static void on_about_activate(GtkMenuItem *mi, gpointer data)
         lbl = gtk_label_new(NULL);
         gtk_label_set_markup(GTK_LABEL(lbl),
                              "<b><span size=\"x-large\">Xscreenlets</span></b> "
-                             "<span size=\"large\">0.0.4</span>\n"
+                             "<span size=\"large\">0.0.5</span>\n"
                              "C/GTK3 replacement for python2 screenlets "
                              "(daemon + gmodule plugins)\n"
                              "<span size=\"small\">(c) kosmik2001 "
