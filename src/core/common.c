@@ -3969,13 +3969,20 @@ static GtkWidget *make_window(XsPlugin *p, int x, int y, int width, int height)
     gtk_container_add(GTK_CONTAINER(window), area);
     gtk_window_move(GTK_WINDOW(window), x, y);
 
-    /* Wayfire's decoration plugin matches native Wayland windows by app_id.
-     * Give all Xscreenlets windows one stable identity so a compositor rule
-     * can disable its titlebar without affecting ordinary applications. */
+    /* Wayfire's decoration plugin adds a titlebar and buttons to native
+     * Wayland toplevels even when GTK is told decorated=FALSE: GTK3 never
+     * negotiated a decoration mode, so the compositor assumed server-side
+     * decoration. announce_csd() states the client-side mode explicitly,
+     * after which no compositor-side titlebar is drawn — verified on
+     * Wayfire with a probe: 34 px titlebar band present without it,
+     * absent with it. Harmless on X11 (guarded by the display type). */
     gtk_widget_realize(window);
-    if (GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(window)))
-        gdk_wayland_window_set_application_id(
-            gtk_widget_get_window(window), "xscreenlets");
+    if (GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(window))) {
+        GdkWindow *gdkwin = gtk_widget_get_window(window);
+
+        gdk_wayland_window_set_application_id(gdkwin, "xscreenlets");
+        gdk_wayland_window_announce_csd(gdkwin);
+    }
 
     state = g_new0(XsWinState, 1);
     state->opacity = 1.0;
